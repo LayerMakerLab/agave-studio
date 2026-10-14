@@ -1,0 +1,12 @@
+Agave Studio
+Copyright 2026 LayerMaker LLC
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes third-party software:
+
+- Google model-viewer 4.0.0 (web/vendor/model-viewer.min.js), Apache License 2.0, with bundled components under
+  the BSD-3-Clause and MIT licences; their notices are kept in the file's header. See web/vendor/README.md.
+- Geist and Geist Mono fonts (web/assets/fonts), Copyright 2024 The Geist Project Authors, and Instrument Serif
+  (web/assets/fonts), Copyright 2022 The Instrument Serif Project Authors, under the SIL Open Font License 1.1.
+  See web/assets/fonts/OFL-Geist.txt and web/assets/fonts/OFL-InstrumentSerif.txt.

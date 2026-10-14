@@ -1,0 +1,452 @@
+# Model registry for the Agave Studio gateway. Loaded at startup.
+#
+# id        our id, served to the web app. Format "<provider>/<slug>".
+# endpoint  the provider's own model id (fal endpoint path, Replicate owner/name, Gemini model, etc.).
+# key       env name of the key slot (see config/keys.example.env).
+# verified  true only when the endpoint id was confirmed on the provider's official docs page.
+#           false means check it with a live call before relying on it.
+#           Verified does not cover request-body fields; those are noted per entry.
+# params    aspect / duration / resolution choices shown to the user. Empty list means not applicable.
+# price     provider list price in USD per "second" of video or per "image", shown in the app as an estimate
+#           of what a job costs on your own key. `usd` is the default and must be the highest rate;
+#           by_resolution overrides it.
+#
+# Adapters exist for: fal, replicate, gemini (veo + image), openai (image), bfl, elevenlabs, meshy.
+
+# ---------------------------------------------------------------- fal.ai
+
+[[model]]
+id = "fal/kling-3-pro-t2v"
+name = "Kling 3.0 Pro"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v3/pro/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal page + API schema checked 2026-10-11 (duration "3".."15", aspect 16:9/9:16/1:1, generate_audio default true)
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10, 15], resolution = [] }
+price = { per = "second", usd = 0.168 }   # fal page 2026-10-11: $0.112/s audio off, $0.168/s audio on (default on)
+
+[[model]]
+id = "fal/kling-3-pro-i2v"
+name = "Kling 3.0 Pro"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v3/pro/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: start_image_url (not image_url); the image sets the frame, no aspect_ratio
+params = { aspect = [], duration = [5, 10, 15], resolution = [] }
+price = { per = "second", usd = 0.168 }   # fal page 2026-10-11, audio on
+
+[[model]]
+id = "fal/seedance-2.5-t2v"
+name = "Seedance 2.5"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "bytedance/seedance-2.5/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal page + API schema checked 2026-10-11 (duration "4".."30", resolution 480p/720p/1080p, audio same price)
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10, 15], resolution = ["480p", "720p", "1080p"] }
+price = { per = "second", usd = 1.164, by_resolution = { "480p" = 0.2205, "720p" = 0.473, "1080p" = 1.164 } }   # fal page 2026-10-11, 16:9 figures (9:16 same area, 1:1 smaller)
+
+[[model]]
+id = "fal/seedance-2.5-i2v"
+name = "Seedance 2.5"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "bytedance/seedance-2.5/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: image_url; aspect_ratio is always auto for image to video
+params = { aspect = [], duration = [5, 10, 15], resolution = ["480p", "720p", "1080p"] }
+price = { per = "second", usd = 1.164, by_resolution = { "480p" = 0.2205, "720p" = 0.473, "1080p" = 1.164 } }   # fal page 2026-10-11
+
+[[model]]
+id = "fal/kling-3-standard-t2v"
+name = "Kling 3.0 Standard"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v3/standard/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal page checked 2026-10-11; same schema as v3 pro
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10, 15], resolution = [] }
+price = { per = "second", usd = 0.126 }   # fal page 2026-10-11: $0.084/s audio off, $0.126/s audio on (default on)
+
+[[model]]
+id = "fal/kling-3-standard-i2v"
+name = "Kling 3.0 Standard"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v3/standard/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal search 2026-10-11; schema assumed same as v3 pro i2v (start_image_url), confirmed by the live test below
+params = { aspect = [], duration = [5, 10, 15], resolution = [] }
+price = { per = "second", usd = 0.126 }   # fal page 2026-10-11, audio on
+
+[[model]]
+id = "fal/kling-2.5-turbo-i2v"
+name = "Kling 2.5 Turbo Pro"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal page checked 2026-10-11; fal OpenAPI 2026-10-13: no aspect_ratio (the frame comes from the image)
+params = { aspect = [], duration = [5, 10], resolution = [] }
+price = { per = "second", usd = 0.07 }   # fal page 2026-10-11: $0.35 for 5 s, $0.07 per extra second
+
+[[model]]
+id = "fal/kling-2.5-turbo-t2v"
+name = "Kling 2.5 Turbo Pro"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v2.5-turbo/pro/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal page checked 2026-10-11
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10], resolution = [] }
+price = { per = "second", usd = 0.07 }   # fal page 2026-10-11
+
+[[model]]
+id = "fal/kling-o3-i2v"
+name = "Kling O3 Standard"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/o3/standard/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal OpenAPI 2026-10-13: image_url, duration "3".."15" as a string, no aspect_ratio, generate_audio off by default
+params = { aspect = [], duration = [5, 10], resolution = [] }
+price = { per = "second", usd = 0.084 }   # fal page 2026-10-11: $0.084/s with audio off (the studio never turns audio on)
+
+[[model]]
+id = "fal/kling-v2.1-master-t2v"
+name = "Kling 2.1 Master"
+vendor = "Kuaishou"
+provider = "fal"
+endpoint = "fal-ai/kling-video/v2.1/master/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: duration "5"/"10", aspect 16:9/9:16/1:1
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10], resolution = [] }
+price = { per = "second", usd = 0.28 }   # fal page 2026-10-11: $1.40 for 5 s, $0.28 per extra second
+
+[[model]]
+id = "fal/seedance-t2v"
+name = "Seedance Pro"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "fal-ai/bytedance/seedance/v1/pro/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: duration "2".."12", resolution 480p/720p/1080p, aspect_ratio
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10], resolution = ["480p", "720p", "1080p"] }
+price = { per = "second", usd = 0.15, by_resolution = { "480p" = 0.03, "720p" = 0.065, "1080p" = 0.15 } }   # fal page 2026-10-11: ~$0.62-0.74 per 1080p 5 s; lower tiers from the token formula at 24 fps, rounded up
+
+[[model]]
+id = "fal/seedance-i2v"
+name = "Seedance Pro"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "fal-ai/bytedance/seedance/v1/pro/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: image_url, same duration and resolution as text to video
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10], resolution = ["480p", "720p", "1080p"] }
+price = { per = "second", usd = 0.15, by_resolution = { "480p" = 0.03, "720p" = 0.065, "1080p" = 0.15 } }   # same as seedance-t2v
+
+[[model]]
+id = "fal/wan-t2v"
+name = "Wan 2.2 A14B"
+vendor = "Alibaba"
+provider = "fal"
+endpoint = "fal-ai/wan/v2.2-a14b/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: no duration field (81 frames at 16 fps, about 5 s); resolution 480p/580p/720p
+params = { aspect = ["16:9", "9:16"], duration = [5], resolution = ["480p", "720p"] }
+price = { per = "second", usd = 0.08, by_resolution = { "480p" = 0.04, "720p" = 0.08 } }   # fal page 2026-10-11
+
+[[model]]
+id = "fal/wan-i2v"
+name = "Wan 2.2 A14B"
+vendor = "Alibaba"
+provider = "fal"
+endpoint = "fal-ai/wan/v2.2-a14b/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: no duration field (81 frames at 16 fps, about 5 s); resolution 480p/580p/720p
+params = { aspect = ["16:9", "9:16"], duration = [5], resolution = ["480p", "720p"] }
+price = { per = "second", usd = 0.08, by_resolution = { "480p" = 0.04, "720p" = 0.08 } }   # fal page 2026-10-11
+
+[[model]]
+id = "fal/hailuo-02-t2v"
+name = "Hailuo 02"
+vendor = "MiniMax"
+provider = "fal"
+endpoint = "fal-ai/minimax/hailuo-02/standard/text-to-video"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: prompt and duration "6"/"10" only (768P, no aspect choice)
+params = { aspect = [], duration = [6, 10], resolution = [] }
+price = { per = "second", usd = 0.045 }   # fal page 2026-10-11: standard 768P $0.045/s
+
+[[model]]
+id = "fal/hailuo-02-i2v"
+name = "Hailuo 02"
+vendor = "MiniMax"
+provider = "fal"
+endpoint = "fal-ai/minimax/hailuo-02/standard/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: image_url, duration "6"/"10", resolution 512P/768P (default 768P); the image sets the frame
+params = { aspect = [], duration = [6, 10], resolution = [] }
+price = { per = "second", usd = 0.045 }   # same as hailuo-02-t2v
+
+[[model]]
+id = "fal/veo-3.1-t2v"
+name = "Veo 3.1 via fal"
+vendor = "Google"
+provider = "fal"
+endpoint = "fal-ai/veo3.1"
+modality = "video"
+modes = ["t2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: duration "4s"/"6s"/"8s", aspect 16:9/9:16, resolution 720p/1080p/4k, generate_audio default true
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
+price = { per = "second", usd = 0.40 }   # fal page 2026-10-11: $0.20/s audio off, $0.40/s audio on (720p/1080p); charged at the higher rate
+
+[[model]]
+id = "fal/veo-3.1-i2v"
+name = "Veo 3.1 via fal"
+vendor = "Google"
+provider = "fal"
+endpoint = "fal-ai/veo3.1/image-to-video"
+modality = "video"
+modes = ["i2v"]
+key = "FAL_KEY"
+verified = true   # fal API schema 2026-10-11: image_url; duration "4s"/"6s"/"8s", aspect 16:9/9:16, resolution 720p/1080p/4k, generate_audio default true
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
+price = { per = "second", usd = 0.40 }   # fal page 2026-10-11: $0.20/s audio off, $0.40/s audio on (720p/1080p); charged at the higher rate. UNVERIFIED for image to video: assumed the same as text to video
+
+[[model]]
+id = "fal/flux-schnell"
+name = "FLUX.1 schnell"
+vendor = "Black Forest Labs"
+provider = "fal"
+endpoint = "fal-ai/flux/schnell"   # verified in recon example
+modality = "image"
+modes = ["t2i"]
+key = "FAL_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+price = { per = "image", usd = 0.006 }   # fal page 2026-10-11: $0.003 per megapixel, rounded up; square_hd is just over 1 MP so 2 MP
+
+[[model]]
+id = "fal/nano-banana"
+name = "Nano Banana"
+vendor = "Google"
+provider = "fal"
+endpoint = "fal-ai/nano-banana"   # fal pricing API + OpenAPI schema 2026-10-11: prompt, aspect_ratio, seed; output images[]
+modality = "image"
+modes = ["t2i"]
+key = "FAL_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+price = { per = "image", usd = 0.0398 }   # fal pricing API 2026-10-11: $0.0398 per image
+
+[[model]]
+id = "fal/seedream-4-t2i"
+name = "Seedream 4"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "fal-ai/bytedance/seedream/v4/text-to-image"   # fal pricing API + OpenAPI schema 2026-10-11: prompt, image_size, seed
+modality = "image"
+modes = ["t2i"]
+key = "FAL_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+price = { per = "image", usd = 0.03 }   # fal page 2026-10-11
+
+[[model]]
+id = "fal/nano-banana-edit"
+name = "Nano Banana Edit"
+vendor = "Google"
+provider = "fal"
+endpoint = "fal-ai/nano-banana/edit"   # fal OpenAPI schema 2026-10-12: prompt, image_urls (required list), aspect_ratio, seed; output images[]
+modality = "image"
+modes = ["i2i"]
+key = "FAL_KEY"
+verified = true
+max_refs = 4   # the schema sets no limit; Agave caps the list at 4
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+price = { per = "image", usd = 0.0398 }   # fal pricing API 2026-10-12: $0.0398 per image
+
+[[model]]
+id = "fal/seedream-4-edit"
+name = "Seedream 4 Edit"
+vendor = "ByteDance"
+provider = "fal"
+endpoint = "fal-ai/bytedance/seedream/v4/edit"   # fal OpenAPI schema 2026-10-12: prompt, image_urls (up to 10), image_size, seed
+modality = "image"
+modes = ["i2i"]
+key = "FAL_KEY"
+verified = true
+max_refs = 4
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+price = { per = "image", usd = 0.03 }   # fal pricing API 2026-10-12: $0.03 per image
+
+# ---------------------------------------------------------------- Replicate
+
+[[model]]
+id = "replicate/flux-schnell"
+name = "FLUX schnell (Replicate)"
+vendor = "Black Forest Labs"
+provider = "replicate"
+endpoint = "black-forest-labs/flux-schnell"   # model page replicate.com/black-forest-labs/flux-schnell, 2026-10-13
+modality = "image"
+modes = ["t2i"]
+key = "REPLICATE_API_TOKEN"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+# ---------------------------------------------------------------- Google Gemini
+
+[[model]]
+id = "gemini/veo-3.1"
+name = "Veo 3.1"
+vendor = "Google"
+provider = "gemini"
+endpoint = "veo-3.1-generate-preview"
+modality = "video"
+modes = ["t2v", "i2v"]
+key = "GEMINI_API_KEY"
+verified = true   # id and image shape (inlineData) from the Gemini Veo docs, 2026-10-13; 1080p is sent as 8 s
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
+
+[[model]]
+id = "gemini/veo-3.1-fast"
+name = "Veo 3.1 Fast"
+vendor = "Google"
+provider = "gemini"
+endpoint = "veo-3.1-fast-generate-preview"
+modality = "video"
+modes = ["t2v", "i2v"]
+key = "GEMINI_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
+
+[[model]]
+id = "gemini/nano-banana-2.1"
+name = "Nano Banana 2.1"
+vendor = "Google"
+provider = "gemini"
+endpoint = "gemini-nano-banana-2.1"   # Gemini image-generation docs, 2026-10-13 (Interactions API); not yet live-tested
+modality = "image"
+modes = ["t2i"]
+key = "GEMINI_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+# ---------------------------------------------------------------- OpenAI
+
+[[model]]
+id = "openai/gpt-image-2.5-flare"
+name = "GPT Image 2.5 Flare"
+vendor = "OpenAI"
+provider = "openai"
+endpoint = "gpt-image-2.5-flare"   # OpenAI image-generation docs, 2026-10-13; not yet live-tested
+modality = "image"
+modes = ["t2i"]
+key = "OPENAI_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+[[model]]
+id = "openai/gpt-image-2.5-sunburst"
+name = "GPT Image 2.5 Sunburst"
+vendor = "OpenAI"
+provider = "openai"
+endpoint = "gpt-image-2.5-sunburst"   # OpenAI image-generation docs, 2026-10-13; not yet live-tested
+modality = "image"
+modes = ["t2i"]
+key = "OPENAI_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+# Sora (video) is shut down per OpenAI docs (2026-09-24). Not listed on purpose.
+
+# ---------------------------------------------------------------- Black Forest Labs
+
+[[model]]
+id = "bfl/flux-pro-1.1"
+name = "FLUX 1.1 [pro]"
+vendor = "Black Forest Labs"
+provider = "bfl"
+endpoint = "flux-pro-1.1"
+modality = "image"
+modes = ["t2i"]
+key = "BFL_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+[[model]]
+id = "bfl/flux-2-pro"
+name = "FLUX.2 [pro]"
+vendor = "Black Forest Labs"
+provider = "bfl"
+endpoint = "flux-2-pro"
+modality = "image"
+modes = ["t2i"]
+key = "BFL_API_KEY"
+verified = true
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
+
+# ---------------------------------------------------------------- ElevenLabs
+
+[[model]]
+id = "elevenlabs/multilingual-v2"
+name = "Eleven Multilingual v2"
+vendor = "ElevenLabs"
+provider = "elevenlabs"
+endpoint = "eleven_multilingual_v2"
+modality = "audio"
+modes = ["tts"]
+key = "ELEVENLABS_API_KEY"
+verified = true   # request needs a voice_id; the gateway takes it as an optional request field
+params = { aspect = [], duration = [], resolution = [] }
+
+# ---------------------------------------------------------------- Meshy
+
+[[model]]
+id = "meshy/image-to-3d"
+name = "Meshy 7.1 Image to 3D"
+vendor = "Meshy"
+provider = "meshy"
+endpoint = "openapi/v1"   # docs.meshy.ai 2026-10-12: POST /openapi/v1/image-to-3d (1 picture) or /multi-image-to-3d (1-4); GET .../{id}
+modality = "3d"
+modes = ["i23d"]
+key = "MESHY_API_KEY"
+verified = true
+max_refs = 4
+provider_credits = 30   # Meshy pricing page 2026-10-12: meshy-7.1, mesh with 4K textures = 30 credits (no USD price published)

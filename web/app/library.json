@@ -1,0 +1,133 @@
+{
+ "note": "Agave prompt library. Prompts are Agave's own words. Each card shows the shape of what the entry makes.",
+ "updated": "2026-10-13",
+ "items": [
+  {
+   "id": "creator-portrait",
+   "category": "Influencer",
+   "title": "Creator portrait",
+   "blurb": "A believable base portrait for a new creator. Save it as an Element to keep the face.",
+   "mode": "image",
+   "model": "fal/nano-banana",
+   "aspect": "9:16",
+   "prompt": "Eye-level portrait of a 27-year-old woman with shoulder-length dark curly hair and light freckles, sitting at a wooden desk in a small sunlit home studio, hands resting on the desk, looking into the lens with a relaxed half smile. Soft window light from the left, a warm lamp glowing behind her, 50mm lens, shallow depth of field. Natural skin texture with visible pores, no beauty filter, no microphones, cameras or lights in the frame."
+  },
+  {
+   "id": "same-person-grid",
+   "category": "Consistency",
+   "title": "Same person, four poses",
+   "blurb": "One picture in, a 2x2 grid of the same person out. Pick a panel to keep going.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "recipe": "grid4",
+   "needs_ref": "Add a portrait of the person (or press Use on one you made).",
+   "prompt": ""
+  },
+  {
+   "id": "outfit-swap",
+   "category": "Consistency",
+   "title": "Change the outfit only",
+   "blurb": "Same face, pose and room. Only the clothes change.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "recipe": "edit",
+   "needs_ref": "Add the picture of the person first.",
+   "prompt": "a dark leather apron"
+  },
+  {
+   "id": "character-sheet",
+   "category": "Consistency",
+   "title": "Character sheet",
+   "blurb": "Front, back and face on flat gray, ready to save as an Element.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "recipe": "sheet",
+   "needs_ref": "Add the picture of the character first.",
+   "prompt": ""
+  },
+  {
+   "id": "product-scene",
+   "category": "Product",
+   "title": "Your product, new scene",
+   "blurb": "Put the exact product somewhere new without changing it.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "aspect": "16:9",
+   "needs_ref": "Add a photo of your product (or save it as an Element and type its @tag).",
+   "prompt": "Place this exact product on a black marble counter at night with soft neon reflections behind it. Keep its shape, colours and details the same."
+  },
+  {
+   "id": "product-hero",
+   "category": "Product",
+   "title": "Studio hero shot",
+   "blurb": "A clean listing or ad shot with space for a headline.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "aspect": "16:9",
+   "needs_ref": "Add a photo of your product.",
+   "prompt": "Studio hero shot of this exact product on a matte stone pedestal, seamless warm gray backdrop, one soft key light from above left and a subtle rim light, centered with clear space above for text. Keep the product unchanged."
+  },
+  {
+   "id": "product-angles",
+   "category": "Product",
+   "title": "Nine angles",
+   "blurb": "A 3x3 sheet of the product on light gray. Check that the angles really differ before using it for 3D.",
+   "mode": "image",
+   "model": "fal/nano-banana-edit",
+   "recipe": "product",
+   "aspect": "1:1",
+   "needs_ref": "Add a photo of your product.",
+   "prompt": ""
+  },
+  {
+   "id": "food-shot",
+   "category": "Product",
+   "title": "Editorial food photo",
+   "blurb": "Overhead, soft morning light. Cheap and fast on Flux Schnell.",
+   "mode": "image",
+   "model": "fal/flux-schnell",
+   "aspect": "1:1",
+   "prompt": "Overhead photo of a rustic sourdough loaf on a floured linen cloth, a butter knife and a small dish of salted butter beside it, soft morning window light, natural shadows, editorial food photography."
+  },
+  {
+   "id": "film-still",
+   "category": "Cinematic",
+   "title": "Film still",
+   "blurb": "A wide, moody frame to animate into an opening shot.",
+   "mode": "image",
+   "model": "fal/seedream-4-t2i",
+   "aspect": "16:9",
+   "prompt": "Wide cinematic still of a vintage motorcycle parked outside a lonely roadside diner at dusk, a red neon sign reading \"DINER\" just flickering on, long shadows across the gravel, anamorphic 35mm lens, soft haze, light film grain, low camera angle."
+  },
+  {
+   "id": "thumbnail-bg",
+   "category": "YouTube",
+   "title": "Thumbnail background",
+   "blurb": "High-contrast scene with the left third left empty for your face and title.",
+   "mode": "image",
+   "model": "fal/nano-banana",
+   "aspect": "16:9",
+   "prompt": "Bold YouTube thumbnail background, full-bleed and filling the whole frame edge to edge with no black bars or borders: a busy maker workbench with a glowing 3D printer on the right, strong orange key light against deep teal shadows, shallow depth of field, clean empty space on the left third for a face and big text, high contrast, no text, no logos."
+  },
+  {
+   "id": "animate-still",
+   "category": "Video",
+   "title": "Bring a still to life",
+   "blurb": "Gentle motion from a still you approved. Picture first, then video.",
+   "mode": "video",
+   "model": "fal/kling-3-pro-i2v",
+   "needs_ref": "Start from a still: press Animate on a picture you made, or add one.",
+   "prompt": "Slow push-in. The subject moves naturally, small shifts of weight, cloth and hair moving in a light breeze. Steady exposure, no cuts."
+  },
+  {
+   "id": "print-3d",
+   "category": "3D",
+   "title": "3D model from photos",
+   "blurb": "1 to 4 photos of one object become a model to spin, print (STL, 3MF) or view in AR.",
+   "mode": "3d",
+   "model": "meshy/image-to-3d",
+   "needs_ref": "Add 1 to 4 photos of the object: front, side, back.",
+   "prompt": ""
+  }
+ ]
+}

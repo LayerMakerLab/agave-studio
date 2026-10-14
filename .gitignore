@@ -1,0 +1,13 @@
+config/keys.env
+config/keys.env.*
+data/
+target/
+.build/
+*.app
+.DS_Store
+native/macos/build/
+__pycache__/
+*.watch/
+native/vision/agave-vision
+native/speech/agave-speech
+native/speech/.build/

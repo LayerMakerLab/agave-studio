@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agave Studio</title>
+<meta name="description" content="Agave Studio: AI image, video, voice and 3D with your own keys, plus a video editor.">
+<meta name="theme-color" content="#08080a">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/assets/brand/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/assets/brand/favicon-16.png" type="image/png" sizes="16x16">
+<link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+<link rel="alternate icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2308080a'/%3E%3Ccircle cx='12' cy='12' r='5' fill='%23ff6b3d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/fonts.css">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/app/app.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3.5v10l-6-3.5"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8.5a2 2 0 0 1 2-2h2.2l1.6-2.3h6.4l1.6 2.3H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+    <symbol id="i-audio" viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/></symbol>
+    <symbol id="i-3d" viewBox="0 0 24 24"><path d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2"/></symbol>
+    <symbol id="i-characters" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.6-4 3.7-6 7.5-6s6.9 2 7.5 6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></symbol>
+    <symbol id="i-elements" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M8 5v14M16 5v14M2.5 12h19"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5M8 7.5h8M8 11h6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.75L12 13 3.5 8.25z"/><path d="M3.5 12.25L12 17l8.5-4.75"/><path d="M3.5 16.25L12 21l8.5-4.75"/><circle class="ember" cx="12" cy="8.25" r="1.6"/></symbol>
+  </defs>
+</svg>
+
+<div class="shell">
+  <aside class="rail">
+    <a class="brand" href="/" aria-label="Agave Studio home">
+      <img class="brand-logo" src="/assets/brand/mark.svg" alt="" width="30" height="30">
+      <span class="wordmark">Agave Studio</span>
+    </a>
+
+    <nav class="modes" aria-label="Modes">
+      <button type="button" class="mode" data-mode="image" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-image"/></svg><span class="lbl">Image</span></button>
+      <button type="button" class="mode" data-mode="video" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-video"/></svg><span class="lbl">Video</span></button>
+      <button type="button" class="mode" data-mode="camera" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-camera"/></svg><span class="lbl">Camera</span></button>
+      <button type="button" class="mode" data-mode="audio" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-audio"/></svg><span class="lbl">Audio</span></button>
+      <button type="button" class="mode" data-mode="3d" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-3d"/></svg><span class="lbl">3D</span></button>
+      <button type="button" class="mode" data-mode="characters" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-characters"/></svg><span class="lbl">Characters</span></button>
+    </nav>
+
+    <div class="rail-foot">
+      <button type="button" class="mode" data-open-panel="prompts" aria-controls="prompts" aria-expanded="false"><svg class="ico" aria-hidden="true"><use href="#i-book"/></svg><span class="lbl">Library</span></button>
+      <button type="button" class="mode" data-open-panel="library" aria-controls="library" aria-expanded="false"><svg class="ico" aria-hidden="true"><use href="#i-elements"/></svg><span class="lbl">Elements</span></button>
+      <button type="button" class="mode" data-open-panel="editor" aria-controls="editor" aria-expanded="false"><svg class="ico" aria-hidden="true"><use href="#i-edit"/></svg><span class="lbl">Edit</span><span class="badge" id="editCount" hidden></span></button>
+      <button type="button" class="mode" data-open-settings aria-controls="settings" aria-expanded="false"><svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg><span class="lbl">Settings</span></button>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <header class="topbar">
+      <div class="titles">
+        <h1 id="modeTitle">Image</h1>
+        <p id="modeSub" class="sub"></p>
+      </div>
+      <div class="top-right">
+        <p id="jobCount" class="count" aria-live="polite"></p>
+        <button type="button" class="ghost retry-all" id="retryAll" hidden>Run failed again</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden>Engine offline. Start it with: <code>cd gateway &amp;&amp; cargo run --release</code></div>
+
+    <section id="empty" class="empty">
+      <div class="empty-art" aria-hidden="true"><img src="/assets/img/workspace-empty.webp" alt="" decoding="async"></div>
+      <p class="eyebrow">Ready when you are</p>
+      <h2>Nothing rendered yet.</h2>
+      <p>Pick a mode, describe the shot in the composer, then press Generate. Each result appears here as it finishes.</p>
+      <div id="emptyKey" class="empty-key" hidden>
+        <p>No provider key is set yet. Add one first, then generate.</p>
+        <button type="button" class="ghost" data-open-settings>Open Settings</button>
+      </div>
+    </section>
+
+    <section id="gallery" class="gallery" aria-label="Jobs" hidden></section>
+  </main>
+
+  <div id="dock" class="dock">
+    <form id="composer" class="composer" autocomplete="off" novalidate>
+      <label class="sr" for="prompt">Prompt</label>
+      <textarea id="prompt" rows="1" required maxlength="4000" placeholder="Describe the image or shot"></textarea>
+
+      <div class="row chips">
+        <label class="chip model-chip"><span class="k">Model</span><select id="model"></select></label>
+        <label class="chip" hidden><span class="k">Aspect</span><select id="aspect"></select></label>
+        <label class="chip" hidden><span class="k">Length</span><select id="duration"></select></label>
+        <label class="chip" hidden><span class="k">Res</span><select id="resolution"></select></label>
+        <label class="chip" id="cameraWrap" hidden><span class="k">Camera</span><select id="camera"></select></label>
+        <label class="chip" id="styleWrap" hidden><span class="k">Style</span><select id="style"></select></label>
+        <label class="chip" id="voiceWrap" hidden><span class="k">Voice</span><select id="voice"></select></label>
+        <label class="chip" id="recipeWrap" hidden><span class="k">Recipe</span><select id="recipe">
+          <option value="">None</option>
+          <option value="grid4">Grid 2×2</option>
+          <option value="grid9">Grid 3×3</option>
+          <option value="edit">Change one thing</option>
+          <option value="sheet">Character sheet</option>
+          <option value="product">Product sheet</option>
+        </select></label>
+        <label class="chip"><span class="k">Count</span><select id="count">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+        </select></label>
+      </div>
+
+      <div class="row el-row" id="elRow" hidden></div>
+      <div class="row tray" id="tray" hidden aria-label="Reference images"></div>
+
+      <div class="row foot">
+        <div class="field add-wrap" id="addWrap">
+          <span class="k">Images</span>
+          <button type="button" class="add-ref" id="addRef" title="Add reference images (or drop or paste them here)">+ Add</button>
+          <input type="file" id="fileIn" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        </div>
+        <label class="field" id="refWrap">
+          <span class="k">Reference URL</span>
+          <input id="ref" type="url" inputmode="url" placeholder="https://" spellcheck="false" aria-describedby="refHint">
+          <small id="refHint" class="ref-hint"></small>
+        </label>
+        <label class="field seed">
+          <span class="k">Seed</span>
+          <input id="seed" type="number" min="0" step="1" inputmode="numeric" placeholder="random">
+        </label>
+        <button id="generate" class="pill lg" type="submit"><span class="dot" aria-hidden="true"></span>Generate<span id="cost" class="cost" hidden></span></button>
+      </div>
+      <p id="status" class="composer-status" role="status" aria-live="polite"></p>
+    </form>
+  </div>
+</div>
+
+<div id="scrim" class="scrim" hidden></div>
+
+<div id="setup" class="setup" hidden>
+  <div class="setup-sheet" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+    <div class="setup-head">
+      <div class="setup-brand"><img class="brand-mark" src="/assets/brand/mark.svg" alt="" width="24" height="24">Agave Studio</div>
+      <div class="setup-steps"><b data-bar="1"></b><b data-bar="2"></b><b data-bar="3"></b><span id="setupStepNo">Step 1 of 3</span></div>
+    </div>
+
+    <section class="setup-step" data-setup-step="1">
+      <h2 id="setupTitle" class="setup-title">Connect a model provider</h2>
+      <p class="setup-lead">Agave runs on your own keys, so you pay the provider directly and nothing is marked up. One key is enough to start. Keys stay on this computer and are never shown again after you save them.</p>
+      <form id="setupKeyForm" class="setup-card" autocomplete="off">
+        <div class="setup-card-top">
+          <div><div class="setup-name">fal.ai</div><div class="muted small">Images and video: Flux, Seedream, Kling, Nano Banana</div></div>
+          <span class="setup-tag rec" id="setupKeyTag">Start here</span>
+        </div>
+        <input id="setupKey" class="setup-input" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your fal.ai key" aria-label="fal.ai key">
+        <p class="key-note" id="setupKeyNote" role="status"></p>
+      </form>
+      <p class="muted small">Replicate, Google Gemini, OpenAI, Black Forest Labs, ElevenLabs and Meshy can be added now or later in Settings.</p>
+      <div class="setup-actions">
+        <button type="button" class="setup-ghost" data-setup-next="2">Skip for now</button>
+        <div class="setup-right">
+          <a class="setup-ghost" href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">Where do I get a key?</a>
+          <button type="submit" form="setupKeyForm" class="pill" id="setupKeySave"><span class="dot"></span>Save and continue</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="setup-step" data-setup-step="2" hidden>
+      <h2 class="setup-title">Captions from speech</h2>
+      <p class="setup-lead">Auto captions and the transcript run on this computer, free and offline. They need a speech model, a one-time download.</p>
+      <div id="setupModels" class="setup-models"></div>
+      <p class="muted small" id="setupModelNote">You can keep using the studio while it downloads. If you skip, the captions box in Edit offers the same download later.</p>
+      <div class="setup-actions">
+        <button type="button" class="setup-ghost" data-setup-next="3" id="setupSkipModel">Skip for now</button>
+        <div class="setup-right" id="setupModelActions"></div>
+      </div>
+    </section>
+
+    <section class="setup-step" data-setup-step="3" hidden>
+      <h2 class="setup-title">You're set</h2>
+      <p class="setup-lead">Here is what is ready on this computer. Anything you skipped is in Settings, under Setup.</p>
+      <div id="setupReady" class="setup-ready"></div>
+      <div class="setup-actions">
+        <span></span>
+        <div class="setup-right"><button type="button" class="pill" id="setupDone"><span class="dot"></span>Open the studio</button></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<aside id="settings" class="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" inert>
+  <header class="settings-head">
+    <h2 id="settingsTitle">Settings</h2>
+    <button type="button" id="closeSettings" class="icon-btn" aria-label="Close settings"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </header>
+  <div class="panel-box setup-again">
+    <h3>Setup</h3>
+    <p class="muted">Provider key and the on-device speech model for captions.</p>
+    <div class="panel-actions"><button type="button" class="small-btn" id="openSetup">Open setup</button><span class="key-note" id="setupSummary" role="status"></span></div>
+  </div>
+  <form id="projectForm" class="panel-box project" autocomplete="off">
+    <h3>Project look</h3>
+    <p class="muted">Added to the front of every image and video prompt: lighting, camera, colour, skin, the whole look.</p>
+    <textarea id="stylePrefix" rows="4" maxlength="800" placeholder="Natural light, 35mm lens, muted warm colour, real skin texture, no beauty filter"></textarea>
+    <label class="check"><input type="checkbox" id="stillFirst"> <span>Picture before video: video only starts from an approved still</span></label>
+    <div class="panel-actions"><button type="submit" class="small-btn">Save look</button><span class="key-note" id="projectNote" role="status"></span></div>
+  </form>
+  <h3 class="keys-title">Provider keys</h3>
+  <p class="muted intro">Keys are saved on this machine. A saved value is never shown again.</p>
+  <div id="keyList" class="key-list"></div>
+</aside>
+
+<aside id="library" class="settings" role="dialog" aria-modal="true" aria-labelledby="libraryTitle" inert>
+  <header class="settings-head">
+    <h2 id="libraryTitle">Elements</h2>
+    <button type="button" class="icon-btn" data-close-panel aria-label="Close elements"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </header>
+  <p class="muted intro">Save a character, product or place once. Type its @tag in any prompt and its pictures go with the request, so it looks the same every time.</p>
+  <form id="elementForm" class="panel-box" autocomplete="off">
+    <h3>New element</h3>
+    <div class="el-new-imgs" id="elNewImgs"></div>
+    <p class="muted small" id="elNewHint">Uses the reference images in the composer (up to 4). Add some there first.</p>
+    <div class="two">
+      <label class="field"><span class="k">Tag</span><input id="elTag" maxlength="32" placeholder="mia" spellcheck="false"></label>
+      <label class="field"><span class="k">Kind</span><select id="elKind" class="plain-select">
+        <option value="character">Character</option><option value="product">Product</option><option value="location">Location</option><option value="prop">Prop</option><option value="style">Style</option>
+      </select></label>
+    </div>
+    <label class="field"><span class="k">Words used in the prompt</span><input id="elName" maxlength="60" placeholder="Mia, a woman in her late 20s with short dark hair"></label>
+    <div class="panel-actions"><button type="submit" class="small-btn">Save element</button><span class="key-note" id="elNote" role="status"></span></div>
+  </form>
+  <div id="elList" class="el-list"></div>
+</aside>
+
+<aside id="prompts" class="settings wide" role="dialog" aria-modal="true" aria-labelledby="promptsTitle" inert>
+  <header class="settings-head">
+    <h2 id="promptsTitle">Library</h2>
+    <button type="button" class="icon-btn" data-close-panel aria-label="Close library"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </header>
+  <p class="muted intro">Ready workflows with the exact prompt, model and settings. Press Use this and it fills the composer; nothing runs until you press Generate.</p>
+  <div class="lib-cats" id="libCats" role="group" aria-label="Filter by category"></div>
+  <div class="lib-grid" id="libGrid"></div>
+</aside>
+
+<aside id="editor" class="settings wide edit-panel" role="dialog" aria-modal="true" aria-labelledby="editorTitle" inert>
+  <header class="settings-head">
+    <h2 id="editorTitle">Edit</h2>
+    <button type="button" class="icon-btn" data-close-panel aria-label="Close edit"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </header>
+  <p class="muted intro">Add finished clips and pictures with "Add to edit" in the gallery, or upload one here. Trim, split and caption them, then export one MP4.</p>
+  <div class="edit-stage">
+    <div class="pv" id="pv" data-fill="false">
+      <video id="pvVideo" playsinline preload="auto"></video>
+      <img id="pvImg" alt="" hidden>
+      <p class="pv-auto" id="pvAuto" hidden></p>
+      <p class="pv-cap" id="pvCap" hidden></p>
+      <p class="pv-empty muted" id="pvEmpty">No clips yet.</p>
+    </div>
+    <div class="transport">
+      <button type="button" class="icon-sm play" id="pvPlay" aria-label="Play">▶</button>
+      <span class="tc" id="pvTime">0:00.0 / 0:00.0</span>
+      <span class="spacer"></span>
+      <div class="seg" role="group" aria-label="Frame" id="frameChips"></div>
+      <div class="seg" role="group" aria-label="Fit or fill" id="fitChips"></div>
+    </div>
+  </div>
+  <div class="tl-wrap">
+    <div class="tl" id="timeline" role="listbox" aria-label="Timeline"></div>
+    <div class="tl-head" id="tlHead" aria-hidden="true"></div>
+  </div>
+  <div class="tl-tools">
+    <button type="button" class="small-btn" id="splitBtn">Split at playhead</button>
+    <button type="button" class="small-btn" id="addClipBtn">Upload a clip</button>
+    <button type="button" class="small-btn" id="pausesBtn" title="Cut the silent gaps out of every video clip">Remove pauses</button>
+    <button type="button" class="link-btn undo" id="undoBtn" hidden>Undo</button>
+    <input type="file" id="clipIn" accept="video/mp4,video/quicktime,video/webm,image/png,image/jpeg,image/webp" hidden>
+    <span class="muted small" id="tlNote"></span>
+  </div>
+  <div class="panel-box inspector" id="inspector" hidden></div>
+  <div class="panel-box">
+    <h3>Auto captions</h3>
+    <p class="muted small">Made from the clips' speech, on this computer and free. They follow your trims and cuts.</p>
+    <div class="seg" role="group" aria-label="Auto captions" id="autoCapChips"></div>
+    <span class="muted small" id="capNote" role="status"></span>
+    <form class="fix-row" id="fixForm">
+      <label class="field"><span class="k">Heard as</span><input id="fixFrom" maxlength="40" placeholder="bamboo" autocomplete="off"></label>
+      <label class="field"><span class="k">Should read</span><input id="fixTo" maxlength="40" placeholder="Bambu" autocomplete="off"></label>
+      <button type="submit" class="small-btn">Fix word</button>
+    </form>
+    <ul class="fix-list" id="fixList"></ul>
+  </div>
+  <div class="panel-box">
+    <h3>Sound</h3>
+    <label class="check"><input type="checkbox" id="keepSound" checked> <span>Keep the clips' own sound</span></label>
+    <label class="check"><input type="checkbox" id="cleanVoice"> <span>Clean up voices (takes out steady background hiss and hum)</span></label>
+    <label class="check"><input type="checkbox" id="loudness"> <span>Even out the volume to −14 LUFS, the level YouTube and most apps play at</span></label>
+    <div class="sound-row">
+      <button type="button" class="small-btn" id="addSong">Use a soundtrack</button>
+      <input type="file" id="songIn" accept="audio/*,video/mp4" hidden>
+      <span class="muted small" id="songName">None</span>
+      <button type="button" class="link-btn" id="clearSong" hidden>Remove</button>
+    </div>
+  </div>
+  <div class="panel-box export-box">
+    <h3>Export</h3>
+    <div class="export-row">
+      <button type="button" class="small-btn" id="forYouTube" title="16:9, fit with bars, volume evened out">For YouTube</button>
+      <button type="button" class="small-btn" id="forVertical" title="9:16, crop follows the subject, volume evened out">For Shorts, TikTok, Reels</button>
+    </div>
+    <p class="muted small">These set the shape and sound for that place, then export. Export MP4 uses the settings above as they are.</p>
+  </div>
+  <div class="panel-actions"><button type="button" class="pill" id="joinBtn">Export MP4</button><span class="key-note" id="editNote" role="status"></span></div>
+</aside>
+
+<script src="/app/app.js" defer></script>
+</body>
+</html>
