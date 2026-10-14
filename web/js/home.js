@@ -58,7 +58,7 @@
 
   /* ---------- Hero carousel: blur crossfade + progress dots ---------- */
   const hero = $(".hero"), slides = $$(".slide"), dotsEl = $("#dots"), titleEl = $("#heroTitle"), subEl = $("#heroSub"), tagEl = $("#heroTag");
-  const DUR = 5200; let cur = 0, timer = null, first = true, held = false;
+  const DUR = 5200; let cur = 0, timer = null, first = true;
   hero.style.setProperty("--dur", DUR + "ms");
   const renderTitle = (raw) => {
     const [a, b, c] = raw.split("|");
@@ -71,42 +71,32 @@
     requestAnimationFrame(() => requestAnimationFrame(() => titleEl.classList.add("in")));
   };
   const dots = slides.map((_, i) => {
-    const d = document.createElement("button"); d.className = "dot-b"; d.type = "button";
+    const d = document.createElement("button"); d.className = "dot-b"; d.type = "button"; d.setAttribute("role", "tab");
     d.setAttribute("aria-label", `Shot ${i + 1}`); d.innerHTML = "<i></i>"; d.addEventListener("click", () => go(i, true)); dotsEl.append(d); return d;
   });
-  // Pause / play for the slideshow (WCAG 2.2.2: anything that moves on its own can be stopped).
-  const hold = document.createElement("button"); hold.type = "button"; hold.className = "hold-b";
-  const setHold = (h) => {
-    held = h; hold.setAttribute("aria-label", h ? "Play the slideshow" : "Pause the slideshow"); hold.setAttribute("aria-pressed", String(h));
-    hold.classList.toggle("is-held", h); hero.classList.toggle("paused", h);
-    const v = $("video", slides[cur]);
-    if (h) { clearTimeout(timer); timer = null; v.pause(); } else { play(v); if (!reduce) timer = setTimeout(() => go(cur + 1), DUR); }
-  };
-  hold.addEventListener("click", () => setHold(!held)); dotsEl.append(hold); setHold(false);
   const go = (n, user) => {
     const prev = slides[cur]; n = (n + slides.length) % slides.length;
     if (n !== cur) { prev.classList.remove("is-on"); prev.classList.add("is-out"); setTimeout(() => { prev.classList.remove("is-out"); $("video", prev).pause(); }, 1300); }
     cur = n; const s = slides[n], v = $("video", s);
-    arm(v); try { v.currentTime = 0; } catch {} if (!held) play(v); s.classList.add("is-on");
+    arm(v); try { v.currentTime = 0; } catch {} play(v); s.classList.add("is-on");
     arm($("video", slides[(n + 1) % slides.length])); // warm the next clip
     if (!first) {
       titleEl.classList.remove("in"); titleEl.classList.add("out"); subEl.classList.add("swap");
       setTimeout(() => { titleEl.classList.remove("out"); renderTitle(s.dataset.title); subEl.textContent = s.dataset.sub; tagEl.textContent = s.dataset.tag; subEl.classList.remove("swap"); }, 420);
     }
     first = false;
-    dots.forEach((d, i) => { d.classList.remove("on"); if (i === n) d.setAttribute("aria-current", "true"); else d.removeAttribute("aria-current"); void d.offsetWidth; if (i === n) d.classList.add("on"); });
-    clearTimeout(timer); timer = null; if (!reduce && !held) timer = setTimeout(() => go(cur + 1), DUR);
+    dots.forEach((d, i) => { d.classList.remove("on"); d.setAttribute("aria-selected", String(i === n)); void d.offsetWidth; if (i === n) d.classList.add("on"); });
+    clearTimeout(timer); if (!reduce) timer = setTimeout(() => go(cur + 1), DUR);
   };
   renderTitle(slides[0].dataset.title); subEl.textContent = slides[0].dataset.sub;
   go(0);
   // pause the carousel when the hero is off screen or the tab is hidden
   new IntersectionObserver(([e]) => {
     const v = $("video", slides[cur]);
-    if (held) return;
     if (e.isIntersecting) { hero.classList.remove("paused"); play(v); if (!timer && !reduce) timer = setTimeout(() => go(cur + 1), DUR); }
     else { hero.classList.add("paused"); v.pause(); clearTimeout(timer); timer = null; }
   }, { threshold: 0.2 }).observe(hero);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !reduce && !held) timer = setTimeout(() => go(cur + 1), DUR); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(timer); timer = null; } else if (!timer && !reduce) timer = setTimeout(() => go(cur + 1), DUR); });
   hero.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") go(cur + 1, true); if (e.key === "ArrowLeft") go(cur - 1, true); });
 
   /* ---------- Hover-to-play clips (cards, look book); in-view autoplay on touch ---------- */
@@ -115,6 +105,16 @@
     const v = $("video", host); if (!v) return;
     if (touch) new IntersectionObserver(([e]) => (e.isIntersecting ? play(v) : v.pause()), { threshold: 0.6 }).observe(host);
     else { host.addEventListener("pointerenter", () => { host.classList.add("playing"); play(v); }); host.addEventListener("pointerleave", () => { host.classList.remove("playing"); v.pause(); }); }
+  });
+
+  /* ---------- Before / after compare ---------- */
+  $$(".compare").forEach((c) => {
+    const set = (x) => { const r = c.getBoundingClientRect(); const p = Math.min(1, Math.max(0, (x - r.left) / r.width)); c.style.setProperty("--p", (p * 100).toFixed(2) + "%"); };
+    let drag = false;
+    c.addEventListener("pointerdown", (e) => { drag = true; c.setPointerCapture(e.pointerId); set(e.clientX); });
+    c.addEventListener("pointermove", (e) => { if (drag || e.pointerType === "mouse") set(e.clientX); });
+    c.addEventListener("pointerup", () => (drag = false));
+    const range = $("input", c); if (range) range.addEventListener("input", () => c.style.setProperty("--p", range.value + "%"));
   });
 
   /* ---------- Prompt bar: types prompts, fakes nothing beyond a UI loop ---------- */

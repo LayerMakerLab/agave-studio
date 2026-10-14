@@ -40,7 +40,7 @@ a { color: inherit; }
 .nav.solid { background: rgba(10,10,12,.82); border-color: var(--line); }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; flex: none; }
 .brand-logo { width: 30px; height: 30px; transition: transform .8s var(--ease-out); }
-.brand:hover .brand-logo { transform: scale(1.06); }
+.brand:hover .brand-logo { transform: rotate(-8deg) scale(1.06); }
 .brand-word { font-weight: 600; font-size: 17px; letter-spacing: -0.025em; white-space: nowrap; }
 .brand-word em { font: italic 400 19px var(--font-serif); color: var(--ink-2); letter-spacing: -0.01em; }
 .nav-links { display: flex; align-items: center; gap: 2px; flex: 1; }
@@ -110,7 +110,7 @@ a { color: inherit; }
 .hero-title .word { display: inline-block; transform: translateY(110%); transition: transform 1.1s var(--ease-out); }
 .hero-title.in .word { transform: none; }
 .hero-title.out .word { transform: translateY(-110%); transition: transform .6s var(--ease-io); }
-.hero-title .serif { font-weight: 400; font-style: italic; letter-spacing: -0.02em; padding-right: .06em; color: var(--silver-2); background: linear-gradient(100deg, var(--silver-1) 0%, var(--silver-2) 42%, var(--ember-2) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; text-shadow: none; }
+.hero-title .serif { font-weight: 400; letter-spacing: -0.03em; color: var(--silver-2); }
 .hero-sub { max-width: 520px; margin: 22px 0 0; font-size: clamp(15px, 1.4vw, 18px); color: #d8d4cd; line-height: 1.5; text-shadow: 0 1px 18px rgba(0,0,0,.9); transition: opacity .6s, transform .8s var(--ease-out); }
 .hero-sub.swap { opacity: 0; transform: translateY(8px); }
 .hero-actions { display: flex; align-items: center; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
@@ -123,13 +123,6 @@ a { color: inherit; }
 .hero.paused .dot-b.on i { animation-play-state: paused; }
 @keyframes dotfill { to { transform: scaleX(1); } }
 .dot-b:focus-visible { outline: 2px solid var(--silver-1); outline-offset: 3px; }
-.hold-b { position: relative; width: 16px; height: 16px; margin-left: 4px; padding: 0; border: 0; background: none; cursor: pointer; color: rgba(242,239,233,.7); }
-.hold-b::before, .hold-b::after { content: ""; position: absolute; top: 4px; width: 2px; height: 8px; border-radius: 1px; background: currentColor; }
-.hold-b::before { left: 5px; } .hold-b::after { left: 9px; }
-.hold-b.is-held::before { left: 5px; top: 4px; width: 0; height: 0; border-radius: 0; background: none; border-style: solid; border-width: 4px 0 4px 7px; border-color: transparent transparent transparent currentColor; }
-.hold-b.is-held::after { display: none; }
-.hold-b:hover { color: var(--silver-1); }
-.hold-b:focus-visible { outline: 2px solid var(--silver-1); outline-offset: 3px; border-radius: 4px; }
 .prompt {
   position: absolute; right: max(16px, calc((100vw - 1320px) / 2)); bottom: 108px; width: 400px; padding: 14px 14px 12px; border-radius: 20px; text-align: left;
   background: rgba(16,16,19,.6); border: 1px solid var(--line-2);
@@ -342,7 +335,6 @@ h2 { margin: 0; font-weight: 500; font-size: clamp(38px, 6vw, 84px); line-height
 .foot nav { display: flex; gap: 22px; }
 .foot a { text-decoration: none; } .foot a:hover { color: var(--ink); }
 .foot p { margin: 0; }
-.foot .foot-note { flex-basis: 100%; font-size: 12.5px; }
 .brand.small .brand-word { color: var(--ink-2); }
 
 @keyframes fade { from { opacity: 0; } }
@@ -476,66 +468,25 @@ h2 { margin: 0; font-weight: 500; font-size: clamp(38px, 6vw, 84px); line-height
 .sharp.playing img { opacity: 0; }
 .lb figcaption { z-index: 2; }
 
-/* ---------- reframe ---------- */
+/* ---------- before / after compare ---------- */
 .b-tall { grid-row: span 2; }
+.compare { position: relative; margin-top: 22px; aspect-ratio: 4 / 3; border-radius: 16px; overflow: hidden; cursor: ew-resize; touch-action: pan-y; user-select: none; border: 1px solid var(--line); }
+.compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.35); transform-origin: 62% 52%; pointer-events: none; }
+.cmp-a { image-rendering: auto; }
+.cmp-b { clip-path: inset(0 0 0 var(--p)); }
+.cmp-line { position: absolute; top: 0; bottom: 0; left: var(--p); width: 2px; margin-left: -1px; background: var(--silver-1); box-shadow: 0 0 18px rgba(255,255,255,.6); }
+.cmp-line i { position: absolute; top: 50%; left: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: rgba(20,20,24,.7); border: 1.5px solid var(--silver-1); backdrop-filter: blur(8px); }
+.cmp-line i::before, .cmp-line i::after { content: ""; position: absolute; top: 12px; width: 7px; height: 7px; border-left: 1.5px solid var(--silver-1); border-bottom: 1.5px solid var(--silver-1); }
+.cmp-line i::before { left: 8px; transform: rotate(45deg); } .cmp-line i::after { right: 8px; transform: rotate(-135deg); }
 .cmp-tag { position: absolute; top: 12px; padding: 5px 9px; border-radius: 999px; font: 500 11px/1 var(--font-mono); background: rgba(14,14,17,.6); border: 1px solid var(--line-2); }
 .cmp-tag.l { left: 12px; } .cmp-tag.r { right: 12px; color: var(--ember-2); }
+.compare input { position: absolute; inset: auto 0 0; width: 100%; opacity: 0; height: 100%; margin: 0; cursor: ew-resize; }
 @media (max-width: 900px) { .b-tall { grid-row: auto; } }
 .b-tall { display: flex; flex-direction: column; }
-.reframe { position: relative; flex: 1; min-height: 280px; margin-top: 22px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); }
-.reframe img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.rf-win { position: absolute; top: 10%; bottom: 10%; left: 50%; aspect-ratio: 9 / 16; border-radius: 10px; border: 1.5px solid var(--silver-1); box-shadow: 0 0 0 100vmax rgba(8, 8, 10, 0.62); transform: translateX(-50%); animation: rf 8s ease-in-out infinite alternate; }
-@keyframes rf { from { left: 34%; } to { left: 64%; } }
-@media (max-width: 900px) { .reframe { aspect-ratio: 4 / 3; min-height: 0; } }
-@media (prefers-reduced-motion: reduce) { .rf-win { animation: none; } }
+.b-tall .compare { flex: 1; aspect-ratio: auto; min-height: 280px; }
+@media (max-width: 900px) { .b-tall .compare { aspect-ratio: 4 / 3; min-height: 0; } }
 
 /* ---------- Tier notes ---------- */
 .tier .note { margin: 0 0 24px; font-size: 14px; color: var(--ink-2); display: grid; gap: 2px; }
 .tier .note em { font-style: normal; color: var(--ink); }
 .tier .note span { font-size: 12.5px; color: var(--ink-3); }
-
-/* ---------- design round: lit set, glass edges, depth, phone ergonomics ---------- */
-/* Hero: lens vignette + faint film-gate line. Sits above video/shade (z -2/-1), below the copy, dots and prompt. */
-.hero::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  background: radial-gradient(120% 90% at 62% 44%, transparent 56%, rgba(0,0,0,.55) 100%);
-  box-shadow: inset 0 0 0 1px rgba(242,239,233,.06); }
-/* Prompt card: warm rim light (1px masked ring) so it sits in the same lit scene. */
-.prompt::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: linear-gradient(135deg, rgba(255,179,107,.5), rgba(255,255,255,.04) 35%, rgba(255,255,255,0) 60%, rgba(255,107,61,.28));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-/* Bento cards: lit rim from top-left and a soft lift, same glass language as .pill. */
-.b::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: linear-gradient(160deg, rgba(244,242,238,.32), rgba(244,242,238,.04) 35%, rgba(244,242,238,.02) 70%, rgba(244,242,238,.12));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.b, .tier { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 40px 80px -50px rgba(0,0,0,.95); }
-/* Depth: full-bleed photos drift against the scroll (translate is separate from the scale transform). */
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    @keyframes agv-drift { from { translate: 0 -1.5%; } to { translate: 0 1.5%; } }
-    .lb-banner img { animation: kb 22s var(--ease-io) infinite alternate, agv-drift linear both; animation-timeline: auto, view(); }
-    .final-bg img { animation: kb 24s var(--ease-io) infinite alternate, agv-drift linear both; animation-timeline: auto, view(); }
-  }
-}
-/* Keyboard focus everywhere; bigger hero-dot tap area without changing the look. */
-a:focus-visible, button:focus-visible { outline: 2px solid var(--silver-1); outline-offset: 3px; }
-.dot-b { overflow: visible; }
-.dot-b::after { content: ""; position: absolute; inset: -18px -4px; }
-/* Phone: 44px targets and home-indicator safe area. */
-@media (max-width: 900px) {
-  .burger { width: 44px; height: 44px; }
-  .burger i { left: 12px; right: 12px; }
-  .burger i:first-child { top: 17px; }
-  .burger i:last-child { top: 25px; }
-  .burger[aria-expanded="true"] i:first-child, .burger[aria-expanded="true"] i:last-child { top: 21px; }
-  .foot nav a { display: inline-flex; align-items: center; min-height: 44px; }
-  .foot { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
-  .mnav { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
-}
-/* Models: two counter-moving rows of lit type (sans, then italic serif) instead of one ghosted outline row. */
-.marquee { margin-top: 56px; display: grid; gap: 10px; }
-.marquee-row span { -webkit-text-stroke: 0; background: linear-gradient(180deg, rgba(244,242,238,.92), rgba(244,242,238,.22)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; transition: filter .4s; }
-.marquee-row span:hover { filter: drop-shadow(0 0 18px rgba(255,107,61,.35)); }
-.marquee-row.rev { animation-direction: reverse; animation-duration: 52s; }
-.marquee-row.rev span { font-family: var(--font-serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em; background: linear-gradient(180deg, rgba(201,198,192,.5), rgba(255,179,107,.14)); -webkit-background-clip: text; background-clip: text; }

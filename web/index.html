@@ -4,20 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agave Studio</title>
-<meta name="description" content="Free, open-source studio for AI image, video, voice and 3D, with a video editor built in. Bring your own API keys.">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Agave Studio">
-<meta property="og:description" content="Free, open-source studio for AI image, video, voice and 3D, with a video editor built in. Bring your own API keys.">
-<meta property="og:image" content="https://raw.githubusercontent.com/LayerMakerLab/agave-studio/main/docs/img/studio.jpg">
-<meta name="twitter:card" content="summary_large_image">
+<meta name="description" content="One workspace for AI image, video, motion and sound.">
 <meta name="theme-color" content="#08080a">
-<link rel="stylesheet" href="/css/fonts.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/tokens.css">
 <link rel="stylesheet" href="/css/home.css">
-<link rel="icon" href="/favicon.ico" sizes="48x48">
-<link rel="icon" href="/assets/brand/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="icon" href="/assets/brand/favicon-16.png" type="image/png" sizes="16x16">
-<link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+<link rel="icon" href="/assets/brand/icon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2308080a'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23d9d6d0' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%23ff6b3d'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -38,12 +32,12 @@
   <nav class="nav-links" aria-label="Primary">
     <div class="nav-item has-menu">
       <button class="nav-btn" aria-expanded="false" aria-controls="menu-video">Video <i class="chev"></i></button>
-      <div class="menu" id="menu-video">
+      <div class="menu" id="menu-video" role="menu">
         <div class="menu-cards">
-          <a class="mcard" href="/app/#video/fal/kling-3-pro-t2v"><video muted loop playsinline preload="none" poster="/assets/img/reel-t2v.webp" data-src="/assets/video/hero-lighthouse-sm.mp4"></video><span>Text to video<em>Type a scene, get a shot</em></span></a>
-          <a class="mcard" href="/app/#video"><video muted loop playsinline preload="none" poster="/assets/img/reel-image.webp" data-src="/assets/video/card-image.mp4"></video><span>Image to video<em>Bring a still to life</em></span></a>
-          <a class="mcard" href="/app/#camera"><video muted loop playsinline preload="none" poster="/assets/img/reel-camera.webp" data-src="/assets/video/card-camera.mp4"></video><span>Camera control<em>20 moves, one click</em></span></a>
-          <a class="mcard" href="/app/#audio"><video muted loop playsinline preload="none" poster="/assets/img/reel-lipsync.webp" data-src="/assets/video/card-lipsync.mp4"></video><span>Voice<em>Your ElevenLabs voices</em></span></a>
+          <a class="mcard" href="/app/#video/fal/kling-3-pro-t2v" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/reel-t2v.webp" data-src="/assets/video/hero-lighthouse-sm.mp4"></video><span>Text to video<em>Type a scene, get a shot</em></span></a>
+          <a class="mcard" href="/app/#video" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/reel-image.webp" data-src="/assets/video/card-image.mp4"></video><span>Image to video<em>Bring a still to life</em></span></a>
+          <a class="mcard" href="/app/#camera" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/reel-camera.webp" data-src="/assets/video/card-camera.mp4"></video><span>Camera control<em>20 moves, one click</em></span></a>
+          <a class="mcard" href="/app/#lipsync" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/reel-lipsync.webp" data-src="/assets/video/card-lipsync.mp4"></video><span>Lipsync<em>Coming soon</em></span></a>
         </div>
         <div class="menu-side">
           <p class="menu-label">Video models</p>
@@ -52,25 +46,25 @@
           <a href="/app/#video/fal/seedance-2.5-t2v">Seedance 2.5 <b class="badge">New</b></a>
           <a href="/app/#video/fal/hailuo-02-t2v">Hailuo 02</a>
           <a href="/app/#video/fal/wan-t2v">Wan 2.2</a>
-          <a class="menu-all" href="/app/#video">All video models <span aria-hidden="true">→</span></a>
+          <a class="menu-all" href="/app/#video">All 9 video models <span aria-hidden="true">→</span></a>
         </div>
       </div>
     </div>
     <div class="nav-item has-menu">
       <button class="nav-btn" aria-expanded="false" aria-controls="menu-image">Image <i class="chev"></i></button>
-      <div class="menu" id="menu-image">
+      <div class="menu" id="menu-image" role="menu">
         <div class="menu-cards">
-          <a class="mcard" href="/app/#image/fal/nano-banana"><img src="/assets/img/lb-perfume.webp" alt="" loading="lazy"><span>Text to image<em>Stills that look shot</em></span></a>
-          <a class="mcard" href="/app/#characters"><video muted loop playsinline preload="none" poster="/assets/img/char-a.webp" data-src="/assets/video/card-character.mp4"></video><span>Characters<em>Same face, every shot</em></span></a>
-          <a class="mcard" href="/app/#3d"><video muted loop playsinline preload="none" poster="/assets/img/reel-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><span>3D<em>Pictures to a 3D model</em></span></a>
-          <a class="mcard" href="#lookbook"><img src="/assets/img/lb-samurai.webp" alt="" loading="lazy"><span>Look book<em>Ten looks to start from</em></span></a>
+          <a class="mcard" href="/app/#image/fal/nano-banana" role="menuitem"><img src="/assets/img/lb-perfume.webp" alt="" loading="lazy"><span>Text to image<em>Stills that look shot</em></span></a>
+          <a class="mcard" href="/app/#characters" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/char-a.webp" data-src="/assets/video/card-character.mp4"></video><span>Characters<em>Same face, every shot</em></span></a>
+          <a class="mcard" href="/app/#upscale" role="menuitem"><video muted loop playsinline preload="none" poster="/assets/img/reel-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><span>Upscale<em>Coming soon</em></span></a>
+          <a class="mcard" href="#lookbook" role="menuitem"><img src="/assets/img/lb-samurai.webp" alt="" loading="lazy"><span>Look book<em>Styles you can steal</em></span></a>
         </div>
         <div class="menu-side">
           <p class="menu-label">Image models</p>
           <a href="/app/#image/fal/nano-banana">Nano Banana <b class="badge">New</b></a>
           <a href="/app/#image/fal/seedream-4-t2i">Seedream 4</a>
           <a href="/app/#image/fal/flux-schnell">FLUX schnell</a>
-          <a class="menu-all" href="/app/#image">All image models <span aria-hidden="true">→</span></a>
+          <a class="menu-all" href="/app/#image">All 3 image models <span aria-hidden="true">→</span></a>
         </div>
       </div>
     </div>
@@ -95,32 +89,32 @@
   <section class="hero" id="top" aria-roledescription="carousel" aria-label="Featured shots">
     <div class="slides" id="slides">
       <div class="slide is-on" data-title="Direct|every|frame." data-sub="One studio for AI image, video, motion and sound. Bring the models you trust and direct them like a film set." data-tag="Camera · Dolly in">
-        <video aria-hidden="true" muted playsinline preload="auto" poster="/assets/img/hero-atrium.jpg" src="/assets/video/hero-atrium.mp4"></video>
+        <video muted playsinline preload="auto" poster="/assets/img/hero-atrium.jpg" src="/assets/video/hero-atrium.mp4"></video>
       </div>
-      <div class="slide" data-title="Type a|scene.|Watch it move." data-sub="Write the shot the way you would say it. Agave turns it into motion with the model you pick." data-tag="Camera · Dolly in">
-        <video aria-hidden="true" muted playsinline preload="metadata" poster="/assets/img/hero-lighthouse.jpg" data-src="/assets/video/hero-lighthouse.mp4"></video>
+      <div class="slide" data-title="Type a|scene.|Watch it move." data-sub="Write the shot the way you would say it. Agave turns it into motion with the model you pick." data-tag="Text to video · Push in">
+        <video muted playsinline preload="metadata" poster="/assets/img/hero-lighthouse.jpg" data-src="/assets/video/hero-lighthouse.mp4"></video>
       </div>
-      <div class="slide" data-title="Scale|without a|crew." data-sub="Deserts, storms and crowds from a single sentence. No permits, no location scouts." data-tag="Camera · Tracking side">
-        <video aria-hidden="true" muted playsinline preload="metadata" poster="/assets/img/hero-dunes.jpg" data-src="/assets/video/hero-dunes.mp4"></video>
+      <div class="slide" data-title="Scale|without a|crew." data-sub="Deserts, storms and crowds from a single sentence. No permits, no location scouts." data-tag="Epic wide · Tracking">
+        <video muted playsinline preload="metadata" poster="/assets/img/hero-dunes.jpg" data-src="/assets/video/hero-dunes.mp4"></video>
       </div>
-      <div class="slide" data-title="Every move,|on|command." data-sub="Dolly, orbit, crane, whip pan. Pick a move from the shot list and the camera does the rest." data-tag="Camera · Handheld">
-        <video aria-hidden="true" muted playsinline preload="metadata" poster="/assets/img/hero-pitstop.jpg" data-src="/assets/video/hero-pitstop.mp4"></video>
+      <div class="slide" data-title="Every move,|on|command." data-sub="Dolly, orbit, crane, whip pan. Pick a move from the shot list and the camera does the rest." data-tag="Handheld · Period action">
+        <video muted playsinline preload="metadata" poster="/assets/img/hero-pitstop.jpg" data-src="/assets/video/hero-pitstop.mp4"></video>
       </div>
-      <div class="slide" data-title="Your|studio|is open." data-sub="Image, video, voice and 3D in one queue. Add your key and make your first shot today." data-tag="Camera · Crane down">
-        <video aria-hidden="true" muted playsinline preload="metadata" poster="/assets/img/hero-soundstage.jpg" data-src="/assets/video/hero-soundstage.mp4"></video>
+      <div class="slide" data-title="Your|studio|is open." data-sub="Image, video, voice and upscale in one queue. Add your key and make your first shot today." data-tag="Soundstage · Crane down">
+        <video muted playsinline preload="metadata" poster="/assets/img/hero-soundstage.jpg" data-src="/assets/video/hero-soundstage.mp4"></video>
       </div>
     </div>
     <div class="hero-shade" aria-hidden="true"></div>
     <div class="hero-inner">
       <p class="eyebrow"><span class="live-dot"></span><span id="heroTag">Camera · Dolly in</span></p>
-      <h1 class="hero-title" id="heroTitle">Direct every frame.</h1>
+      <h1 class="hero-title" id="heroTitle" aria-live="polite"></h1>
       <p class="hero-sub" id="heroSub"></p>
       <div class="hero-actions">
         <a class="pill lg" href="/app/"><span class="dot"></span>Open the studio</a>
         <a class="ghost" href="#free">Why it is free</a>
       </div>
     </div>
-    <div class="dots" id="dots" role="group" aria-label="Choose a shot"></div>
+    <div class="dots" id="dots" role="tablist" aria-label="Choose a shot"></div>
     <div class="prompt" aria-hidden="true">
       <div class="prompt-row">
         <span class="prompt-icon"></span>
@@ -157,11 +151,11 @@
       </article>
       <article class="clip">
         <div class="clip-media kb" data-clip><video muted loop playsinline preload="none" poster="/assets/img/reel-lipsync.webp" data-src="/assets/video/card-lipsync.mp4"></video><img src="/assets/img/reel-lipsync.webp" alt="A jazz singer at a ribbon microphone under a warm spotlight" loading="lazy" decoding="async"><div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-        <div class="clip-cap"><span>Voice</span><em>Text to speech</em></div>
+        <div class="clip-cap"><span>Lipsync</span><em>Voice to face</em></div>
       </article>
       <article class="clip">
-        <div class="clip-media kb" data-clip><video muted loop playsinline preload="none" poster="/assets/img/reel-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><img src="/assets/img/reel-upscale.webp" alt="Macro of a mechanical watch movement" loading="lazy" decoding="async"></div>
-        <div class="clip-cap"><span>3D</span><em>1 to 4 pictures to a model</em></div>
+        <div class="clip-media sharp" data-clip><video muted loop playsinline preload="none" poster="/assets/img/reel-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><img class="lo" src="/assets/img/reel-upscale.webp" alt="" aria-hidden="true" loading="lazy"><img class="hi" src="/assets/img/reel-upscale.webp" alt="Macro of a mechanical watch movement" loading="lazy" decoding="async"><div class="wipe" aria-hidden="true"></div></div>
+        <div class="clip-cap"><span>Upscale</span><em>Up to 4K</em></div>
       </article>
       <article class="clip">
         <div class="clip-media cast" data-clip><video muted loop playsinline preload="none" poster="/assets/img/char-a.webp" data-src="/assets/video/card-character.mp4"></video><img class="card c1" src="/assets/img/char-b.webp" alt="" aria-hidden="true" loading="lazy"><img class="card c2" src="/assets/img/char-c.webp" alt="" aria-hidden="true" loading="lazy"><img class="card c3" src="/assets/img/char-a.webp" alt="The same character on a rooftop, on a train and in a night market" loading="lazy" decoding="async"></div>
@@ -215,21 +209,23 @@
           <div class="q"><span>Video · 8s · 1080p</span><span class="q-bar"><i style="--d:6s"></i></span></div>
           <div class="q"><span>Image · 4 variations</span><span class="q-bar"><i style="--d:3.4s"></i></span></div>
           <div class="q"><span>Voice · 22s</span><span class="q-bar"><i style="--d:4.6s"></i></span></div>
-          <div class="q"><span>3D · GLB</span><span class="q-bar"><i style="--d:7.2s"></i></span></div>
+          <div class="q"><span>Upscale · 4K</span><span class="q-bar"><i style="--d:7.2s"></i></span></div>
         </div>
       </div>
       <div class="b reveal">
         <h3>Your keys, your models</h3>
         <p>Add a key once in Settings. Every model behind it lights up.</p>
-        <div class="keys"><span>FAL_KEY</span><span>REPLICATE_API_TOKEN</span><span>GEMINI_API_KEY</span><span>OPENAI_API_KEY</span><span>MESHY_API_KEY</span><span>ELEVENLABS_API_KEY</span></div>
+        <div class="keys"><span>FAL_KEY</span><span>REPLICATE_API_TOKEN</span><span>GEMINI_API_KEY</span><span>OPENAI_API_KEY</span><span>RUNWAY_API_KEY</span><span>ELEVENLABS_API_KEY</span></div>
       </div>
       <div class="b b-tall reveal">
-        <h3>Wide to vertical</h3>
-        <p>Reframe any clip to 9:16 for Shorts, Reels and TikTok in the editor. On a Mac, Follow keeps the subject in frame.</p>
-        <div class="reframe" aria-hidden="true">
-          <img src="/assets/img/hero-lighthouse.jpg" alt="" loading="lazy" decoding="async">
-          <span class="rf-win"></span>
-          <span class="cmp-tag l">16:9</span><span class="cmp-tag r">9:16</span>
+        <h3>Upscale you can feel</h3>
+        <p>Drag across the frame. Left is a 296px frame, right is the same frame after a real 4x upscale.</p>
+        <div class="compare" style="--p:50%">
+          <img class="cmp-a" src="/assets/img/cmp-raw.jpg" alt="" draggable="false">
+          <img class="cmp-b" src="/assets/img/cmp-topaz.webp" alt="Chrome motorcycle detail after a 4x upscale" draggable="false">
+          <span class="cmp-line" aria-hidden="true"><i></i></span>
+          <span class="cmp-tag l">296px</span><span class="cmp-tag r">4x upscale</span>
+          <input type="range" min="0" max="100" value="50" aria-label="Compare raw and upscaled">
         </div>
       </div>
       <div class="b reveal">
@@ -246,7 +242,7 @@
         <h3>Presets built like shot lists</h3>
         <p>Pick a look and a move, then write the scene. The preset handles the prompt craft.</p>
         <div class="presets">
-          <span>Bullet time</span><span>Crash zoom</span><span>Dolly zoom</span><span>Rack focus</span><span>Low-angle orbit</span><span>Overhead</span><span>Handheld</span><span>FPV dive</span><span>Snorricam</span><span>Tilt reveal</span>
+          <span>Bullet time</span><span>Crash zoom</span><span>Dolly zoom</span><span>Rack focus</span><span>Low orbit</span><span>Overhead</span><span>Handheld</span><span>FPV dive</span><span>Snorricam</span><span>Tilt reveal</span>
         </div>
       </div>
     </div>
@@ -257,23 +253,22 @@
     <div class="section-head">
       <p class="kicker reveal">04 — Look book</p>
       <h2 class="reveal">Pick a look.<br><span class="serif dim">Then make it yours.</span></h2>
-      <p class="models-note reveal">Each caption pairs one of the studio's ten looks with one of its twenty camera moves.</p>
     </div>
     <figure class="lb-banner reveal">
       <img src="/assets/img/showcase-dunes.webp" alt="A rider crosses vast dunes ahead of an amber dust storm" loading="lazy" decoding="async">
-      <figcaption><span class="lb-tag">Anamorphic · Crane up</span><strong>Scale that stops a scroll.</strong></figcaption>
+      <figcaption><span class="lb-tag">Epic wide · Crane up</span><strong>Scale that stops a scroll.</strong></figcaption>
     </figure>
     <div class="lb-grid">
-      <figure class="lb tall" data-clip><video muted loop playsinline preload="none" poster="/assets/img/lb-samurai.webp" data-src="/assets/video/lb-samurai.mp4"></video><img src="/assets/img/lb-samurai.webp" alt="A samurai under a temple gate in the rain" loading="lazy" decoding="async"><figcaption>Film noir · Static lock-off</figcaption></figure>
-      <figure class="lb wide"><img src="/assets/img/lb-perfume.webp" alt="A perfume bottle inside a splash of liquid gold" loading="lazy" decoding="async"><figcaption>Commercial gloss · Orbit right</figcaption></figure>
-      <figure class="lb"><img src="/assets/img/lb-honey.webp" alt="Honey dripping over honeycomb" loading="lazy" decoding="async"><figcaption>Studio product · Rack focus</figcaption></figure>
-      <figure class="lb tall"><img src="/assets/img/lb-ballet.webp" alt="A ballet dancer mid leap in a theater spotlight" loading="lazy" decoding="async"><figcaption>Music video · Bullet time</figcaption></figure>
-      <figure class="lb wide"><img src="/assets/img/lb-pitstop.webp" alt="A 1960s race car pit stop with sparks" loading="lazy" decoding="async"><figcaption>35mm film · Handheld</figcaption></figure>
-      <figure class="lb tall3"><img src="/assets/img/lb-astronaut.webp" alt="An astronaut in a red canyon at sunset" loading="lazy" decoding="async"><figcaption>Anamorphic · Tilt reveal</figcaption></figure>
+      <figure class="lb tall" data-clip><video muted loop playsinline preload="none" poster="/assets/img/lb-samurai.webp" data-src="/assets/video/lb-samurai.mp4"></video><img src="/assets/img/lb-samurai.webp" alt="A samurai under a temple gate in the rain" loading="lazy" decoding="async"><figcaption>Rain noir · Static lock-off</figcaption></figure>
+      <figure class="lb wide"><img src="/assets/img/lb-perfume.webp" alt="A perfume bottle inside a splash of liquid gold" loading="lazy" decoding="async"><figcaption>Product gloss · Orbit</figcaption></figure>
+      <figure class="lb"><img src="/assets/img/lb-honey.webp" alt="Honey dripping over honeycomb" loading="lazy" decoding="async"><figcaption>Macro · Rack focus</figcaption></figure>
+      <figure class="lb tall"><img src="/assets/img/lb-ballet.webp" alt="A ballet dancer mid leap in a theater spotlight" loading="lazy" decoding="async"><figcaption>Stage light · Bullet time</figcaption></figure>
+      <figure class="lb wide"><img src="/assets/img/lb-pitstop.webp" alt="A 1960s race car pit stop with sparks" loading="lazy" decoding="async"><figcaption>Period action · Handheld</figcaption></figure>
+      <figure class="lb tall3"><img src="/assets/img/lb-astronaut.webp" alt="An astronaut in a red canyon at sunset" loading="lazy" decoding="async"><figcaption>Sci-fi epic · Tilt reveal</figcaption></figure>
       <figure class="lb wide"><img src="/assets/img/lb-noir.webp" alt="A detective at a desk striped by blind shadows" loading="lazy" decoding="async"><figcaption>Film noir · Dolly in</figcaption></figure>
-      <figure class="lb tall"><img src="/assets/img/lb-silk.webp" alt="A model in flowing silk on a rooftop" loading="lazy" decoding="async"><figcaption>Golden hour · Tracking side</figcaption></figure>
-      <figure class="lb wide"><img src="/assets/img/lb-fisherman.webp" alt="An old fisherman mending nets at dawn" loading="lazy" decoding="async"><figcaption>Documentary · Crane down</figcaption></figure>
-      <figure class="lb wide"><img src="/assets/img/lb-moto.webp" alt="A chrome motorcycle in a smoky workshop" loading="lazy" decoding="async"><figcaption>VHS · Low-angle orbit</figcaption></figure>
+      <figure class="lb tall"><img src="/assets/img/lb-silk.webp" alt="A model in flowing silk on a rooftop" loading="lazy" decoding="async"><figcaption>Fashion · Slow motion</figcaption></figure>
+      <figure class="lb wide"><img src="/assets/img/lb-fisherman.webp" alt="An old fisherman mending nets at dawn" loading="lazy" decoding="async"><figcaption>Documentary · Push in</figcaption></figure>
+      <figure class="lb wide"><img src="/assets/img/lb-moto.webp" alt="A chrome motorcycle in a smoky workshop" loading="lazy" decoding="async"><figcaption>Garage grit · Low orbit</figcaption></figure>
     </div>
   </section>
 
@@ -282,13 +277,10 @@
     <p class="kicker center reveal">05 — Models</p>
     <h2 class="center reveal">Plug in the best engines.</h2>
     <p class="models-note reveal">Connect the providers you already use. Agave routes each job to the model you pick.</p>
-    <div class="marquee">
+    <div class="marquee" aria-label="Supported model families">
       <div class="marquee-row">
-        <span>Kling</span><span>Veo</span><span>Seedance</span><span>Wan</span><span>Hailuo</span><span>Flux</span><span>Nano Banana</span><span>GPT Image</span><span>Seedream</span><span>ElevenLabs</span><span>Meshy</span>
-        <span aria-hidden="true">Kling</span><span aria-hidden="true">Veo</span><span aria-hidden="true">Seedance</span><span aria-hidden="true">Wan</span><span aria-hidden="true">Hailuo</span><span aria-hidden="true">Flux</span><span aria-hidden="true">Nano Banana</span><span aria-hidden="true">GPT Image</span><span aria-hidden="true">Seedream</span><span aria-hidden="true">ElevenLabs</span><span aria-hidden="true">Meshy</span>
-      </div>
-      <div class="marquee-row rev" aria-hidden="true">
-        <span>Flux</span><span>ElevenLabs</span><span>Seedance</span><span>GPT Image</span><span>Kling</span><span>Meshy</span><span>Seedream</span><span>Veo</span><span>Nano Banana</span><span>Hailuo</span><span>Wan</span><span>Flux</span><span>ElevenLabs</span><span>Seedance</span><span>GPT Image</span><span>Kling</span><span>Meshy</span><span>Seedream</span><span>Veo</span><span>Nano Banana</span><span>Hailuo</span><span>Wan</span>
+        <span>Kling</span><span>Veo</span><span>Seedance</span><span>Wan</span><span>Hailuo</span><span>Runway</span><span>Luma Ray</span><span>Flux</span><span>Imagen</span><span>GPT Image</span><span>Seedream</span><span>ElevenLabs</span>
+        <span aria-hidden="true">Kling</span><span aria-hidden="true">Veo</span><span aria-hidden="true">Seedance</span><span aria-hidden="true">Wan</span><span aria-hidden="true">Hailuo</span><span aria-hidden="true">Runway</span><span aria-hidden="true">Luma Ray</span><span aria-hidden="true">Flux</span><span aria-hidden="true">Imagen</span><span aria-hidden="true">GPT Image</span><span aria-hidden="true">Seedream</span><span aria-hidden="true">ElevenLabs</span>
       </div>
     </div>
   </section>
@@ -298,7 +290,7 @@
     <div class="section-head center">
       <p class="kicker reveal">06 — Free</p>
       <h2 class="reveal">Free. Every feature.</h2>
-      <p class="models-note reveal">No plans, no credits, no sign-in. Add an API key from a provider such as fal.ai and pay them directly for what you make. For fal.ai models the studio shows the provider's list price before you press Generate; Meshy jobs show their credit cost.</p>
+      <p class="models-note reveal">No plans, no credits, no sign-in. Add an API key from a provider such as fal.ai and pay them directly for what you make. Every generation shows its estimated cost before you press Generate.</p>
     </div>
     <div class="tiers">
       <article class="tier reveal">
@@ -322,7 +314,7 @@
           <li>fal.ai, Replicate, OpenAI, Gemini</li>
           <li>Black Forest Labs, ElevenLabs, Meshy</li>
           <li>Keys stored only on your computer</li>
-          <li>Price shown before each fal.ai job</li>
+          <li>Estimated cost before every job</li>
         </ul>
         <a class="pill" href="/app/"><span class="dot"></span>Open the studio</a>
       </article>
@@ -351,8 +343,7 @@
 <footer class="foot">
   <div class="brand small"><img class="brand-logo" src="/assets/brand/mark.svg" alt="" width="24" height="24"><span class="brand-word">Agave <em>Studio</em></span></div>
   <nav aria-label="Footer"><a href="#create">Create</a><a href="#free">Free</a><a href="/app/">Workspace</a></nav>
-  <p>© 2026 LayerMaker LLC</p>
-  <p class="foot-note">Pictures on this page were made with Meshy and animated with Kling 3.0 on fal. The lighthouse shot is a camera move added in editing.</p>
+  <p>© 2026 Agave Studio</p>
 </footer>
 
 <script src="/js/home.js" defer></script>
