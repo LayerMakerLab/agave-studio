@@ -62,6 +62,11 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     if !host_ok {
         return fail(StatusCode::FORBIDDEN, "bad_host");
     }
+    // A path that starts with "//" is never one of the studio's pages. The static file service would answer it
+    // with a redirect to "//name/", which a browser reads as another host.
+    if req.uri().path().starts_with("//") {
+        return fail(StatusCode::NOT_FOUND, "not_found");
+    }
     if let Some(origin) = req.headers().get(header::ORIGIN) {
         let ok = origin
             .to_str()
@@ -1101,6 +1106,16 @@ mod tests {
         let req = Request::builder().uri("/").header("host", "127.0.0.1:4170").body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.expect("response");
         assert_eq!(resp.headers().get(header::CACHE_CONTROL).unwrap(), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn double_slash_paths_never_redirect() {
+        let app = router(AppState::for_tests("api_double_slash"));
+        for uri in ["//app", "//assets", "//css/", "///app"] {
+            let resp = app.clone().oneshot(get_req(uri)).await.expect("response");
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{uri}");
+            assert!(resp.headers().get(header::LOCATION).is_none(), "{uri}");
+        }
     }
 
     #[tokio::test]
