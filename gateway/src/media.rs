@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine as _;
-use rand::RngCore;
+use rand::Rng;
 use reqwest::header::CONTENT_TYPE;
 use serde::Serialize;
 
@@ -26,7 +26,7 @@ pub struct Output {
 
 pub fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
