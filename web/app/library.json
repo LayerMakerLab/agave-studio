@@ -1,5 +1,5 @@
 {
- "note": "Agave prompt library. Prompts are Agave's own words. Each card shows the shape of what the entry makes.",
+ "note": "Agave prompt library. Prompts are Agave's own words. Previews were made in Agave; preview_note says when a preview was not made with the exact entry.",
  "updated": "2026-10-13",
  "items": [
   {
@@ -10,7 +10,8 @@
    "mode": "image",
    "model": "fal/nano-banana",
    "aspect": "9:16",
-   "prompt": "Eye-level portrait of a 27-year-old woman with shoulder-length dark curly hair and light freckles, sitting at a wooden desk in a small sunlit home studio, hands resting on the desk, looking into the lens with a relaxed half smile. Soft window light from the left, a warm lamp glowing behind her, 50mm lens, shallow depth of field. Natural skin texture with visible pores, no beauty filter, no microphones, cameras or lights in the frame."
+   "prompt": "Eye-level portrait of a 27-year-old woman with shoulder-length dark curly hair and light freckles, sitting at a wooden desk in a small sunlit home studio, hands resting on the desk, looking into the lens with a relaxed half smile. Soft window light from the left, a warm lamp glowing behind her, 50mm lens, shallow depth of field. Natural skin texture with visible pores, no beauty filter, no microphones, cameras or lights in the frame.",
+   "preview": "library/creator-portrait.jpg"
   },
   {
    "id": "same-person-grid",
@@ -21,7 +22,8 @@
    "model": "fal/nano-banana-edit",
    "recipe": "grid4",
    "needs_ref": "Add a portrait of the person (or press Use on one you made).",
-   "prompt": ""
+   "prompt": "",
+   "preview": "library/same-person-grid.jpg"
   },
   {
    "id": "outfit-swap",
@@ -32,7 +34,8 @@
    "model": "fal/nano-banana-edit",
    "recipe": "edit",
    "needs_ref": "Add the picture of the person first.",
-   "prompt": "a dark leather apron"
+   "prompt": "a dark leather apron",
+   "preview": "library/outfit-swap.jpg"
   },
   {
    "id": "character-sheet",
@@ -43,7 +46,8 @@
    "model": "fal/nano-banana-edit",
    "recipe": "sheet",
    "needs_ref": "Add the picture of the character first.",
-   "prompt": ""
+   "prompt": "",
+   "preview": "library/character-sheet.jpg"
   },
   {
    "id": "product-scene",
@@ -54,7 +58,9 @@
    "model": "fal/nano-banana-edit",
    "aspect": "16:9",
    "needs_ref": "Add a photo of your product (or save it as an Element and type its @tag).",
-   "prompt": "Place this exact product on a black marble counter at night with soft neon reflections behind it. Keep its shape, colours and details the same."
+   "prompt": "Place this exact product on a black marble counter at night with soft neon reflections behind it. Keep its shape, colours and details the same.",
+   "preview": "library/product-scene.jpg",
+   "preview_note": "Preview made from a saved @ramen Element with the same scene words."
   },
   {
    "id": "product-hero",
@@ -65,7 +71,8 @@
    "model": "fal/nano-banana-edit",
    "aspect": "16:9",
    "needs_ref": "Add a photo of your product.",
-   "prompt": "Studio hero shot of this exact product on a matte stone pedestal, seamless warm gray backdrop, one soft key light from above left and a subtle rim light, centered with clear space above for text. Keep the product unchanged."
+   "prompt": "Studio hero shot of this exact product on a matte stone pedestal, seamless warm gray backdrop, one soft key light from above left and a subtle rim light, centered with clear space above for text. Keep the product unchanged.",
+   "preview": "library/product-hero.jpg"
   },
   {
    "id": "product-angles",
@@ -77,7 +84,9 @@
    "recipe": "product",
    "aspect": "1:1",
    "needs_ref": "Add a photo of your product.",
-   "prompt": ""
+   "prompt": "",
+   "preview": "library/product-angles.jpg",
+   "preview_note": "A round bowl looks much the same from most sides; here the overhead panel is the one that clearly differs."
   },
   {
    "id": "food-shot",
@@ -87,7 +96,8 @@
    "mode": "image",
    "model": "fal/flux-schnell",
    "aspect": "1:1",
-   "prompt": "Overhead photo of a rustic sourdough loaf on a floured linen cloth, a butter knife and a small dish of salted butter beside it, soft morning window light, natural shadows, editorial food photography."
+   "prompt": "Overhead photo of a rustic sourdough loaf on a floured linen cloth, a butter knife and a small dish of salted butter beside it, soft morning window light, natural shadows, editorial food photography.",
+   "preview": "library/food-shot.jpg"
   },
   {
    "id": "film-still",
@@ -97,7 +107,8 @@
    "mode": "image",
    "model": "fal/seedream-4-t2i",
    "aspect": "16:9",
-   "prompt": "Wide cinematic still of a vintage motorcycle parked outside a lonely roadside diner at dusk, a red neon sign reading \"DINER\" just flickering on, long shadows across the gravel, anamorphic 35mm lens, soft haze, light film grain, low camera angle."
+   "prompt": "Wide cinematic still of a vintage motorcycle parked outside a lonely roadside diner at dusk, a red neon sign reading \"DINER\" just flickering on, long shadows across the gravel, anamorphic 35mm lens, soft haze, light film grain, low camera angle.",
+   "preview": "library/film-still.jpg"
   },
   {
    "id": "thumbnail-bg",
@@ -107,7 +118,8 @@
    "mode": "image",
    "model": "fal/nano-banana",
    "aspect": "16:9",
-   "prompt": "Bold YouTube thumbnail background, full-bleed and filling the whole frame edge to edge with no black bars or borders: a busy maker workbench with a glowing 3D printer on the right, strong orange key light against deep teal shadows, shallow depth of field, clean empty space on the left third for a face and big text, high contrast, no text, no logos."
+   "prompt": "Bold YouTube thumbnail background, full-bleed and filling the whole frame edge to edge with no black bars or borders: a busy maker workbench with a glowing 3D printer on the right, strong orange key light against deep teal shadows, shallow depth of field, clean empty space on the left third for a face and big text, high contrast, no text, no logos.",
+   "preview": "library/thumbnail-bg.jpg"
   },
   {
    "id": "animate-still",
@@ -117,7 +129,10 @@
    "mode": "video",
    "model": "fal/kling-3-pro-i2v",
    "needs_ref": "Start from a still: press Animate on a picture you made, or add one.",
-   "prompt": "Slow push-in. The subject moves naturally, small shifts of weight, cloth and hair moving in a light breeze. Steady exposure, no cuts."
+   "prompt": "Slow push-in. The subject moves naturally, small shifts of weight, cloth and hair moving in a light breeze. Steady exposure, no cuts.",
+   "preview": "library/animate-still.jpg",
+   "preview_kind": "video",
+   "preview_note": "Preview shows a starting picture, not a clip made from this prompt."
   },
   {
    "id": "print-3d",
@@ -127,7 +142,9 @@
    "mode": "3d",
    "model": "meshy/image-to-3d",
    "needs_ref": "Add 1 to 4 photos of the object: front, side, back.",
-   "prompt": ""
+   "prompt": "",
+   "preview": "library/print-3d.png",
+   "preview_note": "Preview is Meshy's own render of a model made from the ramen picture."
   }
  ]
 }
