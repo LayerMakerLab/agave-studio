@@ -1257,9 +1257,12 @@
   // out when it returns. Every save carries the rev it is based on (before the first read, the page reads first).
   // When something else saved first (a pipeline's Add to edit, another tab), the engine answers 409 and the local
   // copy is rebased on the newer timeline: every local change is kept, and clips newly added there are appended.
-  // A change that could not be sent is retried with backoff, and is marked unsent in localStorage (with the clips
-  // it was based on) so a reload rebases it instead of losing it. Nothing ever drops a user's edit.
-  const UNSENT_KEY = 'agave.edit.unsent';
+  // A change that could not be sent is retried with backoff, and kept in localStorage in this tab's own unsent
+  // marker (the doc and the clips it was based on), so a reload rebases it instead of losing it. Only the tab that
+  // wrote a marker, or the page that took it over at load, removes it. Nothing ever drops a user's edit.
+  const UNSENT_PREFIX = 'agave.edit.unsent.';
+  const TAB_ID = Math.random().toString(36).slice(2, 10);
+  let adopted = []; // marker keys taken over at load (from a closed tab or the last visit): removed once saved
   const SAVE_RETRY_MS = [1000, 2000, 5000, 10000, 20000, 30000];
   let saveTimer = null;
   let saving = false; // a POST is in flight
@@ -1278,11 +1281,32 @@
 
   // The local copy, and whether it holds changes the engine has not saved yet (with the clips they were based on).
   function writeLocal(unsent) {
+    const doc = editDoc();
     try {
-      localStorage.setItem('agave.edit', JSON.stringify(editDoc()));
-      if (unsent) localStorage.setItem(UNSENT_KEY, JSON.stringify({ rev: state.editRev, base: [...state.editBase] }));
-      else if (unsent === false) localStorage.removeItem(UNSENT_KEY);
+      if (unsent === false) {
+        // Saved: this tab's marker and the ones it took over go first, so a full storage cannot leave them behind.
+        for (const k of [UNSENT_PREFIX + TAB_ID, ...adopted]) localStorage.removeItem(k);
+        adopted = [];
+      }
+      if (unsent) localStorage.setItem(UNSENT_PREFIX + TAB_ID, JSON.stringify({ tab: TAB_ID, t: Date.now(), rev: state.editRev, base: [...state.editBase], doc }));
+      localStorage.setItem('agave.edit', JSON.stringify(doc));
+    } catch (_) { /* private mode or full */ }
+  }
+
+  // Unsent markers left in this browser (this tab's from before a reload, or another tab's), newest first.
+  function readMarkers() {
+    const out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(UNSENT_PREFIX)) continue;
+        try {
+          const m = JSON.parse(localStorage.getItem(k));
+          if (m && m.doc && Array.isArray(m.doc.clips) && Array.isArray(m.base)) out.push({ ...m, key: k });
+        } catch (_) { /* a broken marker is skipped */ }
+      }
     } catch (_) { /* private mode */ }
+    return out.sort((a, b) => (b.t || 0) - (a.t || 0));
   }
 
   function saveEdit() {
@@ -1309,7 +1333,7 @@
     if (state.editRev === null) {
       // No read has come back yet: read first (it rebases this change onto the saved timeline and sends it).
       await loadEditServer();
-      if (state.editRev === null) retryLater();
+      if (state.editRev === null && retryTimer === null) retryLater();
       return;
     }
     // The doc and the rev it is based on are taken together, at send time.
@@ -1404,27 +1428,47 @@
   // rebased onto the saved timeline at the first read (on the clips they were based on). Without one, the copy was
   // the saved timeline, so its own clips are the base.
   function loadEdit() {
-    try { applyEditDoc(JSON.parse(localStorage.getItem('agave.edit') || '[]')); } catch (_) { applyEditDoc([]); }
-    let unsent = null;
-    try { unsent = JSON.parse(localStorage.getItem(UNSENT_KEY) || 'null'); } catch (_) { unsent = null; }
-    state.editBase = unsent && Array.isArray(unsent.base) ? new Set(unsent.base) : clipUrls(state.edit);
-    if (unsent) dirty = true;
+    const marks = readMarkers();
+    if (!marks.length) {
+      try { applyEditDoc(JSON.parse(localStorage.getItem('agave.edit') || '[]')); } catch (_) { applyEditDoc([]); }
+      state.editBase = clipUrls(state.edit);
+      return;
+    }
+    // The newest unsent doc becomes the local copy; clips the others added (not in their base) are appended.
+    applyEditDoc(marks[0].doc);
+    state.editBase = new Set(marks[0].base);
+    for (const m of marks.slice(1)) {
+      const have = clipUrls(state.edit);
+      const base = new Set(m.base);
+      const extra = m.doc.clips.filter((c) => c && !base.has(c.url) && !have.has(c.url)).map(normClip).filter(Boolean);
+      state.edit.push(...extra.slice(0, Math.max(0, MAX_EDIT_CLIPS - state.edit.length)));
+    }
+    adopted = marks.map((m) => m.key);
+    dirty = true;
   }
 
   // The engine keeps the timeline (data/studio.json), so it survives a restart.
-  async function loadEditServer() {
+  async function loadEditServer(confirming = false) {
+    let read = false;
     try {
       const r = await call('/api/edit');
       if (r.ok && r.data && r.data.edit) {
+        read = true;
         const rev = typeof r.data.rev === 'number' ? r.data.rev : null;
         const first = state.editRev === null;
-        // The engine's rev only goes up (it is stored with the timeline), so a late read never undoes a newer save.
-        const newer = rev !== null && (first || rev > state.editRev);
+        // The engine's rev only goes up while its data lasts. A lower one is either a late read (an older answer
+        // arriving after a newer save) or a reset (data/ was wiped and the count started over): a second read tells
+        // them apart, because after a late read it shows the newer rev again.
+        const lower = rev !== null && !first && rev < state.editRev;
+        if (lower && !confirming) return loadEditServer(true);
+        const reset = lower && confirming;
+        const newer = rev !== null && (first || rev > state.editRev || reset);
         if (newer && editPending()) {
-          if (first || (!saving && saveTimer === null)) {
+          if (first || reset || (!saving && saveTimer === null)) {
             // Unsent changes (from before this read, a failed save or the last visit): keep them, add the saved
             // timeline's new clips, and send them on the new rev.
             rebaseEdit(r.data.edit, rev);
+            dirty = true; // the rebased copy differs from what any save in flight carries
             if (!refused) flushEdit();
           }
           // Otherwise a save is on its way: it gets a 409 and rebases, so leave the copy and the rev alone.
@@ -1443,6 +1487,8 @@
         }
       }
     } catch (_) { /* offline: keep the local copy */ }
+    // Unsent changes wait on a read that failed: try again soon instead of waiting for the next change.
+    if (!read && dirty && !refused && !saving && saveTimer === null && retryTimer === null) retryLater();
     renderSong();
     keepCaret(renderEditor);
     measureAll();
