@@ -3,12 +3,14 @@
 ## Unreleased
 
 - Pipelines in the Library: Product (photo, hero still, video, 3D model), Character (sheet, Element, two clips that
-  join on the last frame, edit) and a short film on your own ComfyUI (FLUX.1 schnell look, Element, two LTX-Video
-  shots, edit). The full list price shows first, every paid step waits for your click, a failed step stops the run
+  join on the last frame, edit) and a short film on your own ComfyUI (your photo as an Element, two LTX-Video shots
+  joined on the last frame, edit). The full list price shows first, every paid step waits for your click, a failed step stops the run
   with Run again, and runs survive a reload or restart.
 - Your own ComfyUI as a provider, through comfy-api-proxy and the Comfy API v2 (`COMFY_BASE_URL`, no key, nothing
   billed): LTX-Video 0.9.5 and FLUX.1 schnell.
-- Test mode (`AGAVE_FAKE_PROVIDERS=1`): every model is a local fake, for trying the studio without keys.
+- Test mode (`AGAVE_FAKE_PROVIDERS=1`): every model is a local fake that makes TEST OUTPUT placeholders, for trying
+  the studio without keys.
+- The Edit timeline has a revision: a page holding an older copy can no longer save over newer clips.
 
 ## 0.1.0 (2026-10-13)
 

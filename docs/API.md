@@ -86,7 +86,11 @@ Never return a key value from any endpoint. Never log a key.
 - POST /api/pauses {"url","threshold_db":-35,"min_pause":0.5} -> {"len","has_audio","pauses":[[start,end],...]}
   (ffmpeg silencedetect; -60..-20 dB, 0.2..5 s, else 400 invalid_settings). The app cuts these out of each video
   clip, keeping 0.12 s of silence on each side, and offers Undo.
-- GET /api/edit -> {"edit":EditDoc}; POST /api/edit EditDoc -> {"edit":EditDoc}. The saved timeline (data/studio.json),
+- GET /api/edit -> {"edit":EditDoc,"rev":n}; POST /api/edit EditDoc (+ optional "rev") -> {"edit":EditDoc,"rev":n}.
+  `rev` goes up by one on every save (the page's own saves and a pipeline's Add to edit). A POST that carries the rev
+  it last read is refused with 409 {"error":"edit_changed","edit":<the saved timeline>,"rev":n} when the timeline has
+  changed since, so a page holding an older copy cannot erase newer clips; the studio then loads the newer timeline and
+  says so. A POST without rev saves as before. The saved timeline (data/studio.json),
   so an edit survives a reload or restart. EditDoc {clips:[{url,kind:"video"|"image",from,to,len,caption}],
   frame:"original"|"16:9"|"9:16"|"1:1"|"4:5", fill, keep_sound, song_url, song_name,
   auto_captions:"off"|"simple"|"pop", word_fixes:[{from (one word), to ("" hides it)}] (up to 50), follow,
@@ -118,26 +122,37 @@ survives a reload or a restart. Generation steps go through the same checks as P
          steps:[...step fields above, status:"pending"|"waiting"|"running"|"done"|"failed",job,outputs,error,key],total}
 - POST /api/pipelines/runs {"pipeline","subject" (1-60 chars, also the Element's words),"image":"/outputs/..." (when
   needs_image),"tag"} -> 201 {"run"} | 400 unknown_pipeline/invalid_subject/image_required/invalid_image/invalid_tag |
-  409 tag_in_use (a run never replaces an existing Element). A paid first step waits; free steps start at once.
+  409 tag_in_use (that @tag is already an Element) | 409 tag_in_run (another run that is not finished holds it; a failed
+  run can still be run again, so it keeps its tag until it finishes or is forgotten). A paid first step waits; free
+  steps start at once. The run records the Element it saved (`element`), and its Save as Element step fails, leaving
+  the Element alone, when the tag now belongs to an Element the run did not make.
 - POST /api/pipelines/runs/{id}/step {"step":n} -> {"run"}: the user's click. Only the current step, when it is
-  waiting or failed (409 step_not_ready otherwise). A refused request (for example 412 missing_key) is recorded on the
+  waiting or failed (409 step_not_ready otherwise; 409 pipeline_changed for a run saved by an older version of its
+  pipeline, which is failed instead of resumed). A refused request (for example 412 missing_key) is recorded on the
   step as `error` (and `key`), so the answer is the run either way. A failed step stops the run; clicking it again runs
   only that step and keeps everything before it.
-- POST /api/pipelines/runs/{id}/delete {} -> {"ok":true} | 409 run_busy. Files and the Element stay.
-Paid steps (any provider that bills you) never start on their own. Free steps (Save as Element, the last frame with
-ffmpeg, Add to edit, and generations on your own ComfyUI) run as soon as the step before them is done; a background
-check every 2 s moves runs on with no page open.
+- POST /api/pipelines/runs/{id}/delete {} -> {"ok":true} | 409 run_busy (a step is waiting on a job). Files and the
+  Element stay. At most 50 runs are kept: finished runs go first, oldest first, then the others; a run with a job in
+  flight is never dropped.
+- A step can carry a `note` (for example "Added 1 of 2 clips: the timeline holds 200.").
+Paid steps (any provider that bills you) never start on their own. Free steps (Save as Element, the last frame,
+Add to edit, and generations on your own ComfyUI) run as soon as the step before them is done; a background check
+every 2 s moves runs on with no page open. The last frame is taken by ffmpeg as a local job (model "agave/last-frame",
+shown in the gallery like other jobs), so a restart in the middle fails that step instead of losing it.
 
 ## Your own ComfyUI (Comfy API v2)
 Provider `comfy`: open-weights workflows (LTX-Video 0.9.5 text or image to video, FLUX.1 schnell) on your own ComfyUI
 behind comfy-api-proxy. `COMFY_BASE_URL` (default http://127.0.0.1:8189, no key) is an address, not a secret: http or
-https, no user name, password, query or fragment (400 invalid_url on POST /api/keys). Pictures go up with POST
+https with a host and port only, no path, user name, password, query or fragment (400 invalid_url on POST /api/keys). Pictures go up with POST
 {base}/api/v2/assets and into the workflow as core/ASSET references; the job goes to POST {base}/api/v2/jobs and is
 polled at its own `urls.self`; outputs are downloaded from their `url`. Every link must stay on the base origin.
+An output counts as video or image by its content type, then its file name, then its `type` (the proxy reports a
+SaveVideo mp4 as type "image"). Job answers are read under the 64 MB JSON cap, files under the download cap.
+comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6, ltx-video-2b-v0.9.5).
 
 ## Test mode
-`AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (Library previews for
-pictures, an ffmpeg clip for video), with no key and no network; data goes to data/fake-providers (its own jobs,
+`AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture
+that says TEST OUTPUT and names the step, and an ffmpeg clip of it for video), with no key and no network; data goes to data/fake-providers (its own jobs,
 Elements, edit and keys file). `AGAVE_FAKE_FAIL=video,3d,image` makes the first job of each listed kind fail once, to try
 Run again. GET /api/health reports `fake_providers` and the studio shows a banner.
 
