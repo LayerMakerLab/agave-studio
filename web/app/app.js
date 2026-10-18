@@ -709,8 +709,12 @@
     }
   }
 
+  // Settings with a default (the ComfyUI address and client) are not keys, so they never count as one.
+  const isKey = (k) => !k.default;
+
   function updateEmpty() {
-    els.emptyKey.hidden = !(state.staticLoaded && state.keys.length && !state.keys.some((k) => k.set));
+    const keys = state.keys.filter(isKey);
+    els.emptyKey.hidden = !(state.staticLoaded && keys.length && !keys.some((k) => k.set));
   }
 
   // ---------- submit ----------
@@ -2986,6 +2990,14 @@
     return el('a', { class: 'key-docs', href: k.docs, target: '_blank', rel: 'noopener noreferrer', title: `${who} docs`, 'aria-label': `${who} docs` }, ['Docs']);
   }
 
+  // The state line of a choice setting: what is in effect ("Built-in (default)", "Comfy SDK").
+  function choiceLabel(k) {
+    if (!Array.isArray(k.choices) || !k.choices.length) return '';
+    const v = k.value || k.default;
+    const name = { builtin: 'Built-in', sdk: 'Comfy SDK' }[v] || v;
+    return v === k.default ? `${name} (default)` : name;
+  }
+
   function renderKeys(focusEnv) {
     els.keyList.textContent = '';
     if (!state.keys.length) {
@@ -3006,8 +3018,8 @@
         });
       const note = el('p', { class: 'key-note', role: 'status' });
       const btn = el('button', { type: 'submit' }, ['Save']);
-      const light = el('span', { class: 'light' + (k.set ? ' set' : ''), 'aria-hidden': 'true' });
-      const stateEl = el('span', { class: 'key-state' }, [k.set ? 'Set' : (addr ? 'Default' : 'Not set')]);
+      const light = el('span', { class: 'light' + (k.set || choice ? ' set' : ''), 'aria-hidden': 'true' });
+      const stateEl = el('span', { class: 'key-state' }, [choiceLabel(k) || (k.set ? 'Set' : (addr ? 'Default' : 'Not set'))]);
       const head = el('div', { class: 'key-head' }, [
         light,
         el('span', { class: 'key-env' }, [k.env]),
@@ -3053,7 +3065,7 @@
         k.set = true;
         if (choice) k.value = value;
         ui.light.classList.add('set');
-        ui.stateEl.textContent = 'Set';
+        ui.stateEl.textContent = choiceLabel(k) || 'Set';
         ui.note.textContent = 'Saved';
         await reloadModels();
         updateEmpty();
