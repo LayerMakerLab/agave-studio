@@ -923,6 +923,9 @@ fn ltxv_frames(seconds: u32) -> u32 {
 
 const LTXV_NEGATIVE: &str = "low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly";
 
+/// The sigma schedule the distilled LTX-Video models expect (Lightricks' note in ltxvideo-i2v-distilled.json).
+const LTXV_DISTILLED_SIGMAS: &str = "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0";
+
 /// An uploaded picture: the asset reference the workflow's LoadImage gets.
 pub struct ComfyAsset {
     pub id: String,
@@ -979,6 +982,38 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
             g["72"] = json!({"class_type": "SamplerCustom", "inputs": {"model": ["44", 0], "add_noise": true, "noise_seed": seed, "cfg": 3,
                 "positive": ["69", 0], "negative": ["69", 1], "sampler": ["73", 0], "sigmas": ["71", 0], "latent_image": latent}});
             Ok(g)
+        }
+        // LTX-Video 2B 0.9.8 distilled, image to video, with stock ComfyUI nodes only (checked against
+        // Comfy-Org/ComfyUI c06bf5f: ManualSigmas is in comfy_extras/nodes_custom_sampler.py, LTXVPreprocess and
+        // LTXVImgToVideo in nodes_lt.py). Settings from Lightricks' own ComfyUI example for the distilled model
+        // (ComfyUI-LTXVideo example_workflows/low_level/ltxvideo-i2v-distilled.json at 35ec43a): euler_ancestral,
+        // CFGGuider cfg 1, the fixed sigma list below, LTXVPreprocess 38, 768x512, 24 fps; the same timesteps as
+        // LTX-Video configs/ltxv-2b-0.9.8-distilled.yaml (first pass 1.0..0.725, second 0.9094..0.4219, guidance 1).
+        // Strength 1.0 keeps the first frame, as for 0.9.5. SaveVideo instead of the example's VHS node (custom).
+        "ltxv-0.9.8-distilled-i2v" => {
+            let (w, h) = ltxv_size(r.aspect.as_deref());
+            let length = ltxv_frames(r.duration.unwrap_or(2));
+            let a = image.ok_or_else(|| ProviderError::Failed("LTX-Video image to video needs a picture".into()))?;
+            Ok(json!({
+                "38": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5xxl_fp16.safetensors", "type": "ltxv", "device": "default"}},
+                "44": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "ltxv-2b-0.9.8-distilled.safetensors"}},
+                "6": {"class_type": "CLIPTextEncode", "inputs": {"text": r.prompt, "clip": ["38", 0]}},
+                "7": {"class_type": "CLIPTextEncode", "inputs": {"text": LTXV_NEGATIVE, "clip": ["38", 0]}},
+                "78": {"class_type": "LoadImage", "inputs": {"image": asset(a)}},
+                "82": {"class_type": "LTXVPreprocess", "inputs": {"image": ["78", 0], "img_compression": 38}},
+                "95": {"class_type": "LTXVImgToVideo", "inputs": {"positive": ["6", 0], "negative": ["7", 0], "vae": ["44", 2],
+                    "image": ["82", 0], "width": w, "height": h, "length": length, "batch_size": 1, "strength": 1.0}},
+                "69": {"class_type": "LTXVConditioning", "inputs": {"positive": ["95", 0], "negative": ["95", 1], "frame_rate": 24}},
+                "99": {"class_type": "CFGGuider", "inputs": {"model": ["44", 0], "positive": ["69", 0], "negative": ["69", 1], "cfg": 1}},
+                "97": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler_ancestral"}},
+                "98": {"class_type": "ManualSigmas", "inputs": {"sigmas": LTXV_DISTILLED_SIGMAS}},
+                "102": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+                "101": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["102", 0], "guider": ["99", 0], "sampler": ["97", 0],
+                    "sigmas": ["98", 0], "latent_image": ["95", 2]}},
+                "8": {"class_type": "VAEDecode", "inputs": {"samples": ["101", 0], "vae": ["44", 2]}},
+                "80": {"class_type": "CreateVideo", "inputs": {"images": ["8", 0], "fps": 24}},
+                "81": {"class_type": "SaveVideo", "inputs": {"video": ["80", 0], "filename_prefix": "video/agave", "format": "auto", "codec": "auto"}}
+            }))
         }
         "flux1-schnell-fp8" => {
             let (w, h) = match r.aspect.as_deref().unwrap_or("16:9") {
@@ -1450,6 +1485,31 @@ mod tests {
         assert_eq!((g["27"]["inputs"]["width"].as_u64(), g["27"]["inputs"]["height"].as_u64()), (Some(768), Some(1344)));
         assert_eq!(g["31"]["inputs"]["steps"], 4);
         assert!(comfy_workflow(&req("some-other-workflow", "1:1"), None, 1).is_err());
+    }
+
+    fn i2v_req() -> SubmitReq {
+        let mut r = req("ltxv-0.9.8-distilled-i2v", "16:9");
+        r.mode = "i2v".into();
+        r.image_url = Some("/outputs/still.png".into());
+        r
+    }
+
+    #[test]
+    fn ltxv_098_distilled_uses_stock_nodes_and_keeps_the_first_frame() {
+        let a = ComfyAsset { id: ASSET.into(), file_path: "agave-1.png".into(), hash: None };
+        let g = comfy_workflow(&i2v_req(), Some(&a), 7).unwrap();
+        assert_eq!(g["44"]["inputs"]["ckpt_name"], "ltxv-2b-0.9.8-distilled.safetensors");
+        assert_eq!(g["95"]["inputs"]["strength"], 1.0);
+        assert_eq!((g["95"]["inputs"]["width"].as_u64(), g["95"]["inputs"]["height"].as_u64(), g["95"]["inputs"]["length"].as_u64()), (Some(768), Some(512), Some(49)));
+        assert_eq!(g["97"]["inputs"]["sampler_name"], "euler_ancestral");
+        assert_eq!(g["99"]["inputs"]["cfg"], 1);
+        assert_eq!(g["98"]["inputs"]["sigmas"], "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0");
+        assert_eq!(g["78"]["inputs"]["image"]["info"]["id"], ASSET);
+        let stock = ["CLIPLoader", "CheckpointLoaderSimple", "CLIPTextEncode", "LoadImage", "LTXVPreprocess", "LTXVImgToVideo", "LTXVConditioning",
+            "CFGGuider", "KSamplerSelect", "ManualSigmas", "RandomNoise", "SamplerCustomAdvanced", "VAEDecode", "CreateVideo", "SaveVideo"];
+        for (id, n) in g.as_object().unwrap() {
+            assert!(stock.contains(&n["class_type"].as_str().unwrap()), "node {id} is not a stock ComfyUI node");
+        }
     }
 
     #[tokio::test]

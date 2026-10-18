@@ -487,6 +487,18 @@ verified = true   # ran live end to end through this adapter 2026-10-18 (see abo
 params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 2 s (49 frames) is the size that ran live
 
 [[model]]
+id = "comfy/ltxv-098-distilled-i2v"
+name = "LTX-Video 2B 0.9.8 distilled (your ComfyUI)"
+vendor = "Lightricks"
+provider = "comfy"
+endpoint = "ltxv-0.9.8-distilled-i2v"   # 2026-10-18: github.com/Lightricks/ComfyUI-LTXVideo example_workflows/low_level/ltxvideo-i2v-distilled.json (commit 35ec43a): euler_ancestral, CFGGuider cfg 1, sigmas 1.0 0.9937 0.9875 0.9812 0.975 0.9094 0.725 0.4219 0, LTXVPreprocess 38, 768x512, 24 fps; github.com/Lightricks/LTX-Video configs/ltxv-2b-0.9.8-distilled.yaml (same timesteps, guidance 1). Stock nodes only (ManualSigmas instead of the example's StringToFloatList/FloatToSigmas, SaveVideo instead of VHS). LTXVImgToVideo strength 1.0 keeps the first frame
+modality = "video"
+modes = ["i2v"]
+key = "COMFY_BASE_URL"
+verified = false   # needs ltxv-2b-0.9.8-distilled.safetensors and t5xxl_fp16 in ComfyUI; not run live yet
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 2 s = 49 frames (8n+1 at 24 fps)
+
+[[model]]
 id = "comfy/flux-schnell"
 name = "FLUX.1 schnell (your ComfyUI)"
 vendor = "Black Forest Labs"

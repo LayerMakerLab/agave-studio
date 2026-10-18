@@ -193,7 +193,7 @@ pub const PIPELINES: &[Pipeline] = &[
         id: "ltx-short-on-comfy",
         title: "Short film on your ComfyUI: photo, Element, two LTX-Video shots, edit",
         blurb: "Runs free on your own ComfyUI with the open-weights LTX-Video model. Your photo is saved as an Element, LTX-Video brings it to life with small natural motion, the shot's last frame starts the second shot, and both land on the Edit timeline.",
-        note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and ltx-video-2b-v0.9.5 with the t5xxl_fp16 text encoder installed there. Nothing is billed: it runs on your GPU.",
+        note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and LTX-Video 2B 0.9.8 distilled (checkpoints/ltxv-2b-0.9.8-distilled.safetensors) with the t5xxl_fp16 text encoder installed there. Nothing is billed: it runs on your GPU.",
         needs_image: true,
         image_hint: "A photo of a person, place or object, ideally 3:2 landscape. The shots keep its scene and light.",
         subject_hint: "a white lighthouse on a rocky coast",
@@ -204,9 +204,9 @@ pub const PIPELINES: &[Pipeline] = &[
             with(
                 generate(
                     "Shot 1",
-                    "comfy/ltxv-i2v",
+                    "comfy/ltxv-098-distilled-i2v",
                     "i2v",
-                    "@{tag}, subtle natural motion, a slow push-in. The same scene, framing and lighting as the picture, nothing new enters the frame. Real-life footage, steady exposure.",
+                    "@{tag}, subtle natural motion, a slight turn and soft breathing, a slow push-in. The same scene, framing and lighting as the picture, nothing new enters the frame. Real-life footage, steady exposure.",
                     From::Start,
                 ),
                 Some("16:9"),
@@ -218,9 +218,9 @@ pub const PIPELINES: &[Pipeline] = &[
             with(
                 generate(
                     "Shot 2",
-                    "comfy/ltxv-i2v",
+                    "comfy/ltxv-098-distilled-i2v",
                     "i2v",
-                    "{subject}, the same gentle motion continues, a slow pan to the right. The same scene and lighting as before, nothing new enters the frame. Real-life footage, steady exposure.",
+                    "{subject}, the same subtle motion continues, a slight turn, a slow pan to the right. The same scene and lighting as before, nothing new enters the frame. Real-life footage, steady exposure.",
                     From::Step(2),
                 ),
                 Some("16:9"),
@@ -1055,7 +1055,7 @@ mod tests {
         assert_eq!((ltx["total"]["cents"].as_u64(), ltx["total"]["paid_steps"].as_u64(), ltx["total"]["local_steps"].as_u64()), (Some(0), Some(0), Some(2)));
         assert_eq!(ltx["steps"][1]["price"]["local"], true);
         // Only the model that ran live on the PC: no FLUX step, so it runs with just LTX-Video installed.
-        assert!(ltx["steps"].as_array().unwrap().iter().filter(|s| s["kind"] == "generate").all(|s| s["model"] == "comfy/ltxv-i2v"));
+        assert!(ltx["steps"].as_array().unwrap().iter().filter(|s| s["kind"] == "generate").all(|s| s["model"] == "comfy/ltxv-098-distilled-i2v"));
         // Every model a pipeline names exists and accepts the step's options.
         for p in PIPELINES {
             for s in p.steps {
