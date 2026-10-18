@@ -12,8 +12,8 @@ It talks only to the ComfyUI address in the COMFY_BASE_URL environment variable,
 (your own ComfyUI behind comfy-api-proxy; no key is sent). The gateway picks every file path. Each command prints
 one JSON object on stdout; errors go to stderr with a non-zero exit.
 
-    submit --workflow <api-format.json> [--image-node <id> --image <picture>]   -> {"job_id": "..."}
-    status <job_id>     -> {"status": "...", "outputs": [{"name", "content_type", "node_id", "type"}], "error": ...}
+    submit --workflow=<api-format.json> [--image-node=<id> --image=<picture>]   -> {"job_id": "..."}
+    status -- <job_id>  -> {"status": "...", "outputs": [{"name", "content_type", "node_id", "type"}], "error": ...}
     fetch --name=<output name> --out=<path> --max-bytes=<n> -- <job_id>       -> {"bytes": n, "content_type": "..."}
     selftest            -> {"ok": true}: the origin and redirect checks against a mock transport (no network)
 
@@ -174,6 +174,9 @@ def cmd_selftest(_args) -> dict:
                 "urls": {"self": f"/api/v2/jobs/{job}", "events": "/e", "cancel": "/c"}})
         if path == f"/api/v2/assets/{asset}/content":
             return httpx.Response(302, headers={"Location": "http://127.0.0.1:11434/api/tags"})
+        if path == "/api/v2/jobs/0b0b0b0b-1111-4222-a333-444444444444":
+            # A same-origin redirect (to a path the proxy would serve) must be refused too.
+            return httpx.Response(302, headers={"Location": f"{base}/api/v2/jobs/{job}"})
         return httpx.Response(404, json={"error": {"code": "not_found", "message": path}})
 
     os.environ["COMFY_BASE_URL"] = base
@@ -196,7 +199,21 @@ def cmd_selftest(_args) -> dict:
         checks["submit_redirect_refused"] = False
     except Exception as e:
         checks["submit_redirect_refused"] = "redirect" in str(e) or isinstance(e, OffOrigin)
-    # 3. A request to any other address is refused before it is sent.
+    # 3. A redirect on the same address is refused as well: no 3xx is followed, wherever it points.
+    # Both guards count: the client follows no redirects, and the 3xx check is what refuses the answer.
+    checks["client_follows_no_redirects"] = c._low._client.follow_redirects is False
+    before = len(seen)
+    try:
+        c.jobs.get("0b0b0b0b-1111-4222-a333-444444444444")
+        checks["same_origin_redirect_refused"] = False
+    except Exception as e:
+        chain, err = [], e
+        while err is not None:
+            chain.append(err)
+            err = err.__cause__ or err.__context__
+        ours = any(isinstance(x, OffOrigin) or "refusing a redirect" in str(x) for x in chain)
+        checks["same_origin_redirect_refused"] = ours and len(seen) == before + 1
+    # 4. A request to any other address is refused before it is sent.
     try:
         c._low._client.get("http://192.168.1.5:8188/api/v2/jobs")
         checks["other_origin_refused"] = False

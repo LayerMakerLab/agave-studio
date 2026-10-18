@@ -3,9 +3,9 @@
 //! the built-in HTTP client, so submit, poll, output classification, timeouts and size caps stay shared
 //! (providers.rs). This file only turns those calls into sidecar commands:
 //!   Upload   -> the picture is written to data/comfy-sdk and handed to `submit --image` (the SDK uploads it itself)
-//!   Json     -> `submit --workflow <file> [--image-node <id> --image <file>]`  -> {"job_id"}
-//!   Get      -> `status <job_id>`  -> {"status", "outputs": [{name, content_type, node_id, type}], "error"}
-//!   Download -> `fetch <job_id> --name <name> --out <file> --max-bytes <n>`
+//!   Json     -> `submit --workflow=<file> [--image-node=<id> --image=<file>]`  -> {"job_id"}
+//!   Get      -> `status -- <job_id>`  -> {"status", "outputs": [{name, content_type, node_id, type}], "error"}
+//!   Download -> `fetch --name=<name> --out=<file> --max-bytes=<n> -- <job_id>`
 //!
 //! The sidecar is started with an argument array (never a shell), a cleared environment (PATH, HOME and the
 //! COMFY_BASE_URL the gateway already validated; no key), stdin closed, a timeout, and a cap on what it may print.
