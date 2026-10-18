@@ -12,18 +12,27 @@ pub struct Slot {
     pub env: &'static str,
     pub provider: &'static str,
     pub docs: &'static str,
+    /// Used when nothing is set. Only for settings that are not secrets (the address of your own ComfyUI).
+    pub default: Option<&'static str>,
 }
 
 /// Every key slot the gateway knows. POST /api/keys rejects any other name.
 /// Must match config/keys.example.env (checked by a unit test).
 pub const SLOTS: &[Slot] = &[
-    Slot { env: "FAL_KEY", provider: "fal.ai", docs: "https://fal.ai/docs/model-apis/model-endpoints/queue" },
-    Slot { env: "REPLICATE_API_TOKEN", provider: "Replicate", docs: "https://replicate.com/docs/reference/http" },
-    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/veo" },
-    Slot { env: "OPENAI_API_KEY", provider: "OpenAI", docs: "https://developers.openai.com/api/docs/guides/image-generation" },
-    Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images" },
-    Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert" },
-    Slot { env: "MESHY_API_KEY", provider: "Meshy (3D)", docs: "https://docs.meshy.ai/en/api/image-to-3d" },
+    Slot { env: "FAL_KEY", provider: "fal.ai", docs: "https://fal.ai/docs/model-apis/model-endpoints/queue", default: None },
+    Slot { env: "REPLICATE_API_TOKEN", provider: "Replicate", docs: "https://replicate.com/docs/reference/http", default: None },
+    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/veo", default: None },
+    Slot { env: "OPENAI_API_KEY", provider: "OpenAI", docs: "https://developers.openai.com/api/docs/guides/image-generation", default: None },
+    Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images", default: None },
+    Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert", default: None },
+    Slot { env: "MESHY_API_KEY", provider: "Meshy (3D)", docs: "https://docs.meshy.ai/en/api/image-to-3d", default: None },
+    // Not a key: the address of your own ComfyUI behind comfy-api-proxy. No key is needed by default.
+    Slot {
+        env: "COMFY_BASE_URL",
+        provider: "Your ComfyUI (comfy-api-proxy)",
+        docs: "https://docs.comfy.org/development/comfyui-server/api-proxy",
+        default: Some(crate::providers::COMFY_DEFAULT_BASE),
+    },
 ];
 
 pub fn slot(env: &str) -> Option<&'static Slot> {
@@ -117,8 +126,7 @@ impl KeyStore {
         KeyStore { values: Arc::new(RwLock::new(map)), file: Arc::new(file) }
     }
 
-    /// Empty store that never reads the environment. Used by tests.
-    #[cfg(test)]
+    /// Empty store that never reads the file or the environment. Used by tests and by test mode.
     pub fn empty(file: PathBuf) -> Self {
         KeyStore { values: Arc::new(RwLock::new(HashMap::new())), file: Arc::new(file) }
     }
@@ -134,6 +142,11 @@ impl KeyStore {
     /// Returns the key value for an outgoing provider call. Never serialize or log the result.
     pub fn get(&self, env: &str) -> Option<String> {
         self.read().get(env).cloned()
+    }
+
+    /// The value, or the slot's default when it has one and nothing is set.
+    pub fn get_or_default(&self, env: &str) -> Option<String> {
+        self.get(env).or_else(|| slot(env).and_then(|s| s.default).map(String::from))
     }
 
     pub fn is_set(&self, env: &str) -> bool {

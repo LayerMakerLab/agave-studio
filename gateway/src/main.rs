@@ -7,6 +7,7 @@ mod jobs;
 mod keys;
 mod media;
 mod models;
+mod pipelines;
 mod promptcraft;
 mod providers;
 mod reframe;
@@ -60,11 +61,15 @@ async fn main() {
     // This copy owns the port now: pick up jobs from the last run, start polling, and clear leftovers.
     state.jobs.restore(&state.registry);
     tokio::spawn(jobs::run_poller(state.clone()));
+    tokio::spawn(pipelines::run_ticker(state.clone()));
     fsutil::remove_leftovers(&state.ctx.outputs_dir);
     if let Some(data) = state.paths.jobs_file.parent() {
         fsutil::remove_leftovers(data);
     }
     println!("Agave Studio gateway on http://{addr} (web: {})", state.paths.web.display());
+    if state.fake.is_some() {
+        println!("TEST MODE (AGAVE_FAKE_PROVIDERS=1): fake providers, no keys, no network; data in {}", state.ctx.outputs_dir.display());
+    }
 
     let app = api::router(state);
     if let Err(e) = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await {

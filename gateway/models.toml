@@ -11,7 +11,8 @@
 #           of what a job costs on your own key. `usd` is the default and must be the highest rate;
 #           by_resolution overrides it.
 #
-# Adapters exist for: fal, replicate, gemini (veo + image), openai (image), bfl, elevenlabs, meshy.
+# Adapters exist for: fal, replicate, gemini (veo + image), openai (image), bfl, elevenlabs, meshy, comfy (your own
+# ComfyUI through comfy-api-proxy; `endpoint` names a built-in workflow in providers.rs, `key` is its address).
 
 # ---------------------------------------------------------------- fal.ai
 
@@ -450,3 +451,47 @@ key = "MESHY_API_KEY"
 verified = true
 max_refs = 4
 provider_credits = 30   # Meshy pricing page 2026-10-12: meshy-7.1, mesh with 4K textures = 30 credits (no USD price published)
+
+# ---------------------------------------------------------------- Your own ComfyUI (Comfy API v2, comfy-api-proxy)
+# Open-weights models on your own GPU. No price: a local run costs nothing. COMFY_BASE_URL defaults to the proxy's
+# http://127.0.0.1:8189. Checked on docs.comfy.org 2026-10-18: api-reference/v2/overview and openapi-v2.yaml (POST
+# /api/v2/assets, POST /api/v2/jobs {workflow}, GET urls.self, outputs[].url), development/comfyui-server/api-proxy,
+# the built-in node pages for every node used, and the workflow templates the tutorials link. Not run live yet
+# (no ComfyUI is installed here), so verified = false. Open questions: the API-format key for SaveVideo's nested
+# codec option, and whether the proxy accepts a core/ASSET reference in LoadImage the way the v2 spec describes.
+
+[[model]]
+id = "comfy/ltxv-t2v"
+name = "LTX-Video 0.9.5 (your ComfyUI)"
+vendor = "Lightricks"
+provider = "comfy"
+endpoint = "ltxv-0.9.5-t2v"   # docs.comfy.org tutorials/video/ltxv 2026-10-18: ltxv_text_to_video template; ltx-video-2b-v0.9.5 + t5xxl_fp16
+modality = "video"
+modes = ["t2v"]
+key = "COMFY_BASE_URL"
+verified = false   # nodes: CLIPLoader(type ltxv), CheckpointLoaderSimple, CLIPTextEncode, EmptyLTXVLatentVideo, LTXVConditioning, LTXVScheduler, KSamplerSelect, SamplerCustom, VAEDecode, CreateVideo, SaveVideo
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 49 or 97 frames (8n+1 at 24 fps); 2 s is the tested graph
+
+[[model]]
+id = "comfy/ltxv-i2v"
+name = "LTX-Video 0.9.5 (your ComfyUI)"
+vendor = "Lightricks"
+provider = "comfy"
+endpoint = "ltxv-0.9.5-i2v"   # docs.comfy.org tutorials/video/ltxv 2026-10-18: ltxv_image_to_video template (LTXVImgToVideo, strength 0.15)
+modality = "video"
+modes = ["i2v"]
+key = "COMFY_BASE_URL"
+verified = false   # the picture is uploaded with POST /api/v2/assets and loaded by LoadImage (node 78) as a core/ASSET reference, as the SDK does
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 49 or 97 frames (8n+1 at 24 fps); 2 s is the tested graph
+
+[[model]]
+id = "comfy/flux-schnell"
+name = "FLUX.1 schnell (your ComfyUI)"
+vendor = "Black Forest Labs"
+provider = "comfy"
+endpoint = "flux1-schnell-fp8"   # docs.comfy.org tutorials/flux/flux-1-text-to-image 2026-10-18: flux_schnell template, flux1-schnell-fp8 checkpoint, 4 steps, cfg 1
+modality = "image"
+modes = ["t2i"]
+key = "COMFY_BASE_URL"
+verified = false   # nodes: CheckpointLoaderSimple, CLIPTextEncode, EmptySD3LatentImage, KSampler, VAEDecode, SaveImage
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }

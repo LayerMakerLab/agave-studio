@@ -17,6 +17,7 @@ use crate::assemble::{self, Assemble};
 use crate::jobs::{self, now_unix, Job};
 use crate::keys::{self, SLOTS};
 use crate::media;
+use crate::pipelines;
 use crate::promptcraft;
 use crate::providers::{self, SubmitReq};
 use crate::reframe;
@@ -145,19 +146,24 @@ pub fn router(state: AppState) -> Router {
         .route("/api/setup", get(setup_status))
         .route("/api/setup/download", post(setup_download))
         .route("/api/setup/cancel", post(setup_cancel))
+        .route("/api/pipelines", get(pipelines::list))
+        .route("/api/pipelines/runs", get(pipelines::runs).post(pipelines::create))
+        .route("/api/pipelines/runs/{id}/step", post(pipelines::step))
+        .route("/api/pipelines/runs/{id}/delete", post(pipelines::delete))
         .nest_service("/outputs", ServeDir::new(outputs))
         .fallback_service(ServeDir::new(web).append_index_html_on_directories(true))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
 
-async fn health() -> Json<Value> {
-    Json(json!({"ok": true, "version": env!("CARGO_PKG_VERSION")}))
+async fn health(State(st): State<AppState>) -> Json<Value> {
+    Json(json!({"ok": true, "version": env!("CARGO_PKG_VERSION"), "fake_providers": st.fake.is_some()}))
 }
 
 /// Every model; each is ready when its provider key is set.
 async fn models(State(st): State<AppState>) -> Json<Value> {
-    let models: Vec<Value> = st.registry.models.iter().map(|m| m.view(st.keys.is_set(&m.key))).collect();
+    // In test mode every model runs on the local fake provider, so every model is ready.
+    let models: Vec<Value> = st.registry.models.iter().map(|m| m.view(st.fake.is_some() || st.keys.get_or_default(&m.key).is_some())).collect();
     Json(json!({"models": models}))
 }
 
@@ -168,7 +174,7 @@ async fn presets(State(st): State<AppState>) -> Json<Value> {
 async fn list_keys(State(st): State<AppState>) -> Response {
     let keys: Vec<Value> = SLOTS
         .iter()
-        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs}))
+        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs, "default": s.default}))
         .collect();
     Json(json!({"keys": keys})).into_response()
 }
@@ -209,32 +215,36 @@ async fn set_key(
     if let Err(code) = keys::validate_value(&b.value) {
         return fail(StatusCode::BAD_REQUEST, code);
     }
+    // The ComfyUI address is where the gateway sends workflows and pictures, so only a plain http(s) address passes.
+    if b.env == "COMFY_BASE_URL" && providers::comfy_base(&b.value).is_err() {
+        return fail(StatusCode::BAD_REQUEST, "invalid_url");
+    }
     match st.keys.set(&b.env, &b.value) {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(_) => fail(StatusCode::INTERNAL_SERVER_ERROR, "write_failed"),
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct GenerateReq {
-    model: String,
-    mode: String,
-    prompt: String,
-    camera: Option<String>,
-    style: Option<String>,
-    aspect: Option<String>,
-    duration: Option<u32>,
-    resolution: Option<String>,
-    seed: Option<i64>,
-    image_url: Option<String>,
+#[derive(Deserialize, Serialize, Default, Clone)]
+pub(crate) struct GenerateReq {
+    pub(crate) model: String,
+    pub(crate) mode: String,
+    pub(crate) prompt: String,
+    pub(crate) camera: Option<String>,
+    pub(crate) style: Option<String>,
+    pub(crate) aspect: Option<String>,
+    pub(crate) duration: Option<u32>,
+    pub(crate) resolution: Option<String>,
+    pub(crate) seed: Option<i64>,
+    pub(crate) image_url: Option<String>,
     /// More reference images (models with max_refs). Self-host also adds the images of @tagged Elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    image_urls: Option<Vec<String>>,
+    pub(crate) image_urls: Option<Vec<String>>,
     /// A prompt recipe (studio::recipe): grid4, grid9, edit, sheet, product. The prompt is its detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    recipe: Option<String>,
+    pub(crate) recipe: Option<String>,
     /// Extension: ElevenLabs needs a voice id, and the contract has no field for it.
-    voice_id: Option<String>,
+    pub(crate) voice_id: Option<String>,
 }
 
 /// The requested option if the model allows it, else the first allowed value.
@@ -270,65 +280,93 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
         Ok(b) => b,
         Err(_) => return fail(StatusCode::BAD_REQUEST, "bad_request"),
     };
+    match submit_generate(&st, req) {
+        Ok(job) => (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// A refused generate request: the HTTP status and the JSON body ({"error": code, ...}).
+pub(crate) struct Refused {
+    pub status: StatusCode,
+    pub body: Value,
+}
+
+impl Refused {
+    fn code(status: StatusCode, code: &str) -> Self {
+        Refused { status, body: json!({"error": code}) }
+    }
+}
+
+impl IntoResponse for Refused {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.body)).into_response()
+    }
+}
+
+/// Checks a generate request, queues the job and starts the provider call. Shared by POST /api/generate
+/// and the pipeline steps, so both follow exactly the same rules.
+pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Refused> {
+    let fail = |status: StatusCode, code: &str| Refused::code(status, code);
     let Some(model) = st.registry.get(&req.model).cloned() else {
-        return fail(StatusCode::BAD_REQUEST, "unknown_model");
+        return Err(fail(StatusCode::BAD_REQUEST, "unknown_model"));
     };
     if !model.modes.iter().any(|m| m == &req.mode) {
-        return fail(StatusCode::BAD_REQUEST, "unsupported_mode");
+        return Err(fail(StatusCode::BAD_REQUEST, "unsupported_mode"));
     }
 
     let user_prompt = req.prompt.trim();
     if user_prompt.chars().count() > MAX_PROMPT_CHARS {
-        return fail(StatusCode::BAD_REQUEST, "prompt_too_long");
+        return Err(fail(StatusCode::BAD_REQUEST, "prompt_too_long"));
     }
     let recipe_prompt = match &req.recipe {
         Some(r) => match studio::recipe(r, user_prompt) {
             Some(p) => Some(p),
-            None if user_prompt.is_empty() => return fail(StatusCode::BAD_REQUEST, "prompt_required"),
-            None => return fail(StatusCode::BAD_REQUEST, "unknown_recipe"),
+            None if user_prompt.is_empty() => return Err(fail(StatusCode::BAD_REQUEST, "prompt_required")),
+            None => return Err(fail(StatusCode::BAD_REQUEST, "unknown_recipe")),
         },
         None => None,
     };
     let prompt = recipe_prompt.as_deref().unwrap_or(user_prompt);
     // 3D from pictures needs no words; any words only name the job (kept short, like a title).
     if req.mode == "i23d" && prompt.chars().count() > MAX_TEXTURE_PROMPT_CHARS {
-        return fail(StatusCode::BAD_REQUEST, "prompt_too_long");
+        return Err(fail(StatusCode::BAD_REQUEST, "prompt_too_long"));
     }
     if prompt.is_empty() && req.mode != "i23d" {
-        return fail(StatusCode::BAD_REQUEST, "prompt_required");
+        return Err(fail(StatusCode::BAD_REQUEST, "prompt_required"));
     }
     // @tags become the Element's words, and its images become references.
     let (prompt, element_refs) = st.studio.expand(prompt);
     let prompt = prompt.as_str();
     if let Some(c) = &req.camera {
         if !st.presets.camera_ids.contains(c) {
-            return fail(StatusCode::BAD_REQUEST, "unknown_camera");
+            return Err(fail(StatusCode::BAD_REQUEST, "unknown_camera"));
         }
     }
     if let Some(s) = &req.style {
         if !st.presets.style_ids.contains(s) {
-            return fail(StatusCode::BAD_REQUEST, "unknown_style");
+            return Err(fail(StatusCode::BAD_REQUEST, "unknown_style"));
         }
     }
 
     let aspect = match choose(req.aspect.as_ref(), &model.params.aspect, "aspect") {
         Ok(v) => v,
-        Err(code) => return fail(StatusCode::BAD_REQUEST, code),
+        Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };
     let duration = match choose(req.duration.as_ref(), &model.params.duration, "duration") {
         Ok(v) => v,
-        Err(code) => return fail(StatusCode::BAD_REQUEST, code),
+        Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };
     let resolution = match choose(req.resolution.as_ref(), &model.params.resolution, "resolution") {
         Ok(v) => v,
-        Err(code) => return fail(StatusCode::BAD_REQUEST, code),
+        Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };
 
     // References: the image_url, then image_urls, then the images of @tagged Elements, each once.
     let mut refs: Vec<String> = Vec::new();
     for u in req.image_url.iter().chain(req.image_urls.iter().flatten()) {
         if !valid_image_src(u) {
-            return fail(StatusCode::BAD_REQUEST, "invalid_image_url");
+            return Err(fail(StatusCode::BAD_REQUEST, "invalid_image_url"));
         }
         if !refs.contains(u) {
             refs.push(u.clone());
@@ -341,15 +379,11 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
     }
     let (image_url, image_urls) = if matches!(req.mode.as_str(), "i2v" | "i2i" | "i23d") {
         if refs.is_empty() {
-            return fail(StatusCode::BAD_REQUEST, "image_url_required");
+            return Err(fail(StatusCode::BAD_REQUEST, "image_url_required"));
         }
         let max = model.max_refs.max(1) as usize;
         if refs.len() > max {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "too_many_refs", "max": max, "got": refs.len()})),
-            )
-                .into_response();
+            return Err(Refused { status: StatusCode::BAD_REQUEST, body: json!({"error": "too_many_refs", "max": max, "got": refs.len()}) });
         }
         if model.max_refs > 0 {
             (None, refs)
@@ -358,7 +392,7 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
         }
     } else {
         if !refs.is_empty() {
-            return fail(StatusCode::BAD_REQUEST, "refs_need_image_mode");
+            return Err(fail(StatusCode::BAD_REQUEST, "refs_need_image_mode"));
         }
         (None, Vec::new())
     };
@@ -366,34 +400,34 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
     // Video starts from an approved still unless the project turns the rule off.
     let project = st.studio.project();
     if project.still_first && req.mode == "t2v" {
-        return fail(StatusCode::CONFLICT, "still_first");
+        return Err(fail(StatusCode::CONFLICT, "still_first"));
     }
 
     let voice_id = if model.modality == "audio" {
         match &req.voice_id {
             Some(v) if providers::valid_voice(v) => Some(v.clone()),
-            Some(_) => return fail(StatusCode::BAD_REQUEST, "invalid_voice_id"),
-            None => return fail(StatusCode::BAD_REQUEST, "voice_id_required"),
+            Some(_) => return Err(fail(StatusCode::BAD_REQUEST, "invalid_voice_id")),
+            None => return Err(fail(StatusCode::BAD_REQUEST, "voice_id_required")),
         }
     } else {
         None
     };
 
-    let Some(adapter) = providers::adapter_for(&model) else {
-        return (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(json!({"error": "adapter_not_implemented", "provider": model.provider})),
-        )
-            .into_response();
-    };
-
-    // Key check comes after validation. The key value is used only for the outgoing call.
-    let Some(key) = st.keys.get(&model.key) else {
-        return (
-            StatusCode::PRECONDITION_FAILED,
-            Json(json!({"error": "missing_key", "key": model.key})),
-        )
-            .into_response();
+    // Test mode (AGAVE_FAKE_PROVIDERS=1 at startup) answers every model locally and never needs a key.
+    let (adapter, key) = if let Some(fake) = &st.fake {
+        (fake.clone() as std::sync::Arc<dyn providers::Provider>, String::new())
+    } else {
+        let Some(adapter) = providers::adapter_for(&model) else {
+            return Err(Refused {
+                status: StatusCode::NOT_IMPLEMENTED,
+                body: json!({"error": "adapter_not_implemented", "provider": model.provider}),
+            });
+        };
+        // Key check comes after validation. The key value is used only for the outgoing call.
+        let Some(key) = st.keys.get_or_default(&model.key) else {
+            return Err(Refused { status: StatusCode::PRECONDITION_FAILED, body: json!({"error": "missing_key", "key": model.key}) });
+        };
+        (adapter, key)
     };
 
     // Camera moves apply to video only. Audio text is spoken as-is, so it gets no added language.
@@ -410,7 +444,7 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
         final_prompt
     };
     if final_prompt.chars().count() > MAX_FINAL_PROMPT_CHARS {
-        return fail(StatusCode::BAD_REQUEST, "prompt_too_long");
+        return Err(fail(StatusCode::BAD_REQUEST, "prompt_too_long"));
     }
     let request = serde_json::to_value(&req).ok().filter(|v| v.to_string().len() <= MAX_SAVED_REQUEST_BYTES);
 
@@ -445,10 +479,10 @@ async fn generate(State(st): State<AppState>, body: Result<Json<GenerateReq>, Js
         voice_id,
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
-        return fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs");
+        return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs"));
     }
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, key, sub);
-    (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response()
+    Ok(job)
 }
 
 // ---------------------------------------------------------------- self-host studio
@@ -1087,6 +1121,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_comfyui_address_must_be_a_plain_http_address() {
+        let st = AppState::for_tests("api_comfy_base");
+        for bad in ["file:///etc/passwd", "http://user:pw@127.0.0.1:8189", "ftp://127.0.0.1:21", "http://127.0.0.1:8189/?a=b"] {
+            let mut req = post_json("/api/keys", &json!({"env": "COMFY_BASE_URL", "value": bad}).to_string());
+            req.extensions_mut().insert(from([127, 0, 0, 1]));
+            let resp = router(st.clone()).oneshot(req).await.expect("response");
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{bad}");
+            assert_eq!(body_json(resp).await["error"], "invalid_url");
+        }
+        assert!(!st.keys.is_set("COMFY_BASE_URL"));
+        assert_eq!(st.keys.get_or_default("COMFY_BASE_URL").as_deref(), Some("http://127.0.0.1:8189"), "the proxy's default address");
+        let mut req = post_json("/api/keys", r#"{"env":"COMFY_BASE_URL","value":"http://100.64.0.7:8189"}"#);
+        req.extensions_mut().insert(from([127, 0, 0, 1]));
+        assert_eq!(router(st.clone()).oneshot(req).await.expect("response").status(), StatusCode::OK);
+        let v = body_json(router(st).oneshot(get_req("/api/keys")).await.expect("response")).await;
+        let slot = v["keys"].as_array().unwrap().iter().find(|k| k["env"] == "COMFY_BASE_URL").cloned().unwrap();
+        assert_eq!((slot["set"].as_bool(), slot["default"].as_str()), (Some(true), Some("http://127.0.0.1:8189")));
+        assert!(!v.to_string().contains("100.64.0.7"), "a saved value is never sent back");
+    }
+
+    #[tokio::test]
     async fn models_report_ready_false_without_keys() {
         let app = router(AppState::for_tests("api_models"));
         let resp = app
@@ -1096,7 +1151,8 @@ mod tests {
         let v = body_json(resp).await;
         let models = v["models"].as_array().expect("array");
         assert!(models.len() >= 20);
-        assert!(models.iter().all(|m| m["ready"] == false));
+        // Models on your own ComfyUI need no key (their address has a default); every other model needs its key.
+        assert!(models.iter().all(|m| m["ready"] == (m["provider"] == "comfy")));
         assert!(models.iter().all(|m| m.get("endpoint").is_none()), "endpoint is internal");
     }
 

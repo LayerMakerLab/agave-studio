@@ -217,7 +217,7 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
     Ok(if source_len.is_some() { (from, len) } else { (0.0, len) })
 }
 
-async fn run(cmd: &mut Command) -> PResult<Vec<u8>> {
+pub(crate) async fn run(cmd: &mut Command) -> PResult<Vec<u8>> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let child = cmd.spawn().map_err(|e| ProviderError::Failed(format!("ffmpeg not available: {e}")))?;
     let out = tokio::time::timeout(STEP_TIMEOUT, child.wait_with_output())
