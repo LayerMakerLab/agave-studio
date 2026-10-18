@@ -712,9 +712,9 @@ a:hover { color: var(--silver-1); }
 .pipe-step-acts .pill { --h: 40px; padding: 0 18px; font-size: 14px; }
 .pipe-finished { display: grid; gap: 12px; }
 .pipe-results { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; scroll-padding-inline: 0; }
-.pipe-results.more { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 72px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 72px), transparent); }
-/* Two whole results per view; the rest snap in whole, with a fade while more are to the right. */
-.pipe-results figure { flex: 0 0 calc((100% - 10px) / 2); min-width: 0; margin: 0; display: grid; gap: 6px; scroll-snap-align: start; scroll-snap-stop: always; }
+.pipe-results.more { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); }
+/* Two whole results per view plus a 36px peek of the next (under the fade); the rest snap in whole. */
+.pipe-results figure { flex: 0 0 calc((100% - 20px - 36px) / 2); min-width: 0; margin: 0; display: grid; gap: 6px; scroll-snap-align: start; scroll-snap-stop: always; }
 .pipe-results img, .pipe-results video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; border: 1px solid var(--line-2); background: var(--bg); }
 .pipe-results figcaption { font: 500 11px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .pipe-finished-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
