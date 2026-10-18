@@ -539,6 +539,7 @@ mod tests {
             image_url: None,
             image_urls: Vec::new(),
             voice_id: None,
+            label: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -584,6 +585,7 @@ mod tests {
             image_url: None,
             image_urls: Vec::new(),
             voice_id: None,
+            label: None,
         }
     }
 
@@ -738,6 +740,7 @@ mod tests {
             image_url: None,
             image_urls: Vec::new(),
             voice_id: None,
+            label: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -786,6 +789,7 @@ mod tests {
             image_url: None,
             image_urls: Vec::new(),
             voice_id: None,
+            label: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("assemble failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));

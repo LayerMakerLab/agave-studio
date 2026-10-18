@@ -8,6 +8,7 @@ mod keys;
 mod media;
 mod models;
 mod pipelines;
+mod placeholder;
 mod promptcraft;
 mod providers;
 mod reframe;

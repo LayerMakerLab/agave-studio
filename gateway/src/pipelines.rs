@@ -17,7 +17,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::api::{submit_generate, GenerateReq};
+use crate::api::{fail, submit_generate, GenerateReq};
 use crate::jobs::now_unix;
 use crate::media::{self, Output};
 use crate::state::AppState;
@@ -52,8 +52,8 @@ pub enum Kind {
     },
     /// Free: the last frame of an earlier step's clip, as a picture (the gallery's Continue).
     LastFrame { from: usize },
-    /// Free: saves an earlier step's picture as the run's Element (@tag).
-    Element { from: usize },
+    /// Free: saves a picture as the run's Element (@tag): an earlier step's, or the start photo when `from` is None.
+    Element { from: Option<usize> },
     /// Free: puts earlier steps' clips on the Edit timeline.
     Edit { from: &'static [usize] },
 }
@@ -116,7 +116,7 @@ pub const PIPELINES: &[Pipeline] = &[
                 None,
                 None,
             ),
-            Step { title: "Save as Element", kind: Kind::Element { from: 0 } },
+            Step { title: "Save as Element", kind: Kind::Element { from: Some(0) } },
             with(
                 generate(
                     "Video",
@@ -145,7 +145,7 @@ pub const PIPELINES: &[Pipeline] = &[
         element_kind: "character",
         steps: &[
             with(generate("Character sheet", "fal/nano-banana-edit", "i2i", "", From::Start), Some("16:9"), None, None, Some("sheet")),
-            Step { title: "Save as Element", kind: Kind::Element { from: 0 } },
+            Step { title: "Save as Element", kind: Kind::Element { from: Some(0) } },
             with(
                 generate(
                     "Opening still",
@@ -191,57 +191,44 @@ pub const PIPELINES: &[Pipeline] = &[
     },
     Pipeline {
         id: "ltx-short-on-comfy",
-        title: "Short film on your ComfyUI: look, Element, two LTX-Video shots, edit",
-        blurb: "Runs free on your own ComfyUI with open-weights models. FLUX.1 schnell makes the character's look and saves it as an Element, LTX-Video turns that look into a shot, the shot's last frame starts the second shot, and both land on the Edit timeline.",
-        note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and the LTX-Video 0.9.5 and FLUX.1 schnell models installed there. Nothing is billed: it runs on your GPU.",
-        needs_image: false,
-        image_hint: "",
+        title: "Short film on your ComfyUI: photo, Element, two LTX-Video shots, edit",
+        blurb: "Runs free on your own ComfyUI with the open-weights LTX-Video model. Your photo is saved as an Element, LTX-Video turns it into a shot, the shot's last frame starts the second shot, and both land on the Edit timeline.",
+        note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and ltx-video-2b-v0.9.5 with the t5xxl_fp16 text encoder installed there. Nothing is billed: it runs on your GPU.",
+        needs_image: true,
+        image_hint: "A photo of the character or object, ideally 3:2 landscape.",
         subject_hint: "a young woman with short dark hair in a yellow raincoat",
         tag: "lead",
         element_kind: "character",
         steps: &[
-            with(
-                generate(
-                    "Character look",
-                    "comfy/flux-schnell",
-                    "t2i",
-                    "Full-length portrait of {subject}, standing on a rainy city street at dusk, neon reflections on the wet pavement, 35mm film look, natural skin texture.",
-                    From::Nothing,
-                ),
-                Some("16:9"),
-                None,
-                None,
-                None,
-            ),
-            Step { title: "Save as Element", kind: Kind::Element { from: 0 } },
+            Step { title: "Save as Element", kind: Kind::Element { from: None } },
             with(
                 generate(
                     "Shot 1",
                     "comfy/ltxv-i2v",
                     "i2v",
-                    "@{tag} walks along a rainy city street at dusk, neon signs reflecting in the puddles, the camera tracking alongside at walking pace. Raindrops catch the light, the coat moves with each step. 35mm film look, soft haze, real-life footage.",
-                    From::Step(0),
+                    "@{tag} walks slowly along a rainy city street at dusk, neon signs reflecting in the puddles, the camera tracking alongside at walking pace. Raindrops catch the light and the clothes move with each step. 35mm film look, soft haze, real-life footage.",
+                    From::Start,
                 ),
                 Some("16:9"),
                 Some(2),
                 None,
                 None,
             ),
-            Step { title: "Last frame", kind: Kind::LastFrame { from: 2 } },
+            Step { title: "Last frame", kind: Kind::LastFrame { from: 1 } },
             with(
                 generate(
                     "Shot 2",
                     "comfy/ltxv-i2v",
                     "i2v",
                     "{subject} stops under a flickering neon sign and looks up as the rain eases, the light catching the face. Shallow depth of field, slow push-in, soft haze, real-life footage.",
-                    From::Step(3),
+                    From::Step(2),
                 ),
                 Some("16:9"),
                 Some(2),
                 None,
                 None,
             ),
-            Step { title: "Add to edit", kind: Kind::Edit { from: &[2, 4] } },
+            Step { title: "Add to edit", kind: Kind::Edit { from: &[1, 3] } },
         ],
     },
 ];
@@ -380,6 +367,16 @@ pub struct StepRun {
     /// The key slot a failed step needs (missing_key), so the app can open Settings at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// Something a finished step wants the user to know (for example clips that did not fit on the timeline).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// The Element a run saved, so the run only ever replaces its own Element on Run again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ElementMark {
+    pub created_at: u64,
+    pub image: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -395,6 +392,15 @@ pub struct Run {
     pub status: String,
     pub current: usize,
     pub steps: Vec<StepRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<ElementMark>,
+}
+
+impl Run {
+    /// A step of this run is waiting on a job (a provider call or a local tool).
+    fn busy(&self) -> bool {
+        self.steps.iter().any(|s| s.status == "running")
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -439,12 +445,14 @@ impl PipelineStore {
             Some(r) => *r = run,
             None => runs.push(run),
         }
+        // Over the cap, finished runs go first (oldest first), then the others (oldest first). A run with a job in
+        // flight is never dropped.
         while runs.len() > MAX_RUNS {
             let oldest = runs
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| r.status == "done" || r.status == "failed")
-                .min_by_key(|(_, r)| r.created_at)
+                .filter(|(_, r)| !r.busy())
+                .min_by_key(|(_, r)| (r.status != "done", r.created_at))
                 .map(|(i, _)| i);
             match oldest {
                 Some(i) => {
@@ -500,16 +508,26 @@ fn output_of(run: &Run, i: usize, kinds: &[&str]) -> Option<String> {
     first_output(run, i, kinds).map(|o| o.url)
 }
 
+const OLD_RUN: &str = "This run was made by an older version of this pipeline, so it cannot go on. Start a new run.";
+
 /// Moves a run forward as far as it can go without spending money: picks up finished jobs, runs free steps,
 /// and stops at a paid step (waiting for a click), a running job, a failure or the end.
 async fn advance(st: &AppState, run: &mut Run) {
-    let Some(p) = find(&run.pipeline) else {
-        run.status = "failed".into();
+    let Some(p) = find(&run.pipeline).filter(|p| p.steps.len() == run.steps.len()) else {
+        // A run saved by an older version of its pipeline (or of one that is gone) cannot be resumed safely.
+        if run.status != "done" && run.status != "failed" {
+            let i = run.current.min(run.steps.len().saturating_sub(1));
+            if run.steps.is_empty() {
+                run.status = "failed".into();
+            } else {
+                fail_step(run, i, OLD_RUN);
+            }
+        }
         return;
     };
     while run.status != "done" && run.status != "failed" {
         let i = run.current;
-        if i >= p.steps.len() || i >= run.steps.len() {
+        if i >= p.steps.len() {
             run.status = "done".into();
             return;
         }
@@ -554,47 +572,77 @@ async fn advance(st: &AppState, run: &mut Run) {
     }
 }
 
-/// Runs one free step now (they are all local and quick).
-async fn run_free(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
-    let result: Result<Vec<Output>, String> = match &p.steps[i].kind {
-        Kind::Element { from } => match output_of(run, *from, &["image"]) {
-            Some(img) => {
-                let e = Element { tag: run.tag.clone(), name: run.subject.clone(), kind: p.element_kind.into(), images: vec![img.clone()], created_at: now_unix() };
-                match st.studio.put_element(e) {
-                    Ok(()) => Ok(vec![Output { url: img, kind: "image".into() }]),
-                    Err(StudioError::Full) => Err("The studio already holds 200 Elements. Delete one, then run this step again.".into()),
-                    Err(StudioError::Io) => Err("The Element could not be saved.".into()),
-                }
-            }
-            None => Err(format!("Step {} made no picture to save.", from + 1)),
-        },
-        Kind::LastFrame { from } => match output_of(run, *from, &["video"]) {
-            Some(clip) => last_frame(st, &clip).await.map(|o| vec![o]),
-            None => Err(format!("Step {} made no clip.", from + 1)),
-        },
-        Kind::Edit { from } => {
-            let mut doc = st.studio.edit();
-            let mut added = Vec::new();
-            for &j in from.iter() {
-                let Some(out) = first_output(run, j, &["video", "image"]) else { continue };
-                if doc.clips.len() >= crate::assemble::MAX_CLIPS {
-                    break;
-                }
-                doc.clips.push(EditClip { url: out.url.clone(), kind: out.kind.clone(), from: 0.0, to: None, len: None, caption: String::new() });
-                added.push(out);
-            }
-            if added.is_empty() {
-                Err("There was nothing to add to the edit.".into())
-            } else {
-                st.studio.set_edit(doc).map(|()| added).map_err(|_| "The Edit timeline could not be saved.".to_string())
+/// The step's result, and a note for the user when it only partly went as asked.
+type Free = Result<(Vec<Output>, Option<String>), String>;
+
+/// Saves the run's Element, unless the tag now belongs to an Element this run did not make.
+fn save_element(st: &AppState, p: &Pipeline, run: &mut Run, img: String) -> Free {
+    let existing = st.studio.elements().into_iter().find(|e| e.tag == run.tag);
+    let ours = match (&existing, &run.element) {
+        (Some(e), Some(m)) => e.created_at == m.created_at && e.images == [m.image.clone()],
+        _ => false,
+    };
+    if existing.is_some() && !ours {
+        return Err(format!(
+            "@{} is already an Element this run did not make, so it was left as it is. Delete or rename that Element in Elements, then press Run again.",
+            run.tag
+        ));
+    }
+    let e = Element { tag: run.tag.clone(), name: run.subject.clone(), kind: p.element_kind.into(), images: vec![img.clone()], created_at: now_unix() };
+    let mark = ElementMark { created_at: e.created_at, image: img.clone() };
+    match st.studio.put_element(e) {
+        Ok(()) => {
+            run.element = Some(mark);
+            Ok((vec![Output { url: img, kind: "image".into() }], None))
+        }
+        Err(StudioError::Full) => Err("The studio already holds 200 Elements. Delete one, then press Run again.".into()),
+        Err(_) => Err("The Element could not be saved.".into()),
+    }
+}
+
+/// Puts the listed steps' clips on the Edit timeline, as many as fit.
+fn add_to_edit(st: &AppState, run: &Run, from: &[usize]) -> Free {
+    let mut doc = st.studio.edit();
+    let wanted: Vec<Output> = from.iter().filter_map(|&j| first_output(run, j, &["video", "image"])).collect();
+    let room = crate::assemble::MAX_CLIPS.saturating_sub(doc.clips.len());
+    let added: Vec<Output> = wanted.iter().take(room).cloned().collect();
+    if wanted.is_empty() {
+        return Err("There was nothing to add to the edit.".into());
+    }
+    if added.is_empty() {
+        return Err(format!("The Edit timeline is full ({} clips). Remove some, then press Run again.", crate::assemble::MAX_CLIPS));
+    }
+    for out in &added {
+        doc.clips.push(EditClip { url: out.url.clone(), kind: out.kind.clone(), from: 0.0, to: None, len: None, caption: String::new() });
+    }
+    st.studio.set_edit(doc).map_err(|_| "The Edit timeline could not be saved.".to_string())?;
+    let note = (added.len() < wanted.len()).then(|| {
+        format!("Added {} of {} clips: the timeline holds {}.", added.len(), wanted.len(), crate::assemble::MAX_CLIPS)
+    });
+    Ok((added, note))
+}
+
+/// Runs one free step now (Save as Element and Add to edit are instant file writes).
+fn run_free(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
+    let result: Free = match &p.steps[i].kind {
+        Kind::Element { from } => {
+            let img = match from {
+                Some(j) => output_of(run, *j, &["image"]),
+                None => run.image.clone(),
+            };
+            match img {
+                Some(img) => save_element(st, p, run, img),
+                None => Err("There is no picture to save.".into()),
             }
         }
-        Kind::Generate { .. } => Err("not a free step".into()),
+        Kind::Edit { from } => add_to_edit(st, run, from),
+        _ => Err("not a free step".into()),
     };
     match result {
-        Ok(outputs) => {
+        Ok((outputs, note)) => {
             let s = &mut run.steps[i];
             s.outputs = outputs;
+            s.note = note;
             s.status = "done".into();
             s.error = None;
             run.current += 1;
@@ -604,19 +652,66 @@ async fn run_free(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
     }
 }
 
-/// The last frame of a local clip as a PNG under /outputs (ffmpeg, argument list, no shell).
-async fn last_frame(st: &AppState, url: &str) -> Result<Output, String> {
-    let dir = &st.ctx.outputs_dir;
-    let name = crate::assemble::video_ok(dir, url).ok_or("The clip is missing.")?;
-    let out = format!("{}.png", media::random_hex(12));
-    let mut cmd = tokio::process::Command::new("ffmpeg");
-    // From half a second before the end, every frame overwrites the same file, so the last one stays.
-    cmd.args(["-y", "-v", "error", "-sseof", "-0.5", "-i"]).arg(dir.join(&name)).args(["-update", "1"]).arg(dir.join(&out));
-    crate::assemble::run(&mut cmd).await.map_err(|_| "Could not take the last frame of the clip.".to_string())?;
-    if !dir.join(&out).is_file() {
-        return Err("Could not take the last frame of the clip.".into());
+/// The last frame of a clip, taken by ffmpeg as a local job: the step waits on it like on a provider call, so no
+/// lock is held while ffmpeg runs and a restart in the middle fails the step instead of losing it.
+struct LastFrame {
+    clip: String,
+}
+
+#[async_trait::async_trait]
+impl crate::providers::Provider for LastFrame {
+    async fn submit(&self, ctx: &crate::media::Ctx, _key: &str, _req: &crate::providers::SubmitReq) -> crate::providers::PResult<crate::providers::Submitted> {
+        let fail = |m: &str| crate::providers::ProviderError::Failed(m.into());
+        let dir = &ctx.outputs_dir;
+        let name = crate::assemble::video_ok(dir, &self.clip).ok_or_else(|| fail("The clip is missing."))?;
+        let out = format!("{}.png", media::random_hex(12));
+        let mut cmd = tokio::process::Command::new("ffmpeg");
+        // From half a second before the end, every frame overwrites the same file, so the last one stays.
+        cmd.args(["-y", "-v", "error", "-sseof", "-0.5", "-i"]).arg(dir.join(&name)).args(["-update", "1"]).arg(dir.join(&out));
+        crate::assemble::run(&mut cmd).await.map_err(|_| fail("Could not take the last frame of the clip."))?;
+        if !dir.join(&out).is_file() {
+            return Err(fail("Could not take the last frame of the clip."));
+        }
+        Ok(crate::providers::Submitted::Done(vec![Output { url: format!("/outputs/{out}"), kind: "image".into() }]))
     }
-    Ok(Output { url: format!("/outputs/{out}"), kind: "image".into() })
+}
+
+fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
+    let Some(clip) = output_of(run, from, &["video"]) else {
+        return fail_step(run, i, format!("Step {} made no clip.", from + 1));
+    };
+    let job = crate::jobs::Job {
+        id: format!("j_{}", media::random_hex(8)),
+        model: "agave/last-frame".into(),
+        mode: "last_frame".into(),
+        prompt: format!("Last frame of step {}", from + 1),
+        status: "queued".into(),
+        progress: None,
+        outputs: Vec::new(),
+        error: None,
+        created_at: now_unix(),
+        request: None,
+    };
+    let adapter: Arc<dyn crate::providers::Provider> = Arc::new(LastFrame { clip });
+    if !st.jobs.insert(job.clone(), adapter.clone(), String::new()) {
+        return fail_step(run, i, "too_many_jobs");
+    }
+    let req = crate::providers::SubmitReq {
+        endpoint: String::new(),
+        mode: "last_frame".into(),
+        prompt: String::new(),
+        aspect: None,
+        duration: None,
+        resolution: None,
+        seed: None,
+        image_url: None,
+        image_urls: Vec::new(),
+        voice_id: None,
+        label: None,
+    };
+    crate::jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), req);
+    run.steps[i].status = "running".into();
+    run.steps[i].job = Some(job.id);
 }
 
 /// Starts step `i`: a generation goes to its provider through the composer's own generate path; a free local
@@ -625,7 +720,10 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
     run.steps[i] = StepRun { status: "pending".into(), ..Default::default() };
     run.status = "running".into();
     let Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from } = &p.steps[i].kind else {
-        return run_free(st, p, run, i).await;
+        if let Kind::LastFrame { from } = p.steps[i].kind {
+            return start_last_frame(st, run, i, from);
+        }
+        return run_free(st, p, run, i);
     };
     let image_url = match from {
         From::Nothing => None,
@@ -644,6 +742,7 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
         resolution: resolution.map(String::from),
         image_url,
         recipe: recipe.map(String::from),
+        label: Some(format!("Step {} · {}", i + 1, p.steps[i].title)),
         ..Default::default()
     };
     match submit_generate(st, req) {
@@ -662,6 +761,9 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
 /// The user's click on step `i`: sends a paid step, or runs a failed step again (keeping the steps before it).
 async fn click(st: &AppState, run: &mut Run, i: usize) -> Result<(), &'static str> {
     let Some(p) = find(&run.pipeline) else { return Err("unknown_pipeline") };
+    if p.steps.len() != run.steps.len() {
+        return Err("pipeline_changed");
+    }
     let ready = i == run.current && i < run.steps.len() && matches!(run.steps[i].status.as_str(), "waiting" | "failed");
     if !ready {
         return Err("step_not_ready");
@@ -705,6 +807,7 @@ fn run_json(st: &AppState, run: &Run) -> Value {
             v["outputs"] = json!(s.outputs);
             v["error"] = json!(s.error);
             v["key"] = json!(s.key);
+            v["note"] = json!(s.note);
             v
         })
         .collect();
@@ -714,10 +817,6 @@ fn run_json(st: &AppState, run: &Run) -> Value {
 }
 
 // ---------------------------------------------------------------- routes
-
-fn fail(status: StatusCode, code: &str) -> Response {
-    (status, Json(json!({"error": code}))).into_response()
-}
 
 /// GET /api/pipelines: every pipeline with its steps, prices and the keys it needs.
 pub async fn list(State(st): State<AppState>) -> Response {
@@ -761,13 +860,13 @@ pub async fn create(State(st): State<AppState>, body: Result<Json<CreateReq>, Js
         return fail(StatusCode::BAD_REQUEST, "invalid_tag");
     }
     let _engine = st.pipelines.engine.lock().await;
-    // A run never replaces an Element the user already has.
+    // A run never replaces an Element the user already has, and two runs never share a tag: a run that is
+    // waiting or stopped can still be run again, so it keeps its tag until it finishes or is forgotten.
     if st.studio.elements().iter().any(|e| e.tag == tag) {
         return fail(StatusCode::CONFLICT, "tag_in_use");
     }
-    let taken = st.pipelines.list().iter().any(|r| r.tag == tag && r.status != "done" && r.status != "failed");
-    if taken {
-        return fail(StatusCode::CONFLICT, "tag_in_use");
+    if st.pipelines.list().iter().any(|r| r.tag == tag && r.status != "done") {
+        return fail(StatusCode::CONFLICT, "tag_in_run");
     }
     let mut run = Run {
         id: format!("p_{}", media::random_hex(8)),
@@ -779,6 +878,7 @@ pub async fn create(State(st): State<AppState>, body: Result<Json<CreateReq>, Js
         status: "running".into(),
         current: 0,
         steps: p.steps.iter().map(|_| StepRun { status: "pending".into(), ..Default::default() }).collect(),
+        element: None,
     };
     advance(&st, &mut run).await;
     st.pipelines.put(run.clone());
@@ -820,7 +920,7 @@ pub async fn delete(State(st): State<AppState>, Path(id): Path<String>) -> Respo
     }
     let _engine = st.pipelines.engine.lock().await;
     match st.pipelines.get(&id) {
-        Some(r) if r.status == "running" => fail(StatusCode::CONFLICT, "run_busy"),
+        Some(r) if r.status == "running" || r.busy() => fail(StatusCode::CONFLICT, "run_busy"),
         Some(_) if st.pipelines.remove(&id) => Json(json!({"ok": true})).into_response(),
         _ => fail(StatusCode::NOT_FOUND, "not_found"),
     }
@@ -841,7 +941,7 @@ mod tests {
     /// Test state whose every model is answered by the local fake provider (no network, no key).
     fn fake_state(dir: PathBuf, delay_ms: u64) -> AppState {
         let mut st = AppState::for_tests_in(dir.clone());
-        st.fake = Some(Arc::new(Fake::new(dir.join("no-web"), Duration::from_millis(delay_ms), "")));
+        st.fake = Some(Arc::new(Fake::new(Duration::from_millis(delay_ms), "")));
         st
     }
 
@@ -863,7 +963,7 @@ mod tests {
 
     fn start_image(st: &AppState) -> String {
         std::fs::create_dir_all(&st.ctx.outputs_dir).unwrap();
-        std::fs::write(st.ctx.outputs_dir.join("start.png"), b"\x89PNG\r\n\x1a\nfake").unwrap();
+        std::fs::write(st.ctx.outputs_dir.join("start.png"), crate::placeholder::picture("16:9", "start", "", "")).unwrap();
         "/outputs/start.png".into()
     }
 
@@ -911,9 +1011,10 @@ mod tests {
         assert_eq!(p("character-to-edit")["total"]["cents"], 92);
         // The LTX pipeline runs on your own ComfyUI: nothing to pay, every generation marked local.
         let ltx = p("ltx-short-on-comfy");
-        assert_eq!((ltx["total"]["cents"].as_u64(), ltx["total"]["paid_steps"].as_u64(), ltx["total"]["local_steps"].as_u64()), (Some(0), Some(0), Some(3)));
-        assert_eq!(ltx["steps"][2]["price"]["local"], true);
-        assert_eq!(ltx["steps"][2]["model"], "comfy/ltxv-i2v");
+        assert_eq!((ltx["total"]["cents"].as_u64(), ltx["total"]["paid_steps"].as_u64(), ltx["total"]["local_steps"].as_u64()), (Some(0), Some(0), Some(2)));
+        assert_eq!(ltx["steps"][1]["price"]["local"], true);
+        // Only the model that ran live on the PC: no FLUX step, so it runs with just LTX-Video installed.
+        assert!(ltx["steps"].as_array().unwrap().iter().filter(|s| s["kind"] == "generate").all(|s| s["model"] == "comfy/ltxv-i2v"));
         // Every model a pipeline names exists and accepts the step's options.
         for p in PIPELINES {
             for s in p.steps {
@@ -1052,19 +1153,148 @@ mod tests {
             return;
         }
         let st = fake_state(crate::fsutil::test_dir("pipe_ltx"), 0);
-        let run = create(&st, "ltx-short-on-comfy", None).await;
+        let img = start_image(&st);
+        let run = create(&st, "ltx-short-on-comfy", Some(img.clone())).await;
         let id = run["id"].as_str().unwrap().to_string();
-        assert_eq!(run["steps"][0]["status"], "running", "a free local step starts with the run");
+        assert_eq!(run["steps"][0]["status"], "done", "the photo is saved as the Element at once");
+        assert_eq!(run["steps"][1]["status"], "running", "a free local step starts with the run");
         let run = settle(&st, &id).await;
         assert_eq!(run["status"], "done", "{run}");
+        let el = st.studio.elements().into_iter().find(|e| e.tag == "lead").unwrap();
+        assert_eq!(el.images, vec![img.clone()]);
         let seen = fake(&st).seen.lock().unwrap();
-        assert_eq!(seen.len(), 3);
-        assert_eq!(seen[1].image_url.as_deref(), Some(out(&run, 0).as_str()), "shot 1 starts from the look");
-        assert!(seen[1].prompt.starts_with("a blue ceramic bowl walks"), "@lead became the Element's words: {}", seen[1].prompt);
-        assert_eq!(seen[2].image_url.as_deref(), Some(out(&run, 3).as_str()), "shot 2 starts from shot 1's last frame");
-        assert!(out(&run, 3).ends_with(".png"));
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].image_url.as_deref(), Some(img.as_str()), "shot 1 starts from the photo (the Element's picture)");
+        assert!(seen[0].prompt.starts_with("a blue ceramic bowl walks"), "@lead became the Element's words: {}", seen[0].prompt);
+        assert_eq!(seen[0].label.as_deref(), Some("Step 2 · Shot 1"));
+        assert_eq!(seen[1].image_url.as_deref(), Some(out(&run, 2).as_str()), "shot 2 starts from shot 1's last frame");
+        assert!(out(&run, 2).ends_with(".png"));
+        // The last frame was taken as a local job, like Continue, outside the engine lock.
+        let frame_job = run["steps"][2]["job"].as_str().unwrap();
+        assert_eq!(st.jobs.get(frame_job).unwrap().model, "agave/last-frame");
         let edit: Vec<String> = st.studio.edit().clips.into_iter().map(|c| c.url).collect();
-        assert_eq!(edit, vec![out(&run, 2), out(&run, 4)]);
+        assert_eq!(edit, vec![out(&run, 1), out(&run, 3)]);
+        assert!(run["steps"][4]["note"].is_null());
+    }
+
+    #[tokio::test]
+    async fn a_full_timeline_is_reported_not_silently_cut() {
+        if !ffmpeg_ok() {
+            return;
+        }
+        let st = fake_state(crate::fsutil::test_dir("pipe_full_edit"), 0);
+        let img = start_image(&st);
+        let mut doc = st.studio.edit();
+        doc.clips = (0..crate::assemble::MAX_CLIPS - 1)
+            .map(|_| EditClip { url: img.clone(), kind: "image".into(), from: 0.0, to: None, len: None, caption: String::new() })
+            .collect();
+        st.studio.set_edit(doc).unwrap();
+        let id = create(&st, "ltx-short-on-comfy", Some(img)).await["id"].as_str().unwrap().to_string();
+        let run = settle(&st, &id).await;
+        assert_eq!(run["steps"][4]["status"], "done");
+        assert_eq!(run["steps"][4]["note"], "Added 1 of 2 clips: the timeline holds 200.");
+        assert_eq!(st.studio.edit().clips.len(), crate::assemble::MAX_CLIPS);
+    }
+
+    #[tokio::test]
+    async fn a_run_never_replaces_an_element_it_did_not_make() {
+        if !ffmpeg_ok() {
+            return;
+        }
+        let st = fake_state(crate::fsutil::test_dir("pipe_element_owner"), 0);
+        let img = start_image(&st);
+        // (a) Run A stops at its first step; it still holds @product, so run B cannot take the tag.
+        let a = create(&st, "product-to-3d", Some(img.clone())).await["id"].as_str().unwrap().to_string();
+        fake(&st).fail_next("image");
+        click(&st, &a, 0).await;
+        assert_eq!(settle(&st, &a).await["status"], "failed");
+        let (status, v) = call(&st, "POST", "/api/pipelines/runs", Some(json!({"pipeline": "product-to-3d", "subject": "b", "image": img, "tag": "product"}))).await;
+        assert_eq!((status, v["error"].as_str()), (StatusCode::CONFLICT, Some("tag_in_run")));
+
+        // (b) While A waits to be run again, the user saves their own @product. A's Element step leaves it alone.
+        std::fs::write(st.ctx.outputs_dir.join("mine.png"), b"\x89PNG\r\n\x1a\nmine").unwrap();
+        let (status, _) = call(&st, "POST", "/api/elements", Some(json!({"tag": "product", "name": "My mug", "kind": "product", "images": ["/outputs/mine.png"]}))).await;
+        assert_eq!(status, StatusCode::OK);
+        click(&st, &a, 0).await;
+        let run = settle(&st, &a).await;
+        assert_eq!((run["steps"][0]["status"].as_str(), run["steps"][1]["status"].as_str()), (Some("done"), Some("failed")));
+        assert!(run["steps"][1]["error"].as_str().unwrap().contains("did not make"), "{}", run["steps"][1]["error"]);
+        let el = st.studio.elements().into_iter().find(|e| e.tag == "product").unwrap();
+        assert_eq!((el.name.as_str(), el.images.clone()), ("My mug", vec!["/outputs/mine.png".to_string()]));
+        assert!(fake(&st).seen.lock().unwrap().iter().all(|r| r.mode != "i23d"), "no 3D step ran on the wrong picture");
+
+        // Once the user's Element is gone, Run again saves the run's own, and later retries may replace it.
+        call(&st, "POST", "/api/elements/delete", Some(json!({"tag": "product"}))).await;
+        click(&st, &a, 1).await;
+        let run = settle(&st, &a).await;
+        assert_eq!(run["steps"][1]["status"], "done");
+        let el = st.studio.elements().into_iter().find(|e| e.tag == "product").unwrap();
+        assert_eq!(el.images, vec![out(&run, 0)]);
+        assert_eq!(st.pipelines.get(&a).unwrap().element.unwrap().image, out(&run, 0));
+    }
+
+    #[tokio::test]
+    async fn a_run_saved_by_an_older_pipeline_stops_cleanly() {
+        let st = fake_state(crate::fsutil::test_dir("pipe_old_shape"), 0);
+        let old = Run {
+            id: "p_00112233aabbccdd".into(),
+            pipeline: "product-to-3d".into(),
+            created_at: 1,
+            subject: "x".into(),
+            image: None,
+            tag: "old".into(),
+            status: "waiting".into(),
+            current: 2,
+            steps: vec![StepRun { status: "done".into(), ..Default::default() }, StepRun { status: "done".into(), ..Default::default() }, StepRun { status: "waiting".into(), ..Default::default() }],
+            element: None,
+        };
+        st.pipelines.put(old);
+        let (status, v) = click(&st, "p_00112233aabbccdd", 2).await;
+        assert_eq!((status, v["error"].as_str()), (StatusCode::CONFLICT, Some("pipeline_changed")));
+        assert_eq!(v["run"]["status"], "failed");
+        assert_eq!(v["run"]["steps"][2]["error"], OLD_RUN);
+        assert!(fake(&st).seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_run_cap_drops_finished_runs_first_and_never_a_busy_one() {
+        let st = AppState::for_tests("pipe_cap");
+        let run = |n: u64, status: &str, step: &str| Run {
+            id: format!("p_{n:016x}"),
+            pipeline: "product-to-3d".into(),
+            created_at: n,
+            subject: "x".into(),
+            image: None,
+            tag: format!("t{n}"),
+            status: status.into(),
+            current: 0,
+            steps: vec![StepRun { status: step.into(), ..Default::default() }],
+            element: None,
+        };
+        st.pipelines.put(run(1, "running", "running")); // oldest, but its job is in flight
+        st.pipelines.put(run(2, "failed", "failed"));
+        st.pipelines.put(run(3, "waiting", "waiting"));
+        for n in 10..(10 + MAX_RUNS as u64 - 3) {
+            st.pipelines.put(run(n, "done", "done"));
+        }
+        assert_eq!(st.pipelines.list().len(), MAX_RUNS);
+        st.pipelines.put(run(100, "waiting", "waiting"));
+        assert!(st.pipelines.get(&format!("p_{:016x}", 10)).is_none(), "the oldest finished run went first");
+        st.pipelines.put(run(101, "waiting", "waiting"));
+        assert!(st.pipelines.get(&format!("p_{:016x}", 11)).is_none());
+        for n in [1, 2, 3] {
+            assert!(st.pipelines.get(&format!("p_{n:016x}")).is_some(), "run {n} kept while finished runs remain");
+        }
+        // With no finished run left, the oldest idle run goes, never the busy one.
+        for n in 12..(10 + MAX_RUNS as u64 - 3) {
+            st.pipelines.remove(&format!("p_{n:016x}"));
+        }
+        for n in 200..(200 + MAX_RUNS as u64) {
+            st.pipelines.put(run(n, "waiting", "waiting"));
+        }
+        assert!(st.pipelines.get(&format!("p_{:016x}", 1)).is_some(), "a run with a job in flight is never dropped");
+        assert!(st.pipelines.get(&format!("p_{:016x}", 2)).is_none());
+        assert_eq!(st.pipelines.list().len(), MAX_RUNS);
     }
 
     #[tokio::test]
@@ -1074,12 +1304,12 @@ mod tests {
         assert_eq!(post(json!({"pipeline": "nope", "subject": "x"})).await.1["error"], "unknown_pipeline");
         assert_eq!(post(json!({"pipeline": "product-to-3d", "subject": "x"})).await.1["error"], "image_required");
         assert_eq!(post(json!({"pipeline": "product-to-3d", "subject": "x", "image": "/outputs/missing.png"})).await.1["error"], "invalid_image");
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": " "})).await.1["error"], "invalid_subject");
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x".repeat(61)})).await.1["error"], "invalid_subject");
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "Bad Tag"})).await.1["error"], "invalid_tag");
         let img = start_image(&st);
-        st.studio.put_element(Element { tag: "mine".into(), name: "My cat".into(), kind: "character".into(), images: vec![img], created_at: 1 }).unwrap();
-        let (status, v) = post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "@mine"})).await;
+        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": " ", "image": img})).await.1["error"], "invalid_subject");
+        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x".repeat(61), "image": img})).await.1["error"], "invalid_subject");
+        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "Bad Tag", "image": img})).await.1["error"], "invalid_tag");
+        st.studio.put_element(Element { tag: "mine".into(), name: "My cat".into(), kind: "character".into(), images: vec![img.clone()], created_at: 1 }).unwrap();
+        let (status, v) = post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "@mine", "image": img})).await;
         assert_eq!((status, v["error"].as_str()), (StatusCode::CONFLICT, Some("tag_in_use")));
         assert_eq!(call(&st, "POST", "/api/pipelines/runs/p_zz/step", Some(json!({"step": 0}))).await.0, StatusCode::NOT_FOUND);
     }

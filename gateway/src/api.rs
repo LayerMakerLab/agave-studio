@@ -35,7 +35,7 @@ const MAX_TEXTURE_PROMPT_CHARS: usize = 800;
 const MAX_SAVED_REQUEST_BYTES: usize = 16 << 10;
 const IMAGE_EXT: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 
-fn fail(status: StatusCode, code: impl AsRef<str>) -> Response {
+pub(crate) fn fail(status: StatusCode, code: impl AsRef<str>) -> Response {
     (status, Json(json!({"error": code.as_ref()}))).into_response()
 }
 
@@ -245,6 +245,9 @@ pub(crate) struct GenerateReq {
     pub(crate) recipe: Option<String>,
     /// Extension: ElevenLabs needs a voice id, and the contract has no field for it.
     pub(crate) voice_id: Option<String>,
+    /// Set by pipeline steps ("Step 3 · Video"); never read from a request.
+    #[serde(skip)]
+    pub(crate) label: Option<String>,
 }
 
 /// The requested option if the model allows it, else the first allowed value.
@@ -477,6 +480,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         image_url,
         image_urls,
         voice_id,
+        label: req.label.clone(),
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs"));
@@ -491,6 +495,7 @@ fn studio_fail(e: StudioError) -> Response {
     match e {
         StudioError::Full => fail(StatusCode::CONFLICT, "too_many_elements"),
         StudioError::Io => fail(StatusCode::INTERNAL_SERVER_ERROR, "write_failed"),
+        StudioError::Stale => fail(StatusCode::CONFLICT, "edit_changed"),
     }
 }
 
@@ -610,7 +615,8 @@ async fn set_project(State(st): State<AppState>, body: Result<Json<Project>, Jso
 
 /// A timeline clip: a bare /outputs URL (the whole clip) or a URL with a trim.
 async fn get_edit(State(st): State<AppState>) -> Response {
-    Json(json!({"edit": st.studio.edit()})).into_response()
+    let (edit, rev) = st.studio.edit_rev();
+    Json(json!({"edit": edit, "rev": rev})).into_response()
 }
 
 const EDIT_FRAMES: [&str; 5] = ["original", "16:9", "9:16", "1:1", "4:5"];
@@ -619,8 +625,17 @@ const CAPTION_STYLES: [&str; 3] = ["off", "simple", "pop"];
 const MAX_WORD_FIXES: usize = 50;
 
 /// Saves the Agave Edit timeline. Only the shape is checked here; files are checked again at render.
-async fn set_edit(State(st): State<AppState>, body: Result<Json<studio::EditDoc>, JsonRejection>) -> Response {
-    let Ok(Json(mut e)) = body else {
+#[derive(Deserialize)]
+struct EditReq {
+    #[serde(flatten)]
+    edit: studio::EditDoc,
+    /// The revision the page last read. A stale one is refused (409 edit_changed); no rev saves as before.
+    #[serde(default)]
+    rev: Option<u64>,
+}
+
+async fn set_edit(State(st): State<AppState>, body: Result<Json<EditReq>, JsonRejection>) -> Response {
+    let Ok(Json(EditReq { edit: mut e, rev })) = body else {
         return fail(StatusCode::BAD_REQUEST, "bad_request");
     };
     if e.clips.len() > assemble::MAX_CLIPS {
@@ -661,8 +676,12 @@ async fn set_edit(State(st): State<AppState>, body: Result<Json<studio::EditDoc>
         return fail(StatusCode::BAD_REQUEST, "invalid_audio");
     }
     e.song_name = e.song_name.map(|n| n.chars().filter(|ch| !ch.is_control()).take(120).collect());
-    match st.studio.set_edit(e.clone()) {
-        Ok(()) => Json(json!({"edit": e})).into_response(),
+    match st.studio.set_edit_checked(e.clone(), rev) {
+        Ok(rev) => Json(json!({"edit": e, "rev": rev})).into_response(),
+        Err(StudioError::Stale) => {
+            let (edit, rev) = st.studio.edit_rev();
+            (StatusCode::CONFLICT, Json(json!({"error": "edit_changed", "edit": edit, "rev": rev}))).into_response()
+        }
         Err(err) => studio_fail(err),
     }
 }
@@ -996,6 +1015,7 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         image_url: None,
         image_urls: Vec::new(),
         voice_id: None,
+        label: None,
     };
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), sub);
     (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response()
@@ -1118,6 +1138,35 @@ mod tests {
         let resp = app.oneshot(req).await.expect("response");
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert_eq!(body_json(resp).await["error"], "value_length");
+    }
+
+    #[tokio::test]
+    async fn a_stale_page_cannot_write_over_newer_timeline_clips() {
+        let st = AppState::for_tests("api_edit_rev");
+        let app = router(st.clone());
+        let png = upload_png(&app).await;
+        let doc = |n: usize| json!({"clips": vec![json!({"url": png, "kind": "image"}); n], "frame": "original", "auto_captions": "off"});
+        let v = body_json(app.clone().oneshot(get_req("/api/edit")).await.unwrap()).await;
+        assert_eq!(v["rev"], 0);
+        // No rev: saves as it always did.
+        let (status, v) = post(&app, "/api/edit", doc(1)).await;
+        assert_eq!((status, v["rev"].as_u64()), (StatusCode::OK, Some(1)));
+        // Something else (a pipeline's Add to edit) saves the timeline meanwhile.
+        let mut server = st.studio.edit();
+        server.clips.push(server.clips[0].clone());
+        st.studio.set_edit(server).unwrap();
+        // The page still holds rev 1: refused, and told what the timeline is now.
+        let mut stale = doc(1);
+        stale["rev"] = json!(1);
+        let (status, v) = post(&app, "/api/edit", stale).await;
+        assert_eq!((status, v["error"].as_str(), v["rev"].as_u64()), (StatusCode::CONFLICT, Some("edit_changed"), Some(2)));
+        assert_eq!(v["edit"]["clips"].as_array().unwrap().len(), 2);
+        assert_eq!(st.studio.edit().clips.len(), 2, "the newer clips were kept");
+        let mut fresh = doc(3);
+        fresh["rev"] = json!(2);
+        let (status, v) = post(&app, "/api/edit", fresh).await;
+        assert_eq!((status, v["rev"].as_u64()), (StatusCode::OK, Some(3)));
+        assert_eq!(st.studio.edit().clips.len(), 3);
     }
 
     #[tokio::test]

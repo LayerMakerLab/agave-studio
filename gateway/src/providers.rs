@@ -43,6 +43,8 @@ pub struct SubmitReq {
     /// Several reference images, for models that take a list (models.toml `max_refs`).
     pub image_urls: Vec<String>,
     pub voice_id: Option<String>,
+    /// What the request is for, in a few words ("Step 3 · Video"). Only test mode shows it, on its placeholders.
+    pub label: Option<String>,
 }
 
 pub enum Submitted {
@@ -804,7 +806,10 @@ impl Default for Comfy<ComfyHttp> {
 
 /// One HTTP call to the ComfyUI address.
 pub enum ComfyCall<'a> {
+    /// A JSON answer (job status), read under the JSON cap.
     Get(&'a str),
+    /// A finished file, read under the media download cap.
+    Download(&'a str),
     Json { url: &'a str, body: &'a Value, idempotency: &'a str },
     Upload { url: &'a str, bytes: Vec<u8>, content_type: &'a str, file_path: &'a str },
 }
@@ -821,8 +826,9 @@ pub struct ComfyHttp;
 #[async_trait]
 impl ComfyTransport for ComfyHttp {
     async fn send(&self, http: &reqwest::Client, call: ComfyCall<'_>) -> PResult<(u16, Vec<u8>, Option<String>)> {
+        let limit = if matches!(call, ComfyCall::Download(_)) { media::MAX_DOWNLOAD_BYTES } else { media::MAX_JSON_BYTES };
         let req = match call {
-            ComfyCall::Get(url) => http.get(url),
+            ComfyCall::Get(url) | ComfyCall::Download(url) => http.get(url),
             ComfyCall::Json { url, body, idempotency } => http.post(url).header("Idempotency-Key", idempotency).json(body),
             ComfyCall::Upload { url, bytes, content_type, file_path } => {
                 let part = reqwest::multipart::Part::bytes(bytes)
@@ -841,15 +847,15 @@ impl ComfyTransport for ComfyHttp {
         let resp = req.send().await.map_err(|e| ProviderError::Failed(format!("ComfyUI not reachable: {}", e.without_url())))?;
         let status = resp.status().as_u16();
         let ct = resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_string);
-        let bytes = media::read_capped(resp, media::MAX_DOWNLOAD_BYTES).await?;
+        let bytes = media::read_capped(resp, limit).await?;
         Ok((status, bytes, ct))
     }
 }
 
 pub const COMFY_DEFAULT_BASE: &str = "http://127.0.0.1:8189";
 
-/// Checks a COMFY_BASE_URL value: http or https, a host, no user name or password, no query or fragment.
-/// Returns it without a trailing slash. It is an outbound address the gateway posts workflows and pictures to,
+/// Checks a COMFY_BASE_URL value: http or https, a host and port only (no path, user name, password, query or
+/// fragment; the proxy serves the API at the root, and a path would be lost on the host-relative links it answers). It is an outbound address the gateway posts workflows and pictures to,
 /// so it can only be set by the owner (keys.env, an environment variable, or POST /api/keys behind guard()),
 /// and every link a ComfyUI answer carries must stay on this same origin (`on_base`).
 pub fn comfy_base(raw: &str) -> Result<reqwest::Url, &'static str> {
@@ -860,7 +866,8 @@ pub fn comfy_base(raw: &str) -> Result<reqwest::Url, &'static str> {
         && u.username().is_empty()
         && u.password().is_none()
         && u.query().is_none()
-        && u.fragment().is_none();
+        && u.fragment().is_none()
+        && u.path() == "/";
     if ok {
         Ok(u)
     } else {
@@ -925,9 +932,10 @@ pub struct ComfyAsset {
 
 /// The API-format workflow for one model. Graphs follow ComfyUI's own templates linked from docs.comfy.org
 /// (tutorials/video/ltxv: ltxv_text_to_video.json and ltxv_image_to_video.json; tutorials/flux/flux-1-text-to-image:
-/// flux_schnell.json), with node inputs named as on the built-in node pages. The LTX image to video graph matches
-/// the one that ran end to end on a ComfyUI with comfy-api-proxy 0.1.6 and ltx-video-2b-v0.9.5 (2026-10-18): same
-/// node ids, 20 steps, 768x512, 49 frames for 2 seconds.
+/// flux_schnell.json), with node inputs named as on the built-in node pages. The LTX image to video graph ran live
+/// end to end through this adapter (2026-10-18: ComfyUI and comfy-api-proxy 0.1.6 on an RTX 3080 over an ssh tunnel,
+/// ltx-video-2b-v0.9.5): asset upload, core/ASSET in LoadImage, SaveVideo with format/codec "auto", and the output
+/// download all worked. 20 steps, 768x512, 49 frames for 2 seconds.
 fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResult<Value> {
     // The core/ASSET reference shape the official SDK builds: id always, file_path and hash when known.
     let asset = |a: &ComfyAsset| {
@@ -987,6 +995,30 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
             }))
         }
         other => Err(ProviderError::Failed(format!("no ComfyUI workflow for {other}"))),
+    }
+}
+
+/// "video" or "image" for a job output: by content type first, then the file name, then the reported type. The
+/// proxy reports a SaveVideo file as {"type": "image", "content_type": "video/mp4", "name": "..._.mp4"} (seen in a
+/// live run, 2026-10-18), so the type alone is not enough.
+fn comfy_output_kind(o: &Value) -> Option<&'static str> {
+    let ct = o.get("content_type").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    if ct.starts_with("video/") {
+        return Some("video");
+    }
+    if ct.starts_with("image/") {
+        return Some("image");
+    }
+    let name = o.get("name").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    match name.rsplit('.').next().unwrap_or("") {
+        "mp4" | "webm" | "mov" | "mkv" => return Some("video"),
+        "png" | "jpg" | "jpeg" | "webp" => return Some("image"),
+        _ => {}
+    }
+    match o.get("type").and_then(Value::as_str) {
+        Some("video") => Some("video"),
+        Some("image") => Some("image"),
+        _ => None,
     }
 }
 
@@ -1067,13 +1099,13 @@ impl<T: ComfyTransport + 'static> Provider for Comfy<T> {
         match job.get("status").and_then(Value::as_str).unwrap_or("") {
             "succeeded" => {
                 let outs = job.get("outputs").and_then(Value::as_array).cloned().unwrap_or_default();
-                let pick = |t: &str| outs.iter().find(|o| o.get("type").and_then(Value::as_str) == Some(t)).cloned();
+                let pick = |want: &str| outs.iter().find(|o| comfy_output_kind(o) == Some(want)).cloned();
                 let Some((out, kind)) = pick("video").map(|o| (o, "video")).or_else(|| pick("image").map(|o| (o, "image"))) else {
                     return Ok(Polled::Failed("ComfyUI finished with no picture or video".into()));
                 };
                 let link = out.get("url").and_then(Value::as_str).ok_or_else(|| ProviderError::Failed("ComfyUI output has no url".into()))?;
                 let url = on_base(&base, link)?;
-                let (status, bytes, ct) = self.transport.send(&ctx.http, ComfyCall::Get(&url)).await?;
+                let (status, bytes, ct) = self.transport.send(&ctx.http, ComfyCall::Download(&url)).await?;
                 if status != 200 {
                     return Err(comfy_error(status, &bytes));
                 }
@@ -1094,11 +1126,10 @@ impl<T: ComfyTransport + 'static> Provider for Comfy<T> {
 // ------------------------------------------------------------------ Test mode (fake providers)
 
 /// Answers every model locally, for trying the studio and its pipelines without keys or spending anything.
-/// It never opens a network connection: pictures are copies of the Library previews, clips are made from a
-/// picture with the local ffmpeg. Only used when the gateway starts with AGAVE_FAKE_PROVIDERS=1 (state.rs),
+/// It never opens a network connection: pictures are placeholders that say TEST OUTPUT and name the step, clips are
+/// made from them with the local ffmpeg. Only used when the gateway starts with AGAVE_FAKE_PROVIDERS=1 (state.rs),
 /// which also moves all data to data/fake-providers, or in unit tests.
 pub struct Fake {
-    web: std::path::PathBuf,
     delay: Duration,
     /// Kinds ("image", "video", "3d") whose next job fails once (AGAVE_FAKE_FAIL), to try "Run again".
     fail_once: std::sync::Mutex<std::collections::HashSet<String>>,
@@ -1106,19 +1137,11 @@ pub struct Fake {
     pub seen: std::sync::Mutex<Vec<SubmitReq>>,
 }
 
-/// A 1x1 PNG, used when a Library preview is not there (unit tests have no web folder).
-const TINY_PNG: &[u8] = &[
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
-    0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0x60, 0xf8, 0x0f, 0x00, 0x01, 0x04, 0x01, 0x00, 0x5f, 0xe5, 0xc3, 0x4b, 0x00, 0x00,
-    0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-];
-
 impl Fake {
     /// `fail` is a comma list of kinds that fail once each: image, video, 3d.
-    pub fn new(web: std::path::PathBuf, delay: Duration, fail: &str) -> Self {
+    pub fn new(delay: Duration, fail: &str) -> Self {
         let fail_once = fail.split(',').map(|k| k.trim().to_ascii_lowercase()).filter(|k| !k.is_empty()).collect();
-        Fake { web, delay, fail_once: std::sync::Mutex::new(fail_once), seen: Default::default() }
+        Fake { delay, fail_once: std::sync::Mutex::new(fail_once), seen: Default::default() }
     }
 
     /// Makes the next job of this kind fail once.
@@ -1136,42 +1159,44 @@ impl Fake {
         }
     }
 
-    /// A Library preview that suits the request, or a 1x1 picture.
-    fn picture(&self, req: &SubmitReq, kind: &str) -> (Vec<u8>, &'static str) {
-        let p = req.prompt.to_ascii_lowercase();
-        let name = if kind == "3d" {
-            "print-3d.png"
-        } else if p.contains("sheet") {
-            "character-sheet.jpg"
-        } else if p.contains("product") || p.contains("pedestal") {
-            "product-hero.jpg"
-        } else {
-            "creator-portrait.jpg"
-        };
-        match std::fs::read(self.web.join("app/library").join(name)) {
-            Ok(b) => (b, if name.ends_with(".png") { "png" } else { "jpg" }),
-            Err(_) => (TINY_PNG.to_vec(), "png"),
+    /// A plain placeholder that says TEST OUTPUT and names the step, scaled up to 1280 wide with ffmpeg (kept
+    /// small when ffmpeg is missing). Never a real photo, so it cannot be mistaken for a result.
+    async fn picture(&self, ctx: &Ctx, req: &SubmitReq, kind: &str) -> PResult<Output> {
+        let label = req.label.clone().unwrap_or_else(|| kind.to_string());
+        let detail = format!("{kind} · {}", req.endpoint);
+        let aspect = req.aspect.as_deref().unwrap_or("16:9");
+        let small = crate::placeholder::picture(aspect, &label, &detail, &req.prompt);
+        let raw = media::save(ctx, &small, "png", "image").await?;
+        let src = ctx.outputs_dir.join(raw.url.trim_start_matches("/outputs/"));
+        let name = format!("{}.png", media::random_hex(12));
+        let mut cmd = tokio::process::Command::new("ffmpeg");
+        cmd.args(["-y", "-v", "error", "-i"]).arg(&src).args(["-vf", "scale=iw*4:ih*4:flags=neighbor"]).arg(ctx.outputs_dir.join(&name));
+        if crate::assemble::run(&mut cmd).await.is_err() {
+            return Ok(raw);
         }
+        let _ = tokio::fs::remove_file(&src).await;
+        Ok(Output { url: format!("/outputs/{name}"), kind: "image".into() })
     }
 
-    /// A 3-second clip with a slow push-in, made from the step's own picture when it has a local one.
+    /// A 3-second clip with a slow push-in over the step's placeholder.
     async fn clip(&self, ctx: &Ctx, req: &SubmitReq) -> PResult<Output> {
-        let local = req.image_url.iter().chain(req.image_urls.iter()).find(|u| u.starts_with("/outputs/")).cloned();
-        let src = match local.as_deref().and_then(|u| u.strip_prefix("/outputs/")).filter(|n| media::valid_output_name(n)) {
-            Some(name) => ctx.outputs_dir.join(name),
-            None => {
-                let (bytes, ext) = self.picture(req, "image");
-                let out = media::save(ctx, &bytes, ext, "image").await?;
-                ctx.outputs_dir.join(out.url.trim_start_matches("/outputs/"))
-            }
-        };
+        let still = self.picture(ctx, req, "video").await?;
+        let src = ctx.outputs_dir.join(still.url.trim_start_matches("/outputs/"));
         let name = format!("{}.mp4", media::random_hex(12));
         let dest = ctx.outputs_dir.join(&name);
-        let vf = "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,\
-                  zoompan=z='min(zoom+0.0015,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=72:s=1280x720:fps=24,format=yuv420p";
+        let (w, h) = match req.aspect.as_deref() {
+            Some("9:16") => (720, 1280),
+            Some("1:1") => (960, 960),
+            _ => (1280, 720),
+        };
+        let vf = format!(
+            "scale={w}:{h}:flags=neighbor,zoompan=z='min(zoom+0.0015,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=72:s={w}x{h}:fps=24,format=yuv420p"
+        );
         let mut cmd = tokio::process::Command::new("ffmpeg");
-        cmd.args(["-y", "-v", "error", "-i"]).arg(&src).args(["-vf", vf, "-frames:v", "72", "-c:v", "libx264", "-movflags", "+faststart"]).arg(&dest);
-        crate::assemble::run(&mut cmd).await?;
+        cmd.args(["-y", "-v", "error", "-i"]).arg(&src).args(["-vf", vf.as_str(), "-frames:v", "72", "-c:v", "libx264", "-movflags", "+faststart"]).arg(&dest);
+        let made = crate::assemble::run(&mut cmd).await;
+        let _ = tokio::fs::remove_file(&src).await;
+        made?;
         Ok(Output { url: format!("/outputs/{name}"), kind: "video".into() })
     }
 }
@@ -1194,10 +1219,7 @@ impl Provider for Fake {
         let out = match kind {
             "video" => self.clip(ctx, req).await?,
             "audio" => return Err(ProviderError::Failed("Test mode has no fake voice.".into())),
-            _ => {
-                let (bytes, ext) = self.picture(req, kind);
-                media::save(ctx, &bytes, ext, "image").await?
-            }
+            _ => self.picture(ctx, req, kind).await?,
         };
         Ok(Submitted::Done(vec![out]))
     }
@@ -1219,6 +1241,7 @@ mod tests {
             image_url: None,
             image_urls: Vec::new(),
             voice_id: None,
+            label: None,
         }
     }
 
@@ -1354,11 +1377,12 @@ mod tests {
         async fn send(&self, _http: &reqwest::Client, call: ComfyCall<'_>) -> PResult<(u16, Vec<u8>, Option<String>)> {
             let (method, url, body, extra) = match call {
                 ComfyCall::Get(u) => ("GET", u.to_string(), None, None),
+                ComfyCall::Download(u) => ("DOWNLOAD", u.to_string(), None, None),
                 ComfyCall::Json { url, body, idempotency } => ("POST", url.to_string(), Some(body.clone()), Some(idempotency.to_string())),
                 ComfyCall::Upload { url, content_type, .. } => ("UPLOAD", url.to_string(), None, Some(content_type.to_string())),
             };
             self.calls.lock().unwrap().push((method.to_string(), url.clone(), body, extra));
-            let key = format!("{} {url}", if method == "UPLOAD" { "POST" } else { method });
+            let key = format!("{} {url}", match method { "UPLOAD" => "POST", "DOWNLOAD" => "GET", m => m });
             self.answers
                 .lock()
                 .unwrap()
@@ -1378,11 +1402,11 @@ mod tests {
 
     #[test]
     fn comfy_address_must_be_plain_http_or_https() {
-        for ok in ["http://127.0.0.1:8189", "http://127.0.0.1:8189/", "https://gpu.example.net", "http://100.64.1.2:8189/comfy"] {
+        for ok in ["http://127.0.0.1:8189", "http://127.0.0.1:8189/", "https://gpu.example.net", "http://100.64.1.2:8189"] {
             assert!(comfy_base(ok).is_ok(), "{ok}");
         }
         for bad in ["", "127.0.0.1:8189", "ftp://127.0.0.1", "file:///etc/passwd", "javascript:alert(1)", "http://user:pw@127.0.0.1:8189",
-                    "http://127.0.0.1:8189/?x=1", "http://127.0.0.1:8189/#a", "http://"] {
+                    "http://127.0.0.1:8189/?x=1", "http://127.0.0.1:8189/#a", "http://", "http://100.64.1.2:8189/comfy"] {
             assert!(comfy_base(bad).is_err(), "{bad}");
         }
         let base = comfy_base(BASE).unwrap();
@@ -1427,7 +1451,7 @@ mod tests {
     #[tokio::test]
     async fn comfy_runs_a_job_from_upload_to_saved_file() {
         let ctx = test_ctx("comfy_flow");
-        std::fs::write(ctx.outputs_dir.join("still.png"), TINY_PNG).unwrap();
+        std::fs::write(ctx.outputs_dir.join("still.png"), crate::placeholder::picture("1:1", "x", "x", "x")).unwrap();
         let t = FakeComfy::default();
         t.answer_json("POST", &format!("{BASE}/api/v2/assets"), 201, json!({"id": ASSET, "hash": "blake3:9f8a1c0d", "file_path": "x.png"}));
         t.answer_json("POST", &format!("{BASE}/api/v2/jobs"), 201, json!({"id": JOB, "status": "queued", "urls": {"self": format!("/api/v2/jobs/{JOB}")}}));
@@ -1461,6 +1485,26 @@ mod tests {
         assert_eq!((image["__type"].as_str(), image["info"]["id"].as_str()), (Some("core/ASSET"), Some(ASSET)));
         assert_eq!(image["info"]["hash"], "blake3:9f8a1c0d", "the hash from the upload answer goes along");
         assert!(calls.iter().all(|c| c.1.starts_with(BASE)), "every call goes to the ComfyUI address only");
+    }
+
+    #[tokio::test]
+    async fn comfy_saves_a_savevideo_file_as_video_even_when_the_proxy_calls_it_an_image() {
+        // The exact output shape comfy-api-proxy 0.1.6 answered in the live run.
+        let ctx = test_ctx("comfy_kind");
+        let t = FakeComfy::default();
+        let status = format!("{BASE}/api/v2/jobs/{JOB}");
+        let content = format!("{BASE}/api/v2/assets/{ASSET}/content");
+        t.answer_json("GET", &status, 200, json!({"id": JOB, "status": "succeeded", "outputs": [
+            {"node_id": "81", "name": "agave_00001_.mp4", "type": "image", "content_type": "video/mp4", "size_bytes": 14, "id": ASSET, "hash": null, "url": content}]}));
+        t.answer("GET", &content, 200, b"fake mp4 bytes".to_vec(), Some("video/mp4"));
+        let comfy = Comfy { transport: t };
+        let h = Handle { request_id: JOB.into(), status_url: status, result_url: None };
+        let Polled::Done(outs) = comfy.poll(&ctx, BASE, &h).await.unwrap() else { panic!("expected done") };
+        assert_eq!((outs[0].kind.as_str(), outs[0].url.ends_with(".mp4")), ("video", true));
+        assert_eq!(comfy_output_kind(&json!({"type": "image", "name": "a.webm"})), Some("video"), "the name comes before the type");
+        assert_eq!(comfy_output_kind(&json!({"type": "image"})), Some("image"));
+        assert_eq!(comfy_output_kind(&json!({"type": "latent"})), None);
+        assert_eq!(comfy.transport.calls.lock().unwrap()[1].0, "DOWNLOAD", "files are read under the media cap, answers under the JSON cap");
     }
 
     #[tokio::test]

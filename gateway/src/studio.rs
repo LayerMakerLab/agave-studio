@@ -133,6 +133,9 @@ struct StudioFile {
     project: Project,
     #[serde(default)]
     edit: EditDoc,
+    /// Goes up by one on every timeline save, so a page holding an older copy cannot write over newer clips.
+    #[serde(default)]
+    edit_rev: u64,
 }
 
 #[derive(Clone)]
@@ -145,6 +148,8 @@ pub struct Studio {
 pub enum StudioError {
     Full,
     Io,
+    /// The timeline changed since the caller read it (its rev is old).
+    Stale,
 }
 
 /// A tag: 1 to 32 of a-z, 0-9, _ and -, starting with a letter or digit.
@@ -213,10 +218,33 @@ impl Studio {
         self.lock().edit.clone()
     }
 
-    pub fn set_edit(&self, e: EditDoc) -> Result<(), StudioError> {
+    /// The saved timeline and its revision.
+    pub fn edit_rev(&self) -> (EditDoc, u64) {
+        let f = self.lock();
+        (f.edit.clone(), f.edit_rev)
+    }
+
+    /// Saves the timeline and returns its new revision. With `expect`, only when the saved one is still at that
+    /// revision (else Stale); without it, always, as before revisions existed.
+    pub fn set_edit_checked(&self, e: EditDoc, expect: Option<u64>) -> Result<u64, StudioError> {
         let mut f = self.lock();
+        if expect.is_some_and(|r| r != f.edit_rev) {
+            return Err(StudioError::Stale);
+        }
+        let before = (f.edit.clone(), f.edit_rev);
         f.edit = e;
-        self.save(&f)
+        f.edit_rev += 1;
+        match self.save(&f) {
+            Ok(()) => Ok(f.edit_rev),
+            Err(err) => {
+                (f.edit, f.edit_rev) = before;
+                Err(err)
+            }
+        }
+    }
+
+    pub fn set_edit(&self, e: EditDoc) -> Result<(), StudioError> {
+        self.set_edit_checked(e, None).map(|_| ())
     }
 
     /// Replaces each @tag of a saved element with its name and returns the element images in the
