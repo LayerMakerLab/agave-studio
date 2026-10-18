@@ -192,11 +192,11 @@ pub const PIPELINES: &[Pipeline] = &[
     Pipeline {
         id: "ltx-short-on-comfy",
         title: "Short film on your ComfyUI: photo, Element, two LTX-Video shots, edit",
-        blurb: "Runs free on your own ComfyUI with the open-weights LTX-Video model. Your photo is saved as an Element, LTX-Video turns it into a shot, the shot's last frame starts the second shot, and both land on the Edit timeline.",
+        blurb: "Runs free on your own ComfyUI with the open-weights LTX-Video model. Your photo is saved as an Element, LTX-Video brings it to life with small natural motion, the shot's last frame starts the second shot, and both land on the Edit timeline.",
         note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and ltx-video-2b-v0.9.5 with the t5xxl_fp16 text encoder installed there. Nothing is billed: it runs on your GPU.",
         needs_image: true,
-        image_hint: "A photo of the character or object, ideally 3:2 landscape.",
-        subject_hint: "a young woman with short dark hair in a yellow raincoat",
+        image_hint: "A photo of a person, place or object, ideally 3:2 landscape. The shots keep its scene and light.",
+        subject_hint: "a white lighthouse on a rocky coast",
         tag: "lead",
         element_kind: "character",
         steps: &[
@@ -206,7 +206,7 @@ pub const PIPELINES: &[Pipeline] = &[
                     "Shot 1",
                     "comfy/ltxv-i2v",
                     "i2v",
-                    "@{tag} walks slowly along a rainy city street at dusk, neon signs reflecting in the puddles, the camera tracking alongside at walking pace. Raindrops catch the light and the clothes move with each step. 35mm film look, soft haze, real-life footage.",
+                    "@{tag}, subtle natural motion, a slow push-in. The same scene, framing and lighting as the picture, nothing new enters the frame. Real-life footage, steady exposure.",
                     From::Start,
                 ),
                 Some("16:9"),
@@ -220,7 +220,7 @@ pub const PIPELINES: &[Pipeline] = &[
                     "Shot 2",
                     "comfy/ltxv-i2v",
                     "i2v",
-                    "{subject} stops under a flickering neon sign and looks up as the rain eases, the light catching the face. Shallow depth of field, slow push-in, soft haze, real-life footage.",
+                    "{subject}, the same gentle motion continues, a slow pan to the right. The same scene and lighting as before, nothing new enters the frame. Real-life footage, steady exposure.",
                     From::Step(2),
                 ),
                 Some("16:9"),
@@ -235,6 +235,35 @@ pub const PIPELINES: &[Pipeline] = &[
 
 pub fn find(id: &str) -> Option<&'static Pipeline> {
     PIPELINES.iter().find(|p| p.id == id)
+}
+
+/// A short fingerprint of a pipeline's steps: each step's kind, model and where it takes its input from.
+pub fn shape(p: &Pipeline) -> String {
+    use sha2::Digest as _;
+    let desc: Vec<String> = p
+        .steps
+        .iter()
+        .map(|s| match &s.kind {
+            Kind::Generate { model, mode, from, .. } => {
+                let src = match from {
+                    From::Nothing => "-".to_string(),
+                    From::Start => "start".to_string(),
+                    From::Step(j) => j.to_string(),
+                };
+                format!("gen:{model}:{mode}:{src}")
+            }
+            Kind::LastFrame { from } => format!("frame:{from}"),
+            Kind::Element { from } => format!("element:{from:?}"),
+            Kind::Edit { from } => format!("edit:{from:?}"),
+        })
+        .collect();
+    let hash = sha2::Sha256::digest(desc.join("|").as_bytes());
+    hash.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The run still matches its pipeline's steps.
+fn same_shape(p: &Pipeline, run: &Run) -> bool {
+    p.steps.len() == run.steps.len() && (run.shape.is_empty() || run.shape == shape(p))
 }
 
 /// A step on your own ComfyUI costs nothing. Every other provider bills the user's own account.
@@ -314,6 +343,18 @@ fn total_json(st: &AppState, p: &Pipeline) -> Value {
     json!({"cents": cents, "credits": credits, "unpriced": unpriced, "local_steps": local, "paid_steps": p.steps.iter().filter(|s| is_paid(st, s)).count()})
 }
 
+/// What a free step does, in words that name the steps it works on ("Takes the last frame of Shot 1").
+fn step_detail(p: &Pipeline, s: &Step) -> Option<String> {
+    let name = |j: usize| p.steps.get(j).map(|s| s.title).unwrap_or("the step before");
+    match &s.kind {
+        Kind::Generate { .. } => None,
+        Kind::Element { from: None } => Some("Saves your photo as the run's Element".into()),
+        Kind::Element { from: Some(j) } => Some(format!("Saves the {} as the run's Element", name(*j).to_lowercase())),
+        Kind::LastFrame { from } => Some(format!("Takes the last frame of {}", name(*from))),
+        Kind::Edit { from } => Some(format!("Puts {} on the Edit timeline", from.iter().map(|&j| name(j)).collect::<Vec<_>>().join(" and "))),
+    }
+}
+
 fn steps_json(st: &AppState, p: &Pipeline) -> Vec<Value> {
     p.steps
         .iter()
@@ -326,7 +367,7 @@ fn steps_json(st: &AppState, p: &Pipeline) -> Vec<Value> {
                 _ => (None, None, None),
             };
             json!({"title": s.title, "kind": kind_name(s), "paid": is_paid(st, s), "model": model, "model_name": model_name,
-                   "vendor": vendor, "price": price_json(&step_price(st, s))})
+                   "vendor": vendor, "price": price_json(&step_price(st, s)), "detail": step_detail(p, s)})
         })
         .collect()
 }
@@ -394,6 +435,10 @@ pub struct Run {
     pub steps: Vec<StepRun>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub element: Option<ElementMark>,
+    /// The pipeline's steps when the run was made (`shape`), so a run whose pipeline has changed since is never
+    /// resumed against different steps. Empty on runs saved before it existed (then only the step count is compared).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shape: String,
 }
 
 impl Run {
@@ -441,17 +486,18 @@ impl PipelineStore {
     /// still works until the next restart.
     fn put(&self, run: Run) {
         let mut runs = self.lock();
+        let inserted = run.id.clone();
         match runs.iter_mut().find(|r| r.id == run.id) {
             Some(r) => *r = run,
             None => runs.push(run),
         }
-        // Over the cap, finished runs go first (oldest first), then the others (oldest first). A run with a job in
-        // flight is never dropped.
+        // Over the cap, finished runs go first (oldest first), then the others (oldest first). The run being stored
+        // and runs with a job in flight are never dropped; if nothing else can go, the list stays over the cap.
         while runs.len() > MAX_RUNS {
             let oldest = runs
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| !r.busy())
+                .filter(|(_, r)| !r.busy() && r.id != inserted)
                 .min_by_key(|(_, r)| (r.status != "done", r.created_at))
                 .map(|(i, _)| i);
             match oldest {
@@ -513,7 +559,7 @@ const OLD_RUN: &str = "This run was made by an older version of this pipeline, s
 /// Moves a run forward as far as it can go without spending money: picks up finished jobs, runs free steps,
 /// and stops at a paid step (waiting for a click), a running job, a failure or the end.
 async fn advance(st: &AppState, run: &mut Run) {
-    let Some(p) = find(&run.pipeline).filter(|p| p.steps.len() == run.steps.len()) else {
+    let Some(p) = find(&run.pipeline).filter(|p| same_shape(p, run)) else {
         // A run saved by an older version of its pipeline (or of one that is gone) cannot be resumed safely.
         if run.status != "done" && run.status != "failed" {
             let i = run.current.min(run.steps.len().saturating_sub(1));
@@ -575,51 +621,45 @@ async fn advance(st: &AppState, run: &mut Run) {
 /// The step's result, and a note for the user when it only partly went as asked.
 type Free = Result<(Vec<Output>, Option<String>), String>;
 
-/// Saves the run's Element, unless the tag now belongs to an Element this run did not make.
+/// Saves the run's Element, unless the tag now belongs to an Element this run did not make. The owner check and
+/// the write happen under one studio lock, so a POST /api/elements cannot land in between.
 fn save_element(st: &AppState, p: &Pipeline, run: &mut Run, img: String) -> Free {
-    let existing = st.studio.elements().into_iter().find(|e| e.tag == run.tag);
-    let ours = match (&existing, &run.element) {
-        (Some(e), Some(m)) => e.created_at == m.created_at && e.images == [m.image.clone()],
-        _ => false,
-    };
-    if existing.is_some() && !ours {
-        return Err(format!(
-            "@{} is already an Element this run did not make, so it was left as it is. Delete or rename that Element in Elements, then press Run again.",
-            run.tag
-        ));
-    }
     let e = Element { tag: run.tag.clone(), name: run.subject.clone(), kind: p.element_kind.into(), images: vec![img.clone()], created_at: now_unix() };
     let mark = ElementMark { created_at: e.created_at, image: img.clone() };
-    match st.studio.put_element(e) {
-        Ok(()) => {
+    let mine = run.element.clone();
+    let ours = |existing: Option<&Element>| match (existing, &mine) {
+        (None, _) => true,
+        (Some(x), Some(m)) => x.created_at == m.created_at && x.images == [m.image.clone()],
+        (Some(_), None) => false,
+    };
+    match st.studio.put_element_if(e, ours) {
+        Ok(true) => {
             run.element = Some(mark);
             Ok((vec![Output { url: img, kind: "image".into() }], None))
         }
+        Ok(false) => Err(format!(
+            "@{} is already an Element this run did not make, so it was left as it is. Delete or rename that Element in Elements, then press Run again.",
+            run.tag
+        )),
         Err(StudioError::Full) => Err("The studio already holds 200 Elements. Delete one, then press Run again.".into()),
         Err(_) => Err("The Element could not be saved.".into()),
     }
 }
 
-/// Puts the listed steps' clips on the Edit timeline, as many as fit.
+/// Puts the listed steps' clips on the Edit timeline, as many as fit (read and write under one studio lock).
 fn add_to_edit(st: &AppState, run: &Run, from: &[usize]) -> Free {
-    let mut doc = st.studio.edit();
     let wanted: Vec<Output> = from.iter().filter_map(|&j| first_output(run, j, &["video", "image"])).collect();
-    let room = crate::assemble::MAX_CLIPS.saturating_sub(doc.clips.len());
-    let added: Vec<Output> = wanted.iter().take(room).cloned().collect();
     if wanted.is_empty() {
         return Err("There was nothing to add to the edit.".into());
     }
-    if added.is_empty() {
-        return Err(format!("The Edit timeline is full ({} clips). Remove some, then press Run again.", crate::assemble::MAX_CLIPS));
+    let clips = wanted.iter().map(|o| EditClip { url: o.url.clone(), kind: o.kind.clone(), from: 0.0, to: None, len: None, caption: String::new() }).collect();
+    let max = crate::assemble::MAX_CLIPS;
+    let (n, _rev) = st.studio.append_edit_clips(clips, max).map_err(|_| "The Edit timeline could not be saved.".to_string())?;
+    if n == 0 {
+        return Err(format!("The Edit timeline is full ({max} clips). Remove some, then press Run again."));
     }
-    for out in &added {
-        doc.clips.push(EditClip { url: out.url.clone(), kind: out.kind.clone(), from: 0.0, to: None, len: None, caption: String::new() });
-    }
-    st.studio.set_edit(doc).map_err(|_| "The Edit timeline could not be saved.".to_string())?;
-    let note = (added.len() < wanted.len()).then(|| {
-        format!("Added {} of {} clips: the timeline holds {}.", added.len(), wanted.len(), crate::assemble::MAX_CLIPS)
-    });
-    Ok((added, note))
+    let note = (n < wanted.len()).then(|| format!("Added {n} of {} clips: the timeline holds {max}.", wanted.len()));
+    Ok((wanted.into_iter().take(n).collect(), note))
 }
 
 /// Runs one free step now (Save as Element and Add to edit are instant file writes).
@@ -761,7 +801,7 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
 /// The user's click on step `i`: sends a paid step, or runs a failed step again (keeping the steps before it).
 async fn click(st: &AppState, run: &mut Run, i: usize) -> Result<(), &'static str> {
     let Some(p) = find(&run.pipeline) else { return Err("unknown_pipeline") };
-    if p.steps.len() != run.steps.len() {
+    if !same_shape(p, run) {
         return Err("pipeline_changed");
     }
     let ready = i == run.current && i < run.steps.len() && matches!(run.steps[i].status.as_str(), "waiting" | "failed");
@@ -879,6 +919,7 @@ pub async fn create(State(st): State<AppState>, body: Result<Json<CreateReq>, Js
         current: 0,
         steps: p.steps.iter().map(|_| StepRun { status: "pending".into(), ..Default::default() }).collect(),
         element: None,
+        shape: shape(p),
     };
     advance(&st, &mut run).await;
     st.pipelines.put(run.clone());
@@ -1165,7 +1206,8 @@ mod tests {
         let seen = fake(&st).seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
         assert_eq!(seen[0].image_url.as_deref(), Some(img.as_str()), "shot 1 starts from the photo (the Element's picture)");
-        assert!(seen[0].prompt.starts_with("a blue ceramic bowl walks"), "@lead became the Element's words: {}", seen[0].prompt);
+        assert!(seen[0].prompt.starts_with("a blue ceramic bowl, subtle natural motion"), "@lead became the Element's words: {}", seen[0].prompt);
+        assert!(!seen[0].prompt.contains("walk") && !seen[1].prompt.contains("face"), "the shots work for any subject");
         assert_eq!(seen[0].label.as_deref(), Some("Step 2 · Shot 1"));
         assert_eq!(seen[1].image_url.as_deref(), Some(out(&run, 2).as_str()), "shot 2 starts from shot 1's last frame");
         assert!(out(&run, 2).ends_with(".png"));
@@ -1247,6 +1289,7 @@ mod tests {
             current: 2,
             steps: vec![StepRun { status: "done".into(), ..Default::default() }, StepRun { status: "done".into(), ..Default::default() }, StepRun { status: "waiting".into(), ..Default::default() }],
             element: None,
+            shape: String::new(),
         };
         st.pipelines.put(old);
         let (status, v) = click(&st, "p_00112233aabbccdd", 2).await;
@@ -1270,6 +1313,7 @@ mod tests {
             current: 0,
             steps: vec![StepRun { status: step.into(), ..Default::default() }],
             element: None,
+            shape: String::new(),
         };
         st.pipelines.put(run(1, "running", "running")); // oldest, but its job is in flight
         st.pipelines.put(run(2, "failed", "failed"));
@@ -1295,6 +1339,45 @@ mod tests {
         assert!(st.pipelines.get(&format!("p_{:016x}", 1)).is_some(), "a run with a job in flight is never dropped");
         assert!(st.pipelines.get(&format!("p_{:016x}", 2)).is_none());
         assert_eq!(st.pipelines.list().len(), MAX_RUNS);
+
+        // When every other run is busy, the run just stored is kept and the list goes over the cap.
+        let busy = AppState::for_tests("pipe_cap_busy");
+        for n in 0..MAX_RUNS as u64 {
+            busy.pipelines.put(run(n, "running", "running"));
+        }
+        busy.pipelines.put(run(999, "waiting", "waiting"));
+        assert!(busy.pipelines.get(&format!("p_{:016x}", 999)).is_some(), "a new run is never dropped as it is stored");
+        assert_eq!(busy.pipelines.list().len(), MAX_RUNS + 1);
+    }
+
+    #[tokio::test]
+    async fn a_run_whose_pipeline_steps_changed_is_not_resumed() {
+        let st = fake_state(crate::fsutil::test_dir("pipe_shape"), 0);
+        let p = find("product-to-3d").unwrap();
+        assert_eq!(shape(p).len(), 16);
+        assert_ne!(shape(p), shape(find("character-to-edit").unwrap()));
+        // Same number of steps, but made against different steps: refused, not run.
+        let changed = Run {
+            id: "p_aabbccddeeff0011".into(),
+            pipeline: p.id.into(),
+            created_at: 1,
+            subject: "x".into(),
+            image: None,
+            tag: "shape".into(),
+            status: "waiting".into(),
+            current: 0,
+            steps: p.steps.iter().map(|_| StepRun { status: "pending".into(), ..Default::default() }).collect(),
+            element: None,
+            shape: "0123456789abcdef".into(),
+        };
+        st.pipelines.put(changed);
+        let (status, v) = click(&st, "p_aabbccddeeff0011", 0).await;
+        assert_eq!((status, v["error"].as_str(), v["run"]["status"].as_str()), (StatusCode::CONFLICT, Some("pipeline_changed"), Some("failed")));
+        assert!(fake(&st).seen.lock().unwrap().is_empty());
+        // A run made now carries the current fingerprint.
+        let img = start_image(&st);
+        let id = create(&st, "product-to-3d", Some(img)).await["id"].as_str().unwrap().to_string();
+        assert_eq!(st.pipelines.get(&id).unwrap().shape, shape(p));
     }
 
     #[tokio::test]

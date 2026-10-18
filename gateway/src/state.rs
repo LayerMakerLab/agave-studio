@@ -72,7 +72,7 @@ impl AppState {
             let keys = KeyStore::empty(paths.keys_file.clone());
             let fail = std::env::var("AGAVE_FAKE_FAIL").unwrap_or_default();
             let mut st = Self::build(paths, keys)?;
-            st.fake = Some(Arc::new(Fake::new(Duration::from_millis(1500), &fail)));
+            st.fake = Some(Arc::new(Fake::new(Duration::from_millis(3500), &fail)));
             return Ok(st);
         }
         let keys = KeyStore::load(paths.keys_file.clone());
