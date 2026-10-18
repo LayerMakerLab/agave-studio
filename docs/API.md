@@ -89,9 +89,9 @@ Never return a key value from any endpoint. Never log a key.
 - GET /api/edit -> {"edit":EditDoc,"rev":n}; POST /api/edit EditDoc (+ optional "rev") -> {"edit":EditDoc,"rev":n}.
   `rev` goes up by one on every save (the page's own saves and a pipeline's Add to edit). A POST that carries the rev
   it last read is refused with 409 {"error":"edit_changed","edit":<the saved timeline>,"rev":n} when the timeline has
-  changed since, so a page holding an older copy cannot erase newer clips; the studio then loads the newer timeline and
-  says so. A POST without rev saves as before. The saved timeline (data/studio.json),
-  so an edit survives a reload or restart. EditDoc {clips:[{url,kind:"video"|"image",from,to,len,caption}],
+  changed since, so a page holding an older copy cannot erase newer clips. The studio then rebases: it keeps every
+  local change, appends the clips that are new in the saved timeline, says so, and saves again with the new rev. A
+  POST without rev saves as before. The timeline is saved in data/studio.json, so an edit survives a reload or restart. EditDoc {clips:[{url,kind:"video"|"image",from,to,len,caption}],
   frame:"original"|"16:9"|"9:16"|"1:1"|"4:5", fill, keep_sound, song_url, song_name,
   auto_captions:"off"|"simple"|"pop", word_fixes:[{from (one word), to ("" hides it)}] (up to 50), follow,
   clean_voice, loudness}. Export buttons: "For YouTube" = 16:9 Fit + loudness; "For Shorts, TikTok, Reels" = 9:16

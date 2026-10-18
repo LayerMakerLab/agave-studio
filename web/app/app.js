@@ -81,7 +81,8 @@
     undoAfter: '', // timeline right after it
     song: null, // { url, name } replacement soundtrack
     retried: new Set(), // failed job ids already run again this session
-    editRev: null, // revision of the engine's saved timeline this page last read or wrote
+    editRev: null, // revision of the engine's saved timeline the local copy is based on
+    editBase: new Set(), // clip urls of that saved timeline
   };
 
   const cards = new Map(); // job id -> { el, sig, fill }
@@ -1251,32 +1252,80 @@
     };
   }
 
+  // Timeline sync. The local copy is based on the saved timeline `state.editRev` (clip urls in `state.editBase`).
+  // Changes go out 400 ms after the last one; only one save is in flight at a time, and changes made meanwhile go
+  // out when it returns. When something else saved first (a pipeline's Add to edit, another tab), the engine
+  // answers 409 and the local copy is rebased on the newer timeline: every local change is kept, and clips newly
+  // added there are appended. Nothing ever drops a user's edit.
   let saveTimer = null;
+  let saving = false; // a POST is in flight
+  let dirty = false; // local changes not yet sent
+  const clipUrls = (clips) => new Set((clips || []).map((c) => c && c.url));
+  const editPending = () => saveTimer !== null || saving || dirty;
+
   function saveEdit() {
     // Undo only covers Remove pauses until the timeline changes again.
     if (state.undo && JSON.stringify(state.edit) !== state.undoAfter) { state.undo = null; els.undoBtn.hidden = true; }
-    const doc = editDoc();
-    // The rev is taken together with the doc: it says which saved timeline this copy was made from. The engine
-    // refuses it when something else (a pipeline's Add to edit, another tab) saved in between.
-    const rev = state.editRev;
-    try { localStorage.setItem('agave.edit', JSON.stringify(doc)); } catch (_) { /* private mode */ }
+    dirty = true;
+    try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      saveTimer = null;
-      const body = rev === null ? doc : { ...doc, rev };
-      let r = null;
-      try { r = await call('/api/edit', { method: 'POST', body }); } catch (_) { return; }
-      if (r.ok && r.data && typeof r.data.rev === 'number') state.editRev = r.data.rev;
-      else if (r.status === 409 && r.data && r.data.error === 'edit_changed') {
-        state.editRev = r.data.rev;
-        applyEditDoc(r.data.edit);
-        try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
-        renderSong();
-        renderEditor();
-        measureAll();
-        els.editNote.textContent = 'The timeline changed elsewhere (a pipeline added clips), so the newer one is loaded. Make your last change again.';
-      }
-    }, 400);
+    saveTimer = setTimeout(() => { saveTimer = null; flushEdit(); }, 400);
+  }
+
+  async function flushEdit() {
+    if (saving) return; // the save in flight sends the rest when it returns
+    // The doc and the rev it is based on are taken together, at send time.
+    const doc = editDoc();
+    const rev = state.editRev;
+    dirty = false;
+    saving = true;
+    let r = null;
+    try { r = await call('/api/edit', { method: 'POST', body: rev === null ? doc : { ...doc, rev } }); } catch (_) { r = null; }
+    saving = false;
+    if (r && r.ok && r.data && typeof r.data.rev === 'number') {
+      state.editRev = r.data.rev;
+      state.editBase = clipUrls(doc.clips);
+    } else if (r && r.status === 409 && r.data && r.data.error === 'edit_changed' && r.data.edit) {
+      rebaseEdit(r.data.edit, r.data.rev);
+      dirty = true;
+    } else {
+      // Offline or refused: the change stays local and goes out with the next one.
+      dirty = true;
+      return;
+    }
+    if (dirty && saveTimer === null) flushEdit();
+  }
+
+  // Keeps the current local timeline (clips, trims, captions, settings) and appends the clips the newer saved
+  // timeline has that are new there: in neither the old base nor the local copy. A clip removed here stays removed.
+  function rebaseEdit(saved, rev) {
+    const local = clipUrls(state.edit);
+    const added = (Array.isArray(saved.clips) ? saved.clips : [])
+      .filter((c) => c && !state.editBase.has(c.url) && !local.has(c.url))
+      .map(normClip).filter(Boolean)
+      .slice(0, Math.max(0, MAX_EDIT_CLIPS - state.edit.length));
+    state.editRev = typeof rev === 'number' ? rev : state.editRev;
+    state.editBase = clipUrls(saved.clips);
+    if (!added.length) return;
+    state.edit.push(...added);
+    if (state.editSel < 0) state.editSel = 0;
+    try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
+    keepCaret(() => { renderEditor(); measureAll(); });
+    const n = added.length;
+    els.editNote.textContent = `${n} clip${n === 1 ? ' was' : 's were'} added elsewhere (a pipeline or another tab), so ${n === 1 ? 'it is' : 'they are'} now at the end of the timeline.`;
+  }
+
+  // Re-renders without taking focus and the caret out of the caption being typed.
+  function keepCaret(render) {
+    const a = document.activeElement;
+    const label = a && a.tagName === 'INPUT' && els.inspector.contains(a) ? a.getAttribute('aria-label') : null;
+    const sel = label ? [a.selectionStart, a.selectionEnd] : null;
+    render();
+    if (!label) return;
+    const again = [...els.inspector.querySelectorAll('input')].find((x) => x.getAttribute('aria-label') === label);
+    if (!again) return;
+    again.focus({ preventScroll: true });
+    try { again.setSelectionRange(sel[0], sel[1]); } catch (_) { /* number inputs have no caret */ }
   }
 
   function applyEditDoc(v) {
@@ -1309,18 +1358,26 @@
       const r = await call('/api/edit');
       if (r.ok && r.data && r.data.edit) {
         const rev = typeof r.data.rev === 'number' ? r.data.rev : null;
-        // First read: an older local copy wins over an empty saved one. Later: a newer saved timeline always wins.
-        const take = state.editRev === null ? (r.data.edit.clips.length || !state.edit.length) : rev !== state.editRev;
-        if (take) {
-          // A save still waiting to go out was made from the older timeline: drop it.
-          if (state.editRev !== null) { clearTimeout(saveTimer); saveTimer = null; }
+        const first = state.editRev === null;
+        if (first && editPending()) {
+          // Changed here before the first read came back: keep the change and add the saved clips to it.
+          rebaseEdit(r.data.edit, rev);
+        } else if (first) {
+          // First read: an older local copy wins over an empty saved one.
+          if (r.data.edit.clips.length || !state.edit.length) applyEditDoc(r.data.edit);
+          state.editRev = rev;
+          state.editBase = clipUrls(r.data.edit.clips);
+        } else if (rev !== state.editRev && !editPending()) {
+          // A newer saved timeline and nothing local waiting: take it. When a local change is on its way, leave the
+          // copy and the rev alone; that save gets a 409 and rebases onto the newer timeline.
           applyEditDoc(r.data.edit);
+          state.editRev = rev;
+          state.editBase = clipUrls(r.data.edit.clips);
         }
-        state.editRev = rev;
       }
     } catch (_) { /* offline: keep the local copy */ }
     renderSong();
-    renderEditor();
+    keepCaret(renderEditor);
     measureAll();
     if (state.autoCaps !== 'off') loadTranscripts().then(showAutoCap);
     loadFollow();
