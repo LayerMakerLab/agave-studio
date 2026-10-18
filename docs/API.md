@@ -154,18 +154,23 @@ An output counts as video or image by its content type, then its file name, then
 SaveVideo mp4 as type "image"). Job answers are read under the 64 MB JSON cap, files under the download cap.
 An output with an odd name (a "..", a leading slash, characters other than letters, digits and ._-/) or content type is
 left out. comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6,
-ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and has not run live yet.
+ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and ran live on 2026-10-18 through
+both clients.
 
 Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
 - `builtin` (default): the gateway's own Rust client, making the HTTP calls above.
 - `sdk`: the official Comfy SDK. The gateway runs `uv run --quiet --script tools/comfy-sdk/agave_comfy.py` (PEP 723,
-  pinned to comfy-sdk 0.5.0) with an argument array, a cleared environment (PATH, HOME, COMFY_BASE_URL; no key),
-  stdin closed, a timeout (submit 300 s, status 60 s, fetch 600 s) and a 1 MB cap on what it prints. Commands:
-  `submit --workflow <file> [--image-node <id> --image <file>]` -> {"job_id"}, `status <job_id>` ->
-  {"status","outputs":[{name,content_type,node_id,type}],"error"}, `fetch <job_id> --name <name> --out <file>
-  --max-bytes <n>`. The SDK uploads the picture (assets.from_file, Workflow.set_input), submits (Comfy.submit), reads
+  pinned to comfy-sdk 0.5.0) with an argument array in its own process group, a cleared environment (PATH, HOME,
+  COMFY_BASE_URL; no key), stdin closed, a timeout (submit 300 s, status 60 s, fetch 600 s; then the whole group gets
+  SIGTERM and, 1.5 s later, SIGKILL, so the Python child uv starts cannot keep running) and a 1 MB cap on what it
+  prints. Commands:
+  `submit --workflow=<file> [--image-node=<id> --image=<file>]` -> {"job_id"}, `status -- <job_id>` ->
+  {"status","outputs":[{name,content_type,node_id,type}],"error"}, `fetch --name=<name> --out=<file>
+  --max-bytes=<n> -- <job_id>` (options as --flag=value and `--` before the job id, so no value is read as an option).
+  The sidecar's httpx client follows no redirects, treats a 3xx as an error and refuses any request off
+  COMFY_BASE_URL's origin (`selftest` checks this against a mock transport, offline). The SDK uploads the picture (assets.from_file, Workflow.set_input), submits (Comfy.submit), reads
   the job (jobs.get) and downloads the output (Output.to_stream). The gateway picks every file path (under
-  data/comfy-sdk, removed after each call) and checks the answers like the proxy's: a UUID-shaped job id, a known
+  data/comfy-sdk, removed after each call) and checks the answers like the proxy's: a UUID job id (8-4-4-4-12 hex), a known
   status, safe output names and content types. Both clients share the same submit, poll, output classification
   and caps. Without uv the job fails with a message naming COMFY_CLIENT.
 

@@ -11,7 +11,7 @@
 - `COMFY_CLIENT=sdk` runs ComfyUI jobs through the official Comfy SDK (comfy-sdk 0.5.0, `tools/comfy-sdk/agave_comfy.py`,
   started with uv); `builtin`, the studio's own client, stays the default. Both share the same checks and caps.
 - LTX-Video 2B 0.9.8 distilled on your own ComfyUI (stock nodes, first frame kept); the ComfyUI short film pipeline
-  uses it. Not run live yet.
+  uses it. Ran live through both clients.
 - Test mode (`AGAVE_FAKE_PROVIDERS=1`): every model is a local fake that makes TEST OUTPUT placeholders, for trying
   the studio without keys.
 - The Edit timeline has a revision: a page holding an older copy can no longer save over newer clips.
