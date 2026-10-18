@@ -60,6 +60,49 @@ pub struct SdkTransport {
     uploads: Mutex<HashMap<String, PathBuf>>,
 }
 
+/// The sidecar's process group. Stopped with SIGTERM, then SIGKILL after a short grace, on a timeout and when the
+/// call is dropped (a cancelled request); a group that finished normally is swept with SIGKILL.
+struct Group(Option<i32>);
+
+const GRACE: Duration = Duration::from_millis(1500);
+
+fn signal_group(pgid: i32, sig: i32) {
+    // SAFETY: kill(2) with a negative pid signals that process group; it touches no memory of ours.
+    unsafe {
+        libc::kill(-pgid, sig);
+    }
+}
+
+impl Group {
+    async fn stop(&mut self, child: &mut tokio::process::Child) {
+        if let Some(pgid) = self.0.take() {
+            signal_group(pgid, libc::SIGTERM);
+            let _ = tokio::time::timeout(GRACE, child.wait()).await;
+            signal_group(pgid, libc::SIGKILL);
+        }
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+
+    fn finish(&mut self) {
+        if let Some(pgid) = self.0.take() {
+            signal_group(pgid, libc::SIGKILL);
+        }
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        if let Some(pgid) = self.0.take() {
+            signal_group(pgid, libc::SIGTERM);
+            std::thread::spawn(move || {
+                std::thread::sleep(GRACE);
+                signal_group(pgid, libc::SIGKILL);
+            });
+        }
+    }
+}
+
 fn failed(msg: impl Into<String>) -> ProviderError {
     ProviderError::Failed(msg.into())
 }
@@ -133,6 +176,9 @@ impl SdkTransport {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            // Its own process group: `uv run` starts Python as a child of its own, and killing uv alone would leave
+            // that running (a timed-out submit could still post the job). The whole group is stopped instead.
+            .process_group(0)
             .kill_on_drop(true);
         if let Some(h) = &self.home {
             cmd.env("HOME", h);
@@ -144,6 +190,7 @@ impl SdkTransport {
                 failed(format!("could not start the Comfy SDK client: {e}"))
             }
         })?;
+        let mut group = Group(child.id().and_then(|p| i32::try_from(p).ok()));
         let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
             return Err(failed("could not read the Comfy SDK client"));
         };
@@ -165,10 +212,11 @@ impl SdkTransport {
         };
         let done = tokio::time::timeout(timeout, work).await;
         let Ok((stdout, stderr, status)) = done else {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
+            group.stop(&mut child).await;
             return Err(failed(format!("the Comfy SDK client took longer than {} s and was stopped", timeout.as_secs())));
         };
+        // Finished: anything it left running in its group goes too.
+        group.finish();
         if stdout.len() > max {
             return Err(failed("the Comfy SDK client printed more than the studio accepts"));
         }
@@ -206,9 +254,10 @@ impl SdkTransport {
         }
         let wf_file = self.file("wf", "json");
         fsutil::write_private(&wf_file, &serde_json::to_vec(wf).unwrap_or_default()).map_err(|_| failed("could not write the workflow"))?;
-        let mut args: Vec<OsString> = vec!["submit".into(), "--workflow".into(), wf_file.clone().into()];
+        // Options as --name=value, so no value can be read as another option.
+        let mut args: Vec<OsString> = vec!["submit".into(), opt("--workflow", &wf_file)];
         if let Some((node, file)) = &image {
-            args.extend(["--image-node".into(), node.into(), "--image".into(), file.clone().into()]);
+            args.extend([opt("--image-node", Path::new(node)), opt("--image", file)]);
         }
         let res = self.run(origin, args, self.submit_timeout).await;
         let _ = std::fs::remove_file(&wf_file);
@@ -221,7 +270,7 @@ impl SdkTransport {
     }
 
     async fn status(&self, origin: &str, id: &str) -> PResult<Value> {
-        let v = self.run(origin, vec!["status".into(), id.into()], self.status_timeout).await?;
+        let v = self.run(origin, vec!["status".into(), "--".into(), id.into()], self.status_timeout).await?;
         let status = v.get("status").and_then(Value::as_str).filter(|s| STATUSES.contains(s)).ok_or_else(|| failed("the Comfy SDK client returned an unknown job status"))?;
         let raw = v.get("outputs").and_then(Value::as_array).cloned().unwrap_or_default();
         if raw.len() > 64 {
@@ -256,13 +305,11 @@ impl SdkTransport {
         let dest = self.file("dl", "bin");
         let args: Vec<OsString> = vec![
             "fetch".into(),
+            opt("--name", Path::new(name)),
+            opt("--out", &dest),
+            format!("--max-bytes={}", self.max_download).into(),
+            "--".into(),
             id.into(),
-            "--name".into(),
-            name.into(),
-            "--out".into(),
-            dest.clone().into(),
-            "--max-bytes".into(),
-            self.max_download.to_string().into(),
         ];
         let res = self.run(origin, args, self.fetch_timeout).await;
         let bytes = res.and_then(|_| {
@@ -275,6 +322,13 @@ impl SdkTransport {
         let _ = std::fs::remove_file(&dest);
         bytes
     }
+}
+
+/// `--flag=value` as one argument (a path or name that starts with "-" stays a value).
+fn opt(flag: &str, value: &Path) -> OsString {
+    let mut s = OsString::from(format!("{flag}="));
+    s.push(value.as_os_str());
+    s
 }
 
 /// The ComfyUI origin a call goes to (already checked by comfy_base/on_base) and the parsed URL.
@@ -306,7 +360,8 @@ impl ComfyTransport for SdkTransport {
                 let ext = file_path.rsplit('.').next().unwrap_or("png");
                 let file = self.file("up", ext);
                 fsutil::write_private(&file, &bytes).map_err(|_| failed("could not write the picture"))?;
-                let id = format!("agave-local-{}", media::random_hex(8));
+                // A UUID like the proxy's asset ids, so it passes the same check; it never leaves the studio.
+                let id = crate::providers::uuid_key();
                 self.uploads.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), file);
                 Ok((201, json!({"id": id}).to_string().into_bytes(), Some("application/json".into())))
             }

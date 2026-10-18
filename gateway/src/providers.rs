@@ -890,9 +890,11 @@ fn base_url(key: &str) -> PResult<reqwest::Url> {
     comfy_base(key).map_err(|_| ProviderError::Failed("COMFY_BASE_URL is not a usable http(s) address. Fix it in Settings.".into()))
 }
 
-/// Comfy job and asset ids are UUIDs; anything else is refused before it goes into a URL or a workflow.
+/// Comfy job and asset ids are UUIDs (8-4-4-4-12 hex digits, as the proxy answers); anything else is refused before it
+/// goes into a URL, a workflow or a command line.
 pub(crate) fn comfy_id(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5 && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// A job output the studio will use, from the proxy or the SDK client alike: a plain file name (a subfolder is
@@ -918,7 +920,7 @@ pub(crate) fn comfy_output_ok(o: &Value) -> bool {
 }
 
 /// A random UUID-shaped Idempotency-Key (the v2 docs recommend a client-generated UUID).
-fn uuid_key() -> String {
+pub(crate) fn uuid_key() -> String {
     let h = media::random_hex(16);
     format!("{}-{}-4{}-a{}-{}", &h[0..8], &h[8..12], &h[13..16], &h[17..20], &h[20..32])
 }
@@ -1007,11 +1009,13 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
         }
         // LTX-Video 2B 0.9.8 distilled, image to video, with stock ComfyUI nodes only (checked against
         // Comfy-Org/ComfyUI c06bf5f: ManualSigmas is in comfy_extras/nodes_custom_sampler.py, LTXVPreprocess and
-        // LTXVImgToVideo in nodes_lt.py). Settings from Lightricks' own ComfyUI example for the distilled model
-        // (ComfyUI-LTXVideo example_workflows/low_level/ltxvideo-i2v-distilled.json at 35ec43a): euler_ancestral,
-        // CFGGuider cfg 1, the fixed sigma list below, LTXVPreprocess 38, 768x512, 24 fps; the same timesteps as
-        // LTX-Video configs/ltxv-2b-0.9.8-distilled.yaml (first pass 1.0..0.725, second 0.9094..0.4219, guidance 1).
-        // Strength 1.0 keeps the first frame, as for 0.9.5. SaveVideo instead of the example's VHS node (custom).
+        // LTXVImgToVideo in nodes_lt.py). The graph follows Lightricks' official distilled image to video example
+        // (ComfyUI-LTXVideo example_workflows/low_level/ltxvideo-i2v-distilled.json at 35ec43a), which was written
+        // for 0.9.6 distilled: euler_ancestral, CFGGuider cfg 1, the fixed sigma list below, LTXVPreprocess 38,
+        // 768x512, 24 fps. It loads the 0.9.8 distilled checkpoint at a single scale (the official 0.9.8 config is a
+        // multi-scale run with a spatial upscaler; its passes use the same timesteps, guidance 1). Strength 1.0 keeps
+        // the first frame, as for 0.9.5. SaveVideo instead of the example's VHS node (custom). Ran live 2026-10-18
+        // through both clients (the short film pipeline, 5/5 steps).
         "ltxv-0.9.8-distilled-i2v" => {
             let (w, h) = ltxv_size(r.aspect.as_deref());
             let length = ltxv_frames(r.duration.unwrap_or(2));
@@ -1612,6 +1616,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_timed_out_sdk_client_is_stopped_with_everything_it_started() {
+        let ctx = test_ctx("sdk_group");
+        let dir = ctx.outputs_dir.parent().unwrap().join("sdk_group_work");
+        let h = Handle { request_id: SDK_JOB.into(), status_url: format!("{BASE}/api/v2/jobs/{SDK_JOB}"), result_url: None };
+        // The stub starts a grandchild (as uv starts Python) and hangs.
+        let mut t = sdk("forkslow", &dir);
+        t.status_timeout = Duration::from_millis(500);
+        assert!(matches!(ComfyRun { t: &t }.poll(&ctx, BASE, &h).await, Err(ProviderError::Failed(m)) if m.contains("took longer")));
+        let pid: i32 = std::fs::read_to_string(dir.join("grandchild.pid")).unwrap().trim().parse().unwrap();
+        let alive = || unsafe { libc::kill(pid, 0) } == 0;
+        let t0 = std::time::Instant::now();
+        while alive() && t0.elapsed() < Duration::from_secs(3) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(!alive(), "the grandchild {pid} was stopped with its group");
+    }
+
+    #[tokio::test]
     async fn sdk_client_paths_stay_in_the_work_folder() {
         let ctx = test_ctx("sdk_paths");
         let dir = ctx.outputs_dir.parent().unwrap().join("sdk_paths_work");
@@ -1636,6 +1658,11 @@ mod tests {
         }
         assert!(!comfy_output_ok(&json!({"name": "a.mp4", "content_type": "video/mp4\r\nx: y"})));
         assert!(!comfy_output_ok(&json!({"name": "a.mp4", "content_type": 5})));
+        // Job and asset ids are UUIDs only: nothing that could read as an option or a path reaches the command line.
+        assert!(comfy_id(SDK_JOB) && comfy_id(&uuid_key()));
+        for id in ["-11111111-2222-4333-a444-555555555555", "11111111-2222-4333-a444-55555555555", "x", "", "../../etc", "11111111_2222-4333-a444-555555555555"] {
+            assert!(!comfy_id(id), "{id:?}");
+        }
     }
 
     #[test]
