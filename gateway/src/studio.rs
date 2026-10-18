@@ -181,7 +181,16 @@ impl Studio {
 
     /// Adds an element, or replaces the one with the same tag.
     pub fn put_element(&self, e: Element) -> Result<(), StudioError> {
+        self.put_element_if(e, |_| true).map(|_| ())
+    }
+
+    /// Saves an Element only when `allow` accepts the Element now under that tag (None when there is none), checked
+    /// and written under one lock so nothing can slip in between. Ok(false) when refused.
+    pub fn put_element_if(&self, e: Element, allow: impl FnOnce(Option<&Element>) -> bool) -> Result<bool, StudioError> {
         let mut f = self.lock();
+        if !allow(f.elements.iter().find(|x| x.tag == e.tag)) {
+            return Ok(false);
+        }
         if let Some(slot) = f.elements.iter_mut().find(|x| x.tag == e.tag) {
             *slot = e;
         } else {
@@ -190,7 +199,7 @@ impl Studio {
             }
             f.elements.push(e);
         }
-        self.save(&f)
+        self.save(&f).map(|()| true)
     }
 
     /// True when an element was removed.
@@ -214,6 +223,7 @@ impl Studio {
         self.save(&f)
     }
 
+    #[cfg(test)]
     pub fn edit(&self) -> EditDoc {
         self.lock().edit.clone()
     }
@@ -243,6 +253,28 @@ impl Studio {
         }
     }
 
+    /// Appends clips to the saved timeline, as many as fit under `max`, in one locked step. Returns how many were
+    /// added and the new revision (unchanged when none fit).
+    pub fn append_edit_clips(&self, clips: Vec<EditClip>, max: usize) -> Result<(usize, u64), StudioError> {
+        let mut f = self.lock();
+        let room = max.saturating_sub(f.edit.clips.len());
+        let take = clips.len().min(room);
+        if take == 0 {
+            return Ok((0, f.edit_rev));
+        }
+        let before = (f.edit.clone(), f.edit_rev);
+        f.edit.clips.extend(clips.into_iter().take(take));
+        f.edit_rev += 1;
+        match self.save(&f) {
+            Ok(()) => Ok((take, f.edit_rev)),
+            Err(err) => {
+                (f.edit, f.edit_rev) = before;
+                Err(err)
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub fn set_edit(&self, e: EditDoc) -> Result<(), StudioError> {
         self.set_edit_checked(e, None).map(|_| ())
     }
@@ -405,6 +437,20 @@ mod tests {
         assert_eq!(again.project(), Project { style_prefix: "35mm film".into(), still_first: false });
         assert_eq!(again.delete_element("mia"), Ok(true));
         assert_eq!(again.delete_element("mia"), Ok(false));
+    }
+
+    #[test]
+    fn timeline_appends_and_guarded_element_saves_are_one_step() {
+        let s = studio("studio_atomic");
+        let clip = |u: &str| EditClip { url: u.into(), kind: "video".into(), from: 0.0, to: None, len: None, caption: String::new() };
+        assert_eq!(s.append_edit_clips(vec![clip("/outputs/a.mp4"), clip("/outputs/b.mp4")], 3).unwrap(), (2, 1));
+        assert_eq!(s.append_edit_clips(vec![clip("/outputs/c.mp4"), clip("/outputs/d.mp4")], 3).unwrap(), (1, 2), "only what fits");
+        assert_eq!(s.append_edit_clips(vec![clip("/outputs/e.mp4")], 3).unwrap(), (0, 2), "full: nothing written");
+        assert!(s.set_edit_checked(EditDoc::default(), Some(1)).is_err(), "an old revision cannot write over the appends");
+        let e = |name: &str| Element { tag: "mia".into(), name: name.into(), kind: "character".into(), images: vec!["/outputs/a.png".into()], created_at: 1 };
+        assert!(s.put_element_if(e("first"), |old| old.is_none()).unwrap());
+        assert!(!s.put_element_if(e("second"), |old| old.is_none()).unwrap(), "refused when the check fails");
+        assert_eq!(s.elements()[0].name, "first");
     }
 
     #[test]
