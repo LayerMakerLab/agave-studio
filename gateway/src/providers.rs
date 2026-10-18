@@ -891,8 +891,30 @@ fn base_url(key: &str) -> PResult<reqwest::Url> {
 }
 
 /// Comfy job and asset ids are UUIDs; anything else is refused before it goes into a URL or a workflow.
-fn comfy_id(s: &str) -> bool {
+pub(crate) fn comfy_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// A job output the studio will use, from the proxy or the SDK client alike: a plain file name (a subfolder is
+/// fine; no "..", no leading slash, nothing but letters, digits and ._-/) and, when given, a plain content type.
+pub(crate) fn comfy_output_ok(o: &Value) -> bool {
+    let name_ok = o.get("name").and_then(Value::as_str).is_some_and(|n| {
+        !n.is_empty()
+            && n.len() <= 255
+            && !n.starts_with('/')
+            && !n.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..")
+            && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    });
+    let ct_ok = match o.get("content_type") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(ct)) => {
+            let (a, b) = ct.split_once('/').unwrap_or(("", ""));
+            let part = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '+' | '-'));
+            ct.len() <= 100 && part(a) && part(b)
+        }
+        _ => false,
+    };
+    name_ok && ct_ok
 }
 
 /// A random UUID-shaped Idempotency-Key (the v2 docs recommend a client-generated UUID).
@@ -1071,9 +1093,15 @@ fn ext_for(content_type: &str, name: &str, kind: &str) -> String {
     }
 }
 
-impl<T: ComfyTransport> Comfy<T> {
+/// The adapter's work, on whichever client COMFY_CLIENT picks (the built-in HTTP client or the Comfy SDK sidecar):
+/// both answer the same calls, so everything here (checks, output classification, caps) is shared.
+struct ComfyRun<'a> {
+    t: &'a dyn ComfyTransport,
+}
+
+impl ComfyRun<'_> {
     async fn json(&self, ctx: &Ctx, call: ComfyCall<'_>, want: &[u16]) -> PResult<Value> {
-        let (status, body, _) = self.transport.send(&ctx.http, call).await?;
+        let (status, body, _) = self.t.send(&ctx.http, call).await?;
         if !want.contains(&status) {
             return Err(comfy_error(status, &body));
         }
@@ -1101,12 +1129,35 @@ impl<T: ComfyTransport> Comfy<T> {
     }
 }
 
+impl<T: ComfyTransport> Comfy<T> {
+    /// The Comfy SDK sidecar when COMFY_CLIENT is "sdk", else None (the built-in client).
+    fn sdk(&self, ctx: &Ctx) -> PResult<Option<crate::comfy_sdk::SdkTransport>> {
+        ctx.comfy_sdk.as_deref().filter(|s| s.active()).map(crate::comfy_sdk::SdkTransport::for_setup).transpose()
+    }
+}
+
 #[async_trait]
 impl<T: ComfyTransport + 'static> Provider for Comfy<T> {
     fn poll_interval(&self) -> Duration {
         Duration::from_secs(4)
     }
 
+    async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
+        match self.sdk(ctx)? {
+            Some(sdk) => ComfyRun { t: &sdk }.submit(ctx, key, req).await,
+            None => ComfyRun { t: &self.transport }.submit(ctx, key, req).await,
+        }
+    }
+
+    async fn poll(&self, ctx: &Ctx, key: &str, h: &Handle) -> PResult<Polled> {
+        match self.sdk(ctx)? {
+            Some(sdk) => ComfyRun { t: &sdk }.poll(ctx, key, h).await,
+            None => ComfyRun { t: &self.transport }.poll(ctx, key, h).await,
+        }
+    }
+}
+
+impl ComfyRun<'_> {
     async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
         let base = base_url(key)?;
         let image = match req.image_url.iter().chain(req.image_urls.iter()).next() {
@@ -1136,14 +1187,15 @@ impl<T: ComfyTransport + 'static> Provider for Comfy<T> {
         let job = self.json(ctx, ComfyCall::Get(&status_url), &[200]).await?;
         match job.get("status").and_then(Value::as_str).unwrap_or("") {
             "succeeded" => {
-                let outs = job.get("outputs").and_then(Value::as_array).cloned().unwrap_or_default();
+                // Outputs with an odd name or content type are left out, whichever client answered.
+                let outs: Vec<Value> = job.get("outputs").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().filter(comfy_output_ok).collect();
                 let pick = |want: &str| outs.iter().find(|o| comfy_output_kind(o) == Some(want)).cloned();
                 let Some((out, kind)) = pick("video").map(|o| (o, "video")).or_else(|| pick("image").map(|o| (o, "image"))) else {
                     return Ok(Polled::Failed("ComfyUI finished with no picture or video".into()));
                 };
                 let link = out.get("url").and_then(Value::as_str).ok_or_else(|| ProviderError::Failed("ComfyUI output has no url".into()))?;
                 let url = on_base(&base, link)?;
-                let (status, bytes, ct) = self.transport.send(&ctx.http, ComfyCall::Download(&url)).await?;
+                let (status, bytes, ct) = self.t.send(&ctx.http, ComfyCall::Download(&url)).await?;
                 if status != 200 {
                     return Err(comfy_error(status, &bytes));
                 }
@@ -1431,7 +1483,7 @@ mod tests {
     }
 
     fn test_ctx(name: &str) -> Ctx {
-        Ctx { http: reqwest::Client::new(), outputs_dir: crate::fsutil::test_dir(name) }
+        Ctx { http: reqwest::Client::new(), outputs_dir: crate::fsutil::test_dir(name), comfy_sdk: None }
     }
 
     const BASE: &str = "http://127.0.0.1:8189";
@@ -1487,11 +1539,115 @@ mod tests {
         assert!(comfy_workflow(&req("some-other-workflow", "1:1"), None, 1).is_err());
     }
 
+    // ---- COMFY_CLIENT=sdk: the same adapter on the Comfy SDK sidecar, driven by a stub script (no uv, no network).
+
+    const SDK_JOB: &str = "11111111-2222-4333-a444-555555555555";
+
+    fn sdk(mode: &str, dir: &std::path::Path) -> crate::comfy_sdk::SdkTransport {
+        let stub = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/comfy_sdk_stub.sh");
+        let mut t = crate::comfy_sdk::SdkTransport::new("/bin/sh".into(), vec![stub.into(), mode.into()], dir).unwrap();
+        t.status_timeout = Duration::from_secs(10);
+        t
+    }
+
     fn i2v_req() -> SubmitReq {
         let mut r = req("ltxv-0.9.8-distilled-i2v", "16:9");
         r.mode = "i2v".into();
         r.image_url = Some("/outputs/still.png".into());
         r
+    }
+
+    fn work_files(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn sdk_client_submits_polls_and_fetches_through_the_shared_adapter() {
+        let ctx = test_ctx("sdk_flow");
+        std::fs::write(ctx.outputs_dir.join("still.png"), crate::placeholder::picture("1:1", "x", "x", "x")).unwrap();
+        let dir = ctx.outputs_dir.parent().unwrap().join("sdk_flow_work");
+        let ok = sdk("ok", &dir);
+        let run = ComfyRun { t: &ok };
+        let Submitted::Queued(h) = run.submit(&ctx, BASE, &i2v_req()).await.unwrap() else { panic!("expected a queued job") };
+        assert_eq!((h.request_id.as_str(), h.status_url.as_str()), (SDK_JOB, format!("{BASE}/api/v2/jobs/{SDK_JOB}").as_str()));
+        assert!(work_files(&dir).is_empty(), "the workflow and picture files are removed after submit: {:?}", work_files(&dir));
+        let running = sdk("running", &dir);
+        assert!(matches!(ComfyRun { t: &running }.poll(&ctx, BASE, &h).await.unwrap(), Polled::Running(None)));
+        let Polled::Done(outs) = run.poll(&ctx, BASE, &h).await.unwrap() else { panic!("expected done") };
+        assert_eq!(outs[0].kind, "video", "classified by content type, as for the proxy (it calls the mp4 an image)");
+        assert!(outs[0].url.ends_with(".mp4"));
+        assert_eq!(std::fs::read(ctx.outputs_dir.join(outs[0].url.trim_start_matches("/outputs/"))).unwrap(), b"fakemp4");
+        assert!(work_files(&dir).is_empty(), "the download is moved out of the work folder");
+        let failed = sdk("failedjob", &dir);
+        assert!(matches!(ComfyRun { t: &failed }.poll(&ctx, BASE, &h).await.unwrap(), Polled::Failed(m) if m.contains("out of memory")));
+    }
+
+    #[tokio::test]
+    async fn sdk_client_failures_are_plain_errors() {
+        let ctx = test_ctx("sdk_fail");
+        std::fs::write(ctx.outputs_dir.join("still.png"), crate::placeholder::picture("1:1", "x", "x", "x")).unwrap();
+        let dir = ctx.outputs_dir.parent().unwrap().join("sdk_fail_work");
+        let h = Handle { request_id: SDK_JOB.into(), status_url: format!("{BASE}/api/v2/jobs/{SDK_JOB}"), result_url: None };
+        let err = |r: PResult<Polled>| match r {
+            Err(ProviderError::Failed(m)) => m,
+            other => panic!("expected an error, got {:?}", other.map(|_| ())),
+        };
+        let fail = sdk("fail", &dir);
+        assert!(err(ComfyRun { t: &fail }.poll(&ctx, BASE, &h).await).contains("boom: the proxy said no"), "non-zero exit: stderr is shown");
+        let garbage = sdk("garbage", &dir);
+        assert!(err(ComfyRun { t: &garbage }.poll(&ctx, BASE, &h).await).contains("non-JSON"));
+        let mut slow = sdk("slow", &dir);
+        slow.status_timeout = Duration::from_millis(300);
+        let t0 = std::time::Instant::now();
+        assert!(err(ComfyRun { t: &slow }.poll(&ctx, BASE, &h).await).contains("took longer"));
+        assert!(t0.elapsed() < Duration::from_secs(3), "stopped at the timeout, not when the script ends");
+        let mut flood = sdk("flood", &dir);
+        flood.max_json = 4096;
+        assert!(err(ComfyRun { t: &flood }.poll(&ctx, BASE, &h).await).contains("more than the studio accepts"));
+        let odd = sdk("oddid", &dir);
+        let r = ComfyRun { t: &odd }.submit(&ctx, BASE, &i2v_req()).await;
+        assert!(matches!(r, Err(ProviderError::Failed(m)) if m.contains("odd job id")), "a job id that is not a UUID never goes into a link");
+        let missing = crate::comfy_sdk::SdkTransport::new("/nonexistent/uv".into(), vec![], &dir).unwrap();
+        assert!(err(ComfyRun { t: &missing }.poll(&ctx, BASE, &h).await).contains("COMFY_CLIENT"), "a missing uv names the setting");
+    }
+
+    #[tokio::test]
+    async fn sdk_client_paths_stay_in_the_work_folder() {
+        let ctx = test_ctx("sdk_paths");
+        let dir = ctx.outputs_dir.parent().unwrap().join("sdk_paths_work");
+        let h = Handle { request_id: SDK_JOB.into(), status_url: format!("{BASE}/api/v2/jobs/{SDK_JOB}"), result_url: None };
+        // An output name that climbs out of a folder is left out, so nothing is fetched under it.
+        let bad = sdk("badname", &dir);
+        assert!(matches!(ComfyRun { t: &bad }.poll(&ctx, BASE, &h).await.unwrap(), Polled::Failed(m) if m.contains("no picture or video")));
+        // A job link that is not /api/v2/jobs/<uuid> is refused before anything starts.
+        let ok = sdk("ok", &dir);
+        let other = Handle { request_id: "x".into(), status_url: format!("{BASE}/api/v2/jobs/../../etc"), result_url: None };
+        assert!(ComfyRun { t: &ok }.poll(&ctx, BASE, &other).await.is_err());
+        // A download bigger than the cap is refused and removed.
+        let mut big = sdk("big", &dir);
+        big.max_download = 8;
+        assert!(matches!(ComfyRun { t: &big }.poll(&ctx, BASE, &h).await, Err(ProviderError::Failed(m)) if m.contains("larger than the studio accepts")));
+        assert!(work_files(&dir).is_empty());
+        assert!(work_files(&ctx.outputs_dir).is_empty(), "nothing was saved");
+        // The stub checks every path it is given is inside its working folder (data/comfy-sdk in the studio).
+        assert!(comfy_output_ok(&json!({"name": "video/agave_00001_.mp4", "content_type": "video/mp4"})));
+        for name in ["../x.mp4", "/etc/passwd", "a//b.mp4", "a/./b.mp4", "a b.mp4", "", "x\\y.mp4"] {
+            assert!(!comfy_output_ok(&json!({"name": name})), "{name:?}");
+        }
+        assert!(!comfy_output_ok(&json!({"name": "a.mp4", "content_type": "video/mp4\r\nx: y"})));
+        assert!(!comfy_output_ok(&json!({"name": "a.mp4", "content_type": 5})));
+    }
+
+    #[test]
+    fn the_client_setting_picks_the_sdk_only_when_asked() {
+        let dir = crate::fsutil::test_dir("sdk_setting");
+        let keys = crate::keys::KeyStore::empty(dir.join("keys.env"));
+        let setup = crate::comfy_sdk::SdkSetup { keys: keys.clone(), dir: dir.join("w"), script: dir.join("s.py") };
+        assert!(!setup.active(), "builtin by default");
+        keys.set("COMFY_CLIENT", "sdk").unwrap();
+        assert!(setup.active());
+        keys.set("COMFY_CLIENT", "builtin").unwrap();
+        assert!(!setup.active());
     }
 
     #[test]
@@ -1578,7 +1734,7 @@ mod tests {
         t.answer_json("POST", &format!("{BASE}/api/v2/jobs"), 201, json!({"id": JOB, "status": "queued", "urls": {"self": "http://evil.test/api/v2/jobs/1"}}));
         t.answer_json("POST", &format!("{BASE}/api/v2/jobs"), 422, json!({"error": {"code": "invalid_workflow", "message": "Node 31 (KSampler): value not in list"}}));
         let status = format!("{BASE}/api/v2/jobs/{JOB}");
-        t.answer_json("GET", &status, 200, json!({"id": JOB, "status": "succeeded", "outputs": [{"type": "image", "url": "http://evil.test/x.png"}]}));
+        t.answer_json("GET", &status, 200, json!({"id": JOB, "status": "succeeded", "outputs": [{"type": "image", "url": "http://evil.test/x.png", "name": "x.png"}]}));
         t.answer_json("GET", &status, 200, json!({"id": JOB, "status": "failed", "error": {"code": "node_execution_error", "message": "out of memory"}}));
         let comfy = Comfy { transport: t };
         let r = req("flux1-schnell-fp8", "1:1");

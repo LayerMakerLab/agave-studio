@@ -174,7 +174,15 @@ async fn presets(State(st): State<AppState>) -> Json<Value> {
 async fn list_keys(State(st): State<AppState>) -> Response {
     let keys: Vec<Value> = SLOTS
         .iter()
-        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs, "default": s.default}))
+        .map(|s| {
+            let mut v = json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs, "default": s.default});
+            // A choice is not a secret, so its value is shown (keys never are).
+            if !s.choices.is_empty() {
+                v["choices"] = json!(s.choices);
+                v["value"] = json!(st.keys.get_or_default(s.env));
+            }
+            v
+        })
         .collect();
     Json(json!({"keys": keys})).into_response()
 }
@@ -211,8 +219,14 @@ async fn set_key(
     if keys::slot(&b.env).is_none() {
         return fail(StatusCode::BAD_REQUEST, "unknown_slot");
     }
-    // Error codes never echo the value.
-    if let Err(code) = keys::validate_value(&b.value) {
+    let slot = keys::slot(&b.env).filter(|s| !s.choices.is_empty());
+    // A setting with fixed values (COMFY_CLIENT) takes one of them; a key is checked as a key. Error codes never
+    // echo the value.
+    if let Some(slot) = slot {
+        if !slot.choices.contains(&b.value.as_str()) {
+            return fail(StatusCode::BAD_REQUEST, "invalid_choice");
+        }
+    } else if let Err(code) = keys::validate_value(&b.value) {
         return fail(StatusCode::BAD_REQUEST, code);
     }
     // The ComfyUI address is where the gateway sends workflows and pictures, so only a plain http(s) address passes.

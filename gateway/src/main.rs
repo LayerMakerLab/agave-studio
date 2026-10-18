@@ -2,6 +2,7 @@
 
 mod api;
 mod assemble;
+mod comfy_sdk;
 mod fsutil;
 mod jobs;
 mod keys;

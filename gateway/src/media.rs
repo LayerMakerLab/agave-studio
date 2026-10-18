@@ -15,6 +15,8 @@ use crate::providers::{PResult, ProviderError};
 pub struct Ctx {
     pub http: reqwest::Client,
     pub outputs_dir: PathBuf,
+    /// The Comfy SDK client setup (COMFY_CLIENT=sdk). None in tests that do not need it.
+    pub comfy_sdk: Option<std::sync::Arc<crate::comfy_sdk::SdkSetup>>,
 }
 
 /// A finished file. `url` is always local (/outputs/...) because provider URLs expire.

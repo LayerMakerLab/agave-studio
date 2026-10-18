@@ -14,24 +14,36 @@ pub struct Slot {
     pub docs: &'static str,
     /// Used when nothing is set. Only for settings that are not secrets (the address of your own ComfyUI).
     pub default: Option<&'static str>,
+    /// A setting with a fixed set of values (not a secret): only these are accepted, and its value is shown.
+    pub choices: &'static [&'static str],
 }
 
 /// Every key slot the gateway knows. POST /api/keys rejects any other name.
 /// Must match config/keys.example.env (checked by a unit test).
 pub const SLOTS: &[Slot] = &[
-    Slot { env: "FAL_KEY", provider: "fal.ai", docs: "https://fal.ai/docs/model-apis/model-endpoints/queue", default: None },
-    Slot { env: "REPLICATE_API_TOKEN", provider: "Replicate", docs: "https://replicate.com/docs/reference/http", default: None },
-    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/veo", default: None },
-    Slot { env: "OPENAI_API_KEY", provider: "OpenAI", docs: "https://developers.openai.com/api/docs/guides/image-generation", default: None },
-    Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images", default: None },
-    Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert", default: None },
-    Slot { env: "MESHY_API_KEY", provider: "Meshy (3D)", docs: "https://docs.meshy.ai/en/api/image-to-3d", default: None },
+    Slot { env: "FAL_KEY", provider: "fal.ai", docs: "https://fal.ai/docs/model-apis/model-endpoints/queue", default: None, choices: &[] },
+    Slot { env: "REPLICATE_API_TOKEN", provider: "Replicate", docs: "https://replicate.com/docs/reference/http", default: None, choices: &[] },
+    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/veo", default: None, choices: &[] },
+    Slot { env: "OPENAI_API_KEY", provider: "OpenAI", docs: "https://developers.openai.com/api/docs/guides/image-generation", default: None, choices: &[] },
+    Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images", default: None, choices: &[] },
+    Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert", default: None, choices: &[] },
+    Slot { env: "MESHY_API_KEY", provider: "Meshy (3D)", docs: "https://docs.meshy.ai/en/api/image-to-3d", default: None, choices: &[] },
     // Not a key: the address of your own ComfyUI behind comfy-api-proxy. No key is needed by default.
     Slot {
         env: "COMFY_BASE_URL",
         provider: "Your ComfyUI (comfy-api-proxy)",
         docs: "https://docs.comfy.org/development/comfyui-server/api-proxy",
         default: Some(crate::providers::COMFY_DEFAULT_BASE),
+        choices: &[],
+    },
+    // Not a key: which client talks to that ComfyUI. "builtin" is the studio's own; "sdk" is the official Comfy SDK
+    // (comfy-sdk, run with uv through tools/comfy-sdk/agave_comfy.py).
+    Slot {
+        env: "COMFY_CLIENT",
+        provider: "Your ComfyUI: client",
+        docs: "https://docs.comfy.org/development/api-development/sdks",
+        default: Some("builtin"),
+        choices: &["builtin", "sdk"],
     },
 ];
 

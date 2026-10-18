@@ -21,6 +21,9 @@ pub struct Paths {
     pub models_file: PathBuf,
     pub studio_file: PathBuf,
     pub pipelines_file: PathBuf,
+    /// The Comfy SDK sidecar (COMFY_CLIENT=sdk) and its work folder for pictures, workflows and downloads.
+    pub comfy_sdk_script: PathBuf,
+    pub comfy_sdk_dir: PathBuf,
 }
 
 impl Paths {
@@ -39,6 +42,8 @@ impl Paths {
             models_file: crate_dir.join("models.toml"),
             studio_file: data.join("studio.json"),
             pipelines_file: data.join("pipelines.json"),
+            comfy_sdk_script: repo.join("tools/comfy-sdk/agave_comfy.py"),
+            comfy_sdk_dir: data.join("comfy-sdk"),
         }
     }
 }
@@ -94,7 +99,8 @@ impl AppState {
             .timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| format!("http client: {e}"))?;
-        let ctx = Ctx { http, outputs_dir: paths.outputs_dir.clone() };
+        let sdk = crate::comfy_sdk::SdkSetup { keys: keys.clone(), dir: paths.comfy_sdk_dir.clone(), script: paths.comfy_sdk_script.clone() };
+        let ctx = Ctx { http, outputs_dir: paths.outputs_dir.clone(), comfy_sdk: Some(Arc::new(sdk)) };
         let hosts = vec!["127.0.0.1:4170".to_string(), "localhost:4170".to_string()];
         let origins = vec!["http://127.0.0.1:4170".to_string(), "http://localhost:4170".to_string()];
         Ok(AppState {
@@ -129,6 +135,8 @@ impl AppState {
             models_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml"),
             studio_file: dir.join("studio.json"),
             pipelines_file: dir.join("pipelines.json"),
+            comfy_sdk_script: dir.join("agave_comfy.py"),
+            comfy_sdk_dir: dir.join("comfy-sdk"),
         };
         let keys = KeyStore::empty(paths.keys_file.clone());
         let mut st = Self::build(paths, keys).expect("test state");
