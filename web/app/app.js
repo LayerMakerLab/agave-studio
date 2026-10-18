@@ -182,6 +182,15 @@
     stylePrefix: $('#stylePrefix'),
     stillFirst: $('#stillFirst'),
     projectNote: $('#projectNote'),
+    pipeline: $('#pipeline'),
+    pipelineTitle: $('#pipelineTitle'),
+    pipeBody: $('#pipeBody'),
+    pipeFile: $('#pipeFile'),
+    pipeGrid: $('#pipeGrid'),
+    runList: $('#runList'),
+    runChip: $('#runChip'),
+    runChipText: $('#runChipText'),
+    testBanner: $('#testBanner'),
   };
 
   // ---------- helpers ----------
@@ -2256,6 +2265,403 @@
     else setStatus(`${it.title} is ready. Check the cost, then press Generate.`);
   }
 
+  // ---------- pipelines ----------
+  // A pipeline runs the studio's own steps in a row on the engine (data/pipelines.json), so a run survives a
+  // reload. The full price shows before it starts; a step that costs money waits for a click here.
+
+  const pipe = { list: null, runs: [], view: null, image: null, subject: '', tag: '', timer: null, editSeen: new Set(), busy: false };
+  const RUN_LABEL = { waiting: 'Waiting for you', running: 'Running', failed: 'Stopped', done: 'Finished' };
+  const STEP_LABEL = { pending: 'Next', waiting: 'Waiting for your click', running: 'Running', done: 'Done', failed: 'Failed' };
+  const STEP_ERRORS = {
+    missing_key: (s) => `Add ${s.key || 'the provider key'} in Settings, then press Run again.`,
+    still_first: () => 'Picture before video is on in Settings, and this step makes video from words. Turn it off, then press Run again.',
+    too_many_jobs: () => 'Too many jobs are running. Wait for some to finish, then press Run again.',
+    adapter_not_implemented: () => 'This provider is not connected yet.',
+  };
+
+  const cents = (c) => `$${(c / 100).toFixed(2)}`;
+  // "≈ $0.39 + 30 Meshy cr", "Free", from a pipeline total.
+  function totalText(t) {
+    if (!t) return '';
+    const parts = [];
+    if (t.cents) parts.push(`≈ ${cents(t.cents)}`);
+    for (const c of t.credits || []) parts.push(`${c.credits} ${c.vendor} cr`);
+    if (t.unpriced) parts.push(`${t.unpriced} step${t.unpriced === 1 ? '' : 's'} with no published price`);
+    return parts.length ? parts.join(' + ') : 'Free';
+  }
+  function stepPrice(s) {
+    const p = s.price || {};
+    if (!s.paid) return p.local ? 'Free · your ComfyUI' : 'Free';
+    if (p.cents) return `≈ ${cents(p.cents)}`;
+    if (p.credits) return `${p.credits} ${p.credits_vendor || ''} cr`.trim();
+    return 'No published price';
+  }
+
+  async function loadPipelines() {
+    if (!pipe.list) {
+      try {
+        const r = await call('/api/pipelines');
+        if (r.ok) pipe.list = (r.data && r.data.pipelines) || [];
+      } catch (_) { /* offline */ }
+    }
+    await loadRuns();
+    renderPipeGrid();
+  }
+
+  async function loadRuns() {
+    try {
+      const r = await call('/api/pipelines/runs');
+      if (!r.ok) return;
+      const before = new Map(pipe.runs.map((x) => [x.id, x.status + x.current]));
+      pipe.runs = (r.data && r.data.runs) || [];
+      const changed = pipe.runs.some((x) => before.get(x.id) !== x.status + x.current);
+      // A finished "Add to edit" step changed the saved timeline on the engine: load it.
+      for (const run of pipe.runs) {
+        run.steps.forEach((s, i) => {
+          const k = `${run.id}:${i}`;
+          if (s.kind === 'edit' && s.status === 'done' && !pipe.editSeen.has(k)) {
+            if (pipe.editSeen.size || before.size) loadEditServer();
+            pipe.editSeen.add(k);
+          }
+        });
+      }
+      if (changed) refreshJobs();
+    } catch (_) { /* offline: keep what we have */ }
+    renderRunChip();
+    if (els.prompts.classList.contains('open')) renderRunList();
+    if (pipe.view && pipe.view.run && els.pipeline.classList.contains('open')) {
+      const fresh = pipe.runs.find((x) => x.id === pipe.view.run.id);
+      // Redraw only on a change, so playing previews are not restarted on every check.
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(pipe.view.run)) { pipe.view.run = fresh; renderPipeline(); }
+    }
+    schedulePipes();
+  }
+
+  function schedulePipes() {
+    clearTimeout(pipe.timer);
+    const live = pipe.runs.some((r) => r.status === 'running');
+    if (live) pipe.timer = setTimeout(loadRuns, 2000);
+  }
+
+  function renderRunChip() {
+    const open = pipe.runs.filter((r) => r.status !== 'done');
+    const top = open.find((r) => r.status === 'waiting') || open.find((r) => r.status === 'failed') || open[0];
+    els.runChip.hidden = !top;
+    if (!top) return;
+    const n = top.current + 1;
+    els.runChipText.textContent = top.status === 'waiting' ? `Pipeline: step ${n} waits for you`
+      : top.status === 'failed' ? `Pipeline: step ${n} stopped` : `Pipeline: step ${n} running`;
+    els.runChip.dataset.state = top.status;
+    els.runChip.onclick = () => openRun(top.id);
+  }
+
+  function flowStrip(steps) {
+    const strip = el('ol', { class: 'pipe-flow', 'aria-label': 'Steps' });
+    steps.forEach((s) => strip.append(el('li', { class: s.paid ? 'paid' : 'free', title: `${s.title}: ${stepPrice(s)}` }, [s.title])));
+    return strip;
+  }
+
+  function renderPipeGrid() {
+    els.pipeGrid.textContent = '';
+    if (!pipe.list) {
+      els.pipeGrid.append(el('p', { class: 'muted small' }, ['Pipelines could not be loaded.']));
+      return;
+    }
+    for (const p of pipe.list) {
+      const local = p.total && !p.total.paid_steps;
+      const go = el('button', { type: 'button', class: 'small-btn' }, ['Set up']);
+      go.addEventListener('click', () => openSetupView(p.id));
+      els.pipeGrid.append(el('article', { class: 'pipe-card' + (local ? ' local' : '') }, [
+        flowStrip(p.steps),
+        el('h4', {}, [p.title]),
+        el('p', { class: 'muted' }, [p.blurb]),
+        el('div', { class: 'pipe-card-foot' }, [
+          el('span', { class: 'pipe-price' }, [local ? 'Free · runs on your ComfyUI' : totalText(p.total)]),
+          go,
+        ]),
+      ]));
+    }
+    renderRunList();
+  }
+
+  function renderRunList() {
+    els.runList.textContent = '';
+    const runs = pipe.runs.slice(0, 6);
+    els.runList.hidden = !runs.length;
+    if (!runs.length) return;
+    els.runList.append(el('h4', {}, ['Your runs']));
+    for (const r of runs) {
+      const b = el('button', { type: 'button', class: 'run-row', 'data-state': r.status }, [
+        el('span', { class: 'run-dot', 'aria-hidden': 'true' }),
+        el('span', { class: 'run-row-title' }, [r.title || r.pipeline]),
+        el('span', { class: 'run-row-sub' }, [`${r.subject} · @${r.tag}`]),
+        el('span', { class: 'run-row-state' }, [r.status === 'done' ? RUN_LABEL.done : `${RUN_LABEL[r.status] || r.status} · step ${r.current + 1}`]),
+      ]);
+      b.addEventListener('click', () => openRun(r.id));
+      els.runList.append(b);
+    }
+  }
+
+  function openSetupView(id) {
+    const p = (pipe.list || []).find((x) => x.id === id);
+    if (!p) return;
+    const fromComposer = state.refs.find((u) => u.startsWith('/outputs/') && /\.(png|jpe?g|webp)$/i.test(u));
+    pipe.view = { pipeline: p, run: null, note: '' };
+    pipe.image = p.needs_image ? (fromComposer || null) : null;
+    pipe.subject = '';
+    pipe.tag = p.tag;
+    openPanel(els.pipeline, renderPipeline);
+  }
+
+  function openRun(id) {
+    const run = pipe.runs.find((x) => x.id === id);
+    if (!run) return;
+    pipe.view = { pipeline: (pipe.list || []).find((x) => x.id === run.pipeline) || null, run, note: '' };
+    openPanel(els.pipeline, renderPipeline);
+    loadRuns();
+  }
+
+  function outThumb(s) {
+    const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
+    if (!o) return null;
+    const media = o.kind === 'video'
+      ? el('video', { src: o.url, muted: true, loop: true, autoplay: !reduceMotion, playsinline: true, preload: 'metadata', 'aria-label': `${s.title} result` })
+      : el('img', { src: o.url, alt: `${s.title} result`, loading: 'lazy', decoding: 'async' });
+    if (media.tagName === 'VIDEO') media.muted = true;
+    return el('a', { class: 'pipe-thumb', href: o.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open file' }, [media]);
+  }
+
+  function stepError(s) {
+    const fix = STEP_ERRORS[s.error];
+    return fix ? fix(s) : s.error;
+  }
+
+  function stepList(steps, run) {
+    const list = el('ol', { class: 'pipe-steps' });
+    steps.forEach((s, i) => {
+      const status = run ? s.status : 'pending';
+      const what = s.model_name ? `${s.model_name}${s.vendor ? ' · ' + s.vendor : ''}` : { element: 'Saves the picture as the run\'s Element', last_frame: 'Takes the last frame of the clip', edit: 'Puts the clips on the Edit timeline' }[s.kind];
+      const meta = [!run && s.paid ? `${what} · waits for your click` : what];
+      const row = el('li', { class: `pipe-step ${status}${run && i === run.current && run.status !== 'done' ? ' current' : ''}` }, [
+        el('span', { class: 'pipe-num', 'aria-hidden': 'true' }, [status === 'done' ? '✓' : String(i + 1)]),
+        el('div', { class: 'pipe-step-main' }, [
+          el('div', { class: 'pipe-step-top' }, [
+            el('span', { class: 'pipe-step-title' }, [s.title]),
+            el('span', { class: 'pipe-step-price' + (s.paid ? ' paid' : ''), title: s.paid ? 'Costs money: waits for your click' : 'Free: runs on its own' }, [stepPrice(s)]),
+          ]),
+          el('p', { class: 'pipe-step-meta' }, meta.filter(Boolean)),
+          run ? el('p', { class: 'pipe-step-state' }, [STEP_LABEL[status] || status]) : null,
+          status === 'failed' && s.error ? el('p', { class: 'pipe-step-error' }, [stepError(s)]) : null,
+          status === 'running' ? el('div', { class: 'bar indet' }, [el('i')]) : null,
+        ]),
+        status === 'done' ? outThumb(s) : null,
+      ]);
+      list.append(row);
+    });
+    return list;
+  }
+
+  function renderPipeline() {
+    const v = pipe.view;
+    els.pipeBody.textContent = '';
+    if (!v) return;
+    if (v.run) renderRunView(v);
+    else renderSetupForm(v);
+  }
+
+  function renderSetupForm(v) {
+    const p = v.pipeline;
+    els.pipelineTitle.textContent = 'Pipeline';
+    const subject = el('input', { id: 'pipeSubject', maxlength: '60', placeholder: p.subject_hint, spellcheck: 'false', value: pipe.subject });
+    subject.addEventListener('input', () => { pipe.subject = subject.value; });
+    const tag = el('input', { id: 'pipeTag', maxlength: '32', spellcheck: 'false', value: pipe.tag });
+    tag.addEventListener('input', () => { pipe.tag = tag.value; });
+    const form = el('div', { class: 'panel-box pipe-form' }, [
+      el('label', { class: 'field' }, [el('span', { class: 'k' }, [p.element_kind === 'product' ? 'The product, in a few words' : 'Who it is, in a few words']), subject]),
+      el('label', { class: 'field' }, [el('span', { class: 'k' }, ['Element tag']), tag]),
+      el('p', { class: 'muted small' }, ['These words and the tag become the run\'s Element, so later steps keep the same look.']),
+    ]);
+    if (p.needs_image) {
+      const pick = el('button', { type: 'button', class: 'small-btn' }, [pipe.image ? 'Change photo' : 'Add a photo']);
+      pick.addEventListener('click', () => els.pipeFile.click());
+      form.prepend(el('div', { class: 'pipe-photo' }, [
+        pipe.image ? el('img', { src: pipe.image, alt: 'Start photo' }) : el('div', { class: 'pipe-photo-empty', 'aria-hidden': 'true' }, ['+']),
+        el('div', { class: 'pipe-photo-text' }, [el('span', { class: 'k' }, ['Start photo']), el('p', { class: 'muted small' }, [p.image_hint]), pick]),
+      ]));
+    }
+    const t = p.total || {};
+    const local = !t.paid_steps;
+    const missing = (p.keys || []).filter((k) => !k.set).map((k) => k.env);
+    const first = p.steps[0];
+    const go = el('button', { type: 'button', class: 'pill', id: 'pipeStart' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }),
+      first.paid ? `Start · run step 1 (${stepPrice(first)})` : 'Start']);
+    go.addEventListener('click', () => startRun(p, go));
+    const settingsBtn = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
+    settingsBtn.addEventListener('click', () => openSettings(missing[0]));
+    els.pipeBody.append(
+      el('div', { class: 'pipe-head' }, [el('h3', {}, [p.title]), el('p', { class: 'muted' }, [p.blurb])]),
+      form,
+      stepList(p.steps, null),
+      p.note ? el('p', { class: 'pipe-note' }, [p.note]) : null,
+      missing.length ? el('div', { class: 'pipe-warn' }, [el('p', {}, [`Needs ${missing.join(', ')} in Settings before its paid steps can run.`]), settingsBtn]) : null,
+      el('div', { class: 'pipe-dock' }, [el('div', { class: 'pipe-total' + (local ? ' local' : '') }, [
+        el('span', { class: 'k' }, ['Full list price']),
+        el('strong', {}, [local ? 'Free' : totalText(t)]),
+        el('p', { class: 'muted small' }, [local
+          ? `Every step runs on your own ComfyUI or in the studio, so nothing is billed.`
+          : `On your own keys, at the providers' list prices (rounded up per step). ${t.paid_steps} step${t.paid_steps === 1 ? '' : 's'} cost money, and each one waits for your click. Free steps run on their own.`]),
+      ]),
+      el('div', { class: 'panel-actions' }, [go, el('span', { class: 'key-note', id: 'pipeNote', role: 'status' }, [v.note || ''])])]),
+    );
+  }
+
+  async function uploadPipePhoto(file) {
+    if (!file || !pipe.view) return;
+    pipe.view.note = 'Uploading...';
+    renderPipeline();
+    try {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error('Use a PNG, JPEG or WebP photo.');
+      if (file.size > MAX_UPLOAD) throw new Error('That file is too large (40 MB max).');
+      pipe.image = (await uploadData(await fileToDataUrl(file))).url;
+      pipe.view.note = '';
+    } catch (e) {
+      pipe.view.note = e.message || 'Upload failed.';
+    }
+    renderPipeline();
+  }
+
+  const CREATE_ERRORS = {
+    image_required: 'Add the start photo first.',
+    invalid_subject: 'Say who or what it is in a few words (up to 60 characters).',
+    invalid_tag: 'Tag: letters, numbers, - or _, starting with a letter or number.',
+    tag_in_use: 'That @tag is already an Element. Pick another tag.',
+    invalid_image: 'That photo is missing. Add it again.',
+  };
+
+  async function startRun(p, btn) {
+    if (pipe.busy) return;
+    pipe.busy = true;
+    btn.disabled = true;
+    const note = (t) => { pipe.view.note = t; const n = $('#pipeNote'); if (n) n.textContent = t; };
+    note('Starting...');
+    try {
+      const body = { pipeline: p.id, subject: pipe.subject.trim(), tag: pipe.tag.trim(), image: pipe.image };
+      const r = await call('/api/pipelines/runs', { method: 'POST', body });
+      if (r.status !== 201 || !r.data || !r.data.run) {
+        const code = r.data && r.data.error;
+        note(CREATE_ERRORS[code] || (code ? `The engine refused this (${code}).` : `Could not start (${r.status}).`));
+        return;
+      }
+      let run = r.data.run;
+      // The Start button is the click for a paid first step.
+      if (run.status === 'waiting' && run.current === 0) {
+        const s = await call(`/api/pipelines/runs/${encodeURIComponent(run.id)}/step`, { method: 'POST', body: { step: 0 } });
+        if (s.data && s.data.run) run = s.data.run;
+      }
+      pipe.runs = [run, ...pipe.runs.filter((x) => x.id !== run.id)];
+      pipe.view = { pipeline: p, run, note: '' };
+      renderPipeline();
+      refreshJobs();
+      loadRuns();
+    } catch (_) {
+      note('Could not reach the engine.');
+      setOffline(true);
+    } finally {
+      pipe.busy = false;
+      btn.disabled = false;
+    }
+  }
+
+  async function clickStep(run, i, btn) {
+    if (pipe.busy) return;
+    pipe.busy = true;
+    btn.disabled = true;
+    try {
+      const r = await call(`/api/pipelines/runs/${encodeURIComponent(run.id)}/step`, { method: 'POST', body: { step: i } });
+      if (r.data && r.data.run) {
+        pipe.view.run = r.data.run;
+        pipe.runs = [r.data.run, ...pipe.runs.filter((x) => x.id !== run.id)];
+      }
+      pipe.view.note = r.ok ? '' : 'That step is not ready. The run was refreshed.';
+      renderPipeline();
+      refreshJobs();
+      loadRuns();
+    } catch (_) {
+      pipe.view.note = 'Could not reach the engine.';
+      setOffline(true);
+      renderPipeline();
+    } finally {
+      pipe.busy = false;
+    }
+  }
+
+  function renderRunView(v) {
+    const run = v.run;
+    const steps = run.steps;
+    els.pipelineTitle.textContent = 'Pipeline run';
+    const cur = steps[run.current];
+    const actions = [];
+    if (cur && (run.status === 'waiting' || run.status === 'failed')) {
+      const again = run.status === 'failed';
+      const label = again ? `Run again · step ${run.current + 1}` : `Run step ${run.current + 1} · ${cur.title}`;
+      const price = cur.paid ? ` (${stepPrice(cur)})` : '';
+      const b = el('button', { type: 'button', class: 'pill', id: 'pipeGo' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }), label + price]);
+      b.addEventListener('click', () => clickStep(run, run.current, b));
+      actions.push(b);
+      if (again && cur.error === 'missing_key') {
+        const s = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
+        s.addEventListener('click', () => openSettings(cur.key));
+        actions.push(s);
+      }
+    }
+    if (run.status === 'done') {
+      if (steps.some((s) => s.kind === 'edit')) {
+        const e = el('button', { type: 'button', class: 'pill' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }), 'Open Edit']);
+        e.addEventListener('click', () => { loadEditServer(); openPanel(els.editor, () => { renderEditor(); requestAnimationFrame(() => { sizePreview(); updateHead(); }); }); });
+        actions.push(e);
+      }
+      const useTag = el('button', { type: 'button', class: 'small-btn' }, [`Use @${run.tag}`]);
+      useTag.addEventListener('click', async () => {
+        closePanel();
+        await loadElements(); // the run saved this Element on the engine
+        insertTag(run.tag);
+        setStatus(`@${run.tag} is in the prompt: its picture goes with the request.`);
+      });
+      actions.push(useTag);
+    }
+    const back = el('button', { type: 'button', class: 'link-btn plain' }, ['All pipelines']);
+    back.addEventListener('click', () => { closePanel(true); openPanel(els.prompts, loadLibrary); });
+    const forget = el('button', { type: 'button', class: 'link-btn' }, ['Forget this run']);
+    forget.hidden = run.status === 'running';
+    forget.addEventListener('click', async () => {
+      const r = await call(`/api/pipelines/runs/${encodeURIComponent(run.id)}/delete`, { method: 'POST', body: {} });
+      if (r.ok) {
+        pipe.runs = pipe.runs.filter((x) => x.id !== run.id);
+        pipe.view = null;
+        renderRunChip();
+        closePanel();
+      }
+    });
+    const lead = run.status === 'waiting'
+      ? `Step ${run.current + 1} costs money, so it waits for you. Earlier results are below.`
+      : run.status === 'failed' ? `Step ${run.current + 1} stopped. Run again starts at that step and keeps everything before it.`
+      : run.status === 'running' ? 'Working. You can close this panel or reload the page; the run keeps going.'
+      : 'All steps are done. The files are also in the gallery.';
+    els.pipeBody.append(
+      el('div', { class: 'pipe-head' }, [
+        el('div', { class: 'pipe-head-top' }, [el('h3', {}, [run.title || run.pipeline]), el('span', { class: 'run-pill', 'data-state': run.status }, [RUN_LABEL[run.status] || run.status])]),
+        el('p', { class: 'muted' }, [`${run.subject} · Element @${run.tag}`]),
+      ]),
+      el('p', { class: 'pipe-lead', role: 'status' }, [lead]),
+      stepList(steps, run),
+      el('div', { class: 'pipe-foot' }, [back, forget]),
+      el('div', { class: 'pipe-dock' }, [
+        el('div', { class: 'pipe-total small-total' }, [el('span', { class: 'k' }, ['Full list price']), el('strong', {}, [totalText(run.total)])]),
+        el('div', { class: 'panel-actions' }, [...actions, el('span', { class: 'key-note', role: 'status' }, [v.note || ''])]),
+      ]),
+    );
+  }
+
   // ---------- project look ----------
 
   async function loadProject() {
@@ -2295,20 +2701,23 @@
       return;
     }
     for (const k of state.keys) {
+      // A slot with a default is an address (your own ComfyUI), not a secret: shown as text, with its default.
+      const addr = !!k.default;
       const input = el('input', {
-        type: 'password', name: 'value', autocomplete: 'new-password', spellcheck: 'false',
-        'aria-label': `${k.env} value`, placeholder: 'Paste key',
+        type: addr ? 'url' : 'password', name: 'value', autocomplete: addr ? 'off' : 'new-password', spellcheck: 'false',
+        'aria-label': `${k.env} value`, placeholder: addr ? k.default : 'Paste key',
       });
       const note = el('p', { class: 'key-note', role: 'status' });
       const btn = el('button', { type: 'submit' }, ['Save']);
       const light = el('span', { class: 'light' + (k.set ? ' set' : ''), 'aria-hidden': 'true' });
-      const stateEl = el('span', { class: 'key-state' }, [k.set ? 'Set' : 'Not set']);
+      const stateEl = el('span', { class: 'key-state' }, [k.set ? 'Set' : (addr ? 'Default' : 'Not set')]);
       const head = el('div', { class: 'key-head' }, [
         light,
         el('span', { class: 'key-env' }, [k.env]),
         stateEl,
         docsLink(k),
       ]);
+      if (addr) note.textContent = `Address of your own ComfyUI (comfy-api-proxy), not a key. Empty uses ${k.default}.`;
       const form = el('form', { class: 'key-form', autocomplete: 'off' }, [input, btn, note]);
       form.addEventListener('submit', (ev) => saveKey(ev, k, { input, note, btn, light, stateEl }));
       els.keyList.append(el('div', { class: 'key', 'data-env': k.env }, [head, form]));
@@ -2350,7 +2759,8 @@
         updateEmpty();
       } else {
         ui.input.value = value; // keep what they typed so they can fix it
-        ui.note.textContent = (r.data && r.data.error) || `Could not save (${r.status}).`;
+        const code = r.data && r.data.error;
+        ui.note.textContent = code === 'invalid_url' ? `Use a plain http:// or https:// address, like ${k.default || 'http://127.0.0.1:8189'}.` : (code || `Could not save (${r.status}).`);
       }
     } catch (_) {
       ui.input.value = value;
@@ -2715,7 +3125,7 @@
     document.querySelectorAll('[data-close-panel]').forEach((b) => b.addEventListener('click', () => closePanel()));
     document.querySelectorAll('[data-open-panel]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.openPanel === 'library') openPanel(els.library, () => { renderNewElementImages(); loadElements(); });
-      else if (b.dataset.openPanel === 'prompts') openPanel(els.prompts, loadLibrary);
+      else if (b.dataset.openPanel === 'prompts') openPanel(els.prompts, () => { loadLibrary(); loadPipelines(); });
       else openPanel(els.editor, () => { renderEditor(); requestAnimationFrame(() => { sizePreview(); updateHead(); }); });
     }));
     els.addRef.addEventListener('click', () => els.fileIn.click());
@@ -2766,6 +3176,7 @@
     });
     window.addEventListener('resize', () => { if (openPanelEl === els.editor) { updateHead(); sizePreview(); } });
     els.projectForm.addEventListener('submit', saveProject);
+    els.pipeFile.addEventListener('change', () => { uploadPipePhoto(els.pipeFile.files[0]); els.pipeFile.value = ''; });
 
     els.form.addEventListener('submit', submit);
     els.prompt.addEventListener('input', autosize);
@@ -2817,6 +3228,8 @@
     refreshJobs();
     bindSetup();
     maybeFirstSetup();
+    loadPipelines();
+    call('/api/health').then((r) => { els.testBanner.hidden = !(r.ok && r.data && r.data.fake_providers); }).catch(() => {});
   }
 
   init();

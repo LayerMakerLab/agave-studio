@@ -29,6 +29,7 @@
     <symbol id="i-elements" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/></symbol>
     <symbol id="i-edit" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M8 5v14M16 5v14M2.5 12h19"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5M8 7.5h8M8 11h6"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.2 6h9.6M17.6 7.8l-4.4 8.4M6.4 7.8l4.4 8.4"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
     <symbol id="i-mark" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.75L12 13 3.5 8.25z"/><path d="M3.5 12.25L12 17l8.5-4.75"/><path d="M3.5 16.25L12 21l8.5-4.75"/><circle class="ember" cx="12" cy="8.25" r="1.6"/></symbol>
   </defs>
@@ -65,11 +66,13 @@
         <p id="modeSub" class="sub"></p>
       </div>
       <div class="top-right">
+        <button type="button" class="run-chip" id="runChip" hidden><span class="run-dot" aria-hidden="true"></span><span id="runChipText"></span></button>
         <p id="jobCount" class="count" aria-live="polite"></p>
         <button type="button" class="ghost retry-all" id="retryAll" hidden>Run failed again</button>
       </div>
     </header>
 
+    <div id="testBanner" class="banner test" role="status" hidden>Test mode: every model is a local fake. Nothing is sent to a provider and nothing is paid.</div>
     <div id="banner" class="banner" role="status" hidden>Engine offline. Start it with: <code>cd gateway &amp;&amp; cargo run --release</code></div>
 
     <section id="empty" class="empty">
@@ -239,9 +242,27 @@
     <h2 id="promptsTitle">Library</h2>
     <button type="button" class="icon-btn" data-close-panel aria-label="Close library"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
   </header>
+  <section class="pipe-section" aria-labelledby="pipeTitle">
+    <div class="pipe-section-head">
+      <h3 id="pipeTitle"><svg class="ico" aria-hidden="true"><use href="#i-flow"/></svg>Pipelines</h3>
+      <p class="muted small">Several steps in a row, each one fed by the last. You see the full price first, and every step that costs money waits for your click.</p>
+    </div>
+    <div class="pipe-grid" id="pipeGrid"></div>
+    <div class="run-list" id="runList" hidden></div>
+  </section>
+  <h3 class="lib-sub">Single steps</h3>
   <p class="muted intro">Ready workflows with the exact prompt, model and settings. Press Use this and it fills the composer; nothing runs until you press Generate.</p>
   <div class="lib-cats" id="libCats" role="group" aria-label="Filter by category"></div>
   <div class="lib-grid" id="libGrid"></div>
+</aside>
+
+<aside id="pipeline" class="settings wide" role="dialog" aria-modal="true" aria-labelledby="pipelineTitle" inert>
+  <header class="settings-head">
+    <h2 id="pipelineTitle">Pipeline</h2>
+    <button type="button" class="icon-btn" data-close-panel aria-label="Close pipeline"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </header>
+  <div id="pipeBody" class="pipe-body"></div>
+  <input type="file" id="pipeFile" accept="image/png,image/jpeg,image/webp" hidden>
 </aside>
 
 <aside id="editor" class="settings wide edit-panel" role="dialog" aria-modal="true" aria-labelledby="editorTitle" inert>
