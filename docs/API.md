@@ -5,14 +5,15 @@ Keys: read from env and from `config/keys.env` (gitignored, chmod 600). `config/
 Never return a key value from any endpoint. Never log a key.
 
 ## Endpoints (JSON)
-- GET  /api/health -> {"ok":true,"version":"0.1.0"}
+- GET  /api/health -> {"ok":true,"version":"0.1.0","fake_providers":false}
 - GET  /api/models -> {"models":[Model]}
   Model = {"id":"fal/kling-v2.1-master-t2v","name":"Kling 2.1 Master","vendor":"Kuaishou","provider":"fal",
            "modality":"video"|"image"|"audio"|"3d","modes":["t2v","i2v","t2i","i2i","tts","i23d"],
            "params":{"aspect":["16:9","9:16","1:1"],"duration":[5,10],"resolution":["720p","1080p"]},
            "key":"FAL_KEY","ready":true|false}
 - GET  /api/presets -> {"camera":[{"id":"dolly_in","name":"Dolly in","group":"push"}], "styles":[{"id":"film_35","name":"35mm film"}]}
-- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://..."}]}
+- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://...","default":null}]}
+  (`default` is set only for COMFY_BASE_URL, an address used when nothing is saved; values are never returned)
 - POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot)
 - GET  /api/voices -> {"voices":[{"id":"21m00Tcm4TlvDq8ikWAM","name":"Rachel","category":"premade"}]}
   The voices on the user's ElevenLabs account (needs ELEVENLABS_API_KEY; 412 key_missing without it). Text to speech
@@ -102,6 +103,43 @@ Never return a key value from any endpoint. Never log a key.
 - GET /api/models also returns `provider_credits` (null for most models).
 - The app's Library reads `web/app/library.json` (static): id, category, title, blurb, mode, model, aspect, recipe,
   needs_ref, prompt, preview (under /app/), preview_kind, preview_note. "Use this" fills the composer; nothing runs.
+
+## Pipelines
+Several existing steps in a row (gateway/src/pipelines.rs): a picture, Animate, Continue from the last frame, Save as
+Element, 3D, Add to edit. Each step is fed by the one before; runs live in data/pipelines.json (owner-only), so a run
+survives a reload or a restart. Generation steps go through the same checks as POST /api/generate.
+- GET /api/pipelines -> {"pipelines":[{id,title,blurb,note,needs_image,image_hint,subject_hint,tag,element_kind,
+  steps:[{title,kind:"generate"|"element"|"last_frame"|"edit",paid,model,model_name,vendor,price:{cents,credits,
+  credits_vendor,local}}],total:{cents,credits:[{vendor,credits}],unpriced,local_steps,paid_steps},keys:[{env,set}]}]}
+  Prices are the models.toml list prices with the composer's rounding (rate x seconds, or per picture, rounded up to
+  the cent per step); Meshy steps count credits; steps on your own ComfyUI are `local` and free.
+- GET /api/pipelines/runs -> {"runs":[Run]} newest first (moves running runs on first).
+  Run = {id:"p_<16 hex>",pipeline,title,created_at,subject,image,tag,status:"waiting"|"running"|"failed"|"done",current,
+         steps:[...step fields above, status:"pending"|"waiting"|"running"|"done"|"failed",job,outputs,error,key],total}
+- POST /api/pipelines/runs {"pipeline","subject" (1-60 chars, also the Element's words),"image":"/outputs/..." (when
+  needs_image),"tag"} -> 201 {"run"} | 400 unknown_pipeline/invalid_subject/image_required/invalid_image/invalid_tag |
+  409 tag_in_use (a run never replaces an existing Element). A paid first step waits; free steps start at once.
+- POST /api/pipelines/runs/{id}/step {"step":n} -> {"run"}: the user's click. Only the current step, when it is
+  waiting or failed (409 step_not_ready otherwise). A refused request (for example 412 missing_key) is recorded on the
+  step as `error` (and `key`), so the answer is the run either way. A failed step stops the run; clicking it again runs
+  only that step and keeps everything before it.
+- POST /api/pipelines/runs/{id}/delete {} -> {"ok":true} | 409 run_busy. Files and the Element stay.
+Paid steps (any provider that bills you) never start on their own. Free steps (Save as Element, the last frame with
+ffmpeg, Add to edit, and generations on your own ComfyUI) run as soon as the step before them is done; a background
+check every 2 s moves runs on with no page open.
+
+## Your own ComfyUI (Comfy API v2)
+Provider `comfy`: open-weights workflows (LTX-Video 0.9.5 text or image to video, FLUX.1 schnell) on your own ComfyUI
+behind comfy-api-proxy. `COMFY_BASE_URL` (default http://127.0.0.1:8189, no key) is an address, not a secret: http or
+https, no user name, password, query or fragment (400 invalid_url on POST /api/keys). Pictures go up with POST
+{base}/api/v2/assets and into the workflow as core/ASSET references; the job goes to POST {base}/api/v2/jobs and is
+polled at its own `urls.self`; outputs are downloaded from their `url`. Every link must stay on the base origin.
+
+## Test mode
+`AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (Library previews for
+pictures, an ffmpeg clip for video), with no key and no network; data goes to data/fake-providers (its own jobs,
+Elements, edit and keys file). `AGAVE_FAKE_FAIL=video,3d,image` makes the first job of each listed kind fail once, to try
+Run again. GET /api/health reports `fake_providers` and the studio shows a banner.
 
 ## Prompt craft (C++)
 `engine/promptcraft` (C++17) exposes extern "C" `const char* pc_compose(const char* prompt, const char* camera_id, const char* style_id)`

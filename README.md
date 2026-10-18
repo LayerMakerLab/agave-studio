@@ -28,6 +28,9 @@ show their credit cost). Keys are stored only on your computer, and the app has 
   queue. `gateway/models.toml` lists every model.
 - **Direct:** 20 camera moves, 10 looks, a prompt library, and Elements: saved characters or products you call
   with `@tag`.
+- **Pipelines:** Library flows that run several steps in a row (product photo to hero still, video and 3D model;
+  character sheet to two joined clips; a free short film on your own ComfyUI with LTX-Video). The full price shows
+  first and every paid step waits for your click.
 - **Edit:** trim and join clips, auto captions, remove pauses, reframe to 9:16, clean up voice, and set loudness
   to -14 LUFS.
 
@@ -66,6 +69,7 @@ variables with the same names also work.
 | [Black Forest Labs](https://bfl.ai) | `BFL_API_KEY` | FLUX 1.1 pro, FLUX.2 pro |
 | [ElevenLabs](https://elevenlabs.io) | `ELEVENLABS_API_KEY` | Text to speech |
 | [Meshy](https://www.meshy.ai) | `MESHY_API_KEY` | Image to 3D (GLB, USDZ, STL, 3MF) |
+| [Your own ComfyUI](https://docs.comfy.org/development/comfyui-server/api-proxy) | `COMFY_BASE_URL` (an address, not a key; default `http://127.0.0.1:8189`) | LTX-Video and FLUX.1 schnell on your own GPU, free, through comfy-api-proxy |
 
 Every model id and request shape in `models.toml` was checked against the provider's own docs or API schema; each
 entry notes what was checked and when. Not every model has had a live run yet, so if one fails, please open an issue.
