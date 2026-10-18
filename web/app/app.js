@@ -714,7 +714,9 @@
 
   function updateEmpty() {
     const keys = state.keys.filter(isKey);
-    els.emptyKey.hidden = !(state.staticLoaded && keys.length && !keys.some((k) => k.set));
+    // A saved ComfyUI address (a slot with a default and no choices) means a provider that needs no key is set up.
+    const keyless = state.keys.some((k) => k.default && !(Array.isArray(k.choices) && k.choices.length) && k.set);
+    els.emptyKey.hidden = !(state.staticLoaded && keys.length && !keys.some((k) => k.set) && !keyless);
   }
 
   // ---------- submit ----------
