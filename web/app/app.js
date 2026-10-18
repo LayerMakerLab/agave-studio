@@ -81,6 +81,7 @@
     undoAfter: '', // timeline right after it
     song: null, // { url, name } replacement soundtrack
     retried: new Set(), // failed job ids already run again this session
+    editRev: null, // revision of the engine's saved timeline this page last read or wrote
   };
 
   const cards = new Map(); // job id -> { el, sig, fill }
@@ -1257,7 +1258,23 @@
     const doc = editDoc();
     try { localStorage.setItem('agave.edit', JSON.stringify(doc)); } catch (_) { /* private mode */ }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { call('/api/edit', { method: 'POST', body: doc }).catch(() => {}); }, 400);
+    saveTimer = setTimeout(async () => {
+      // The rev says which saved timeline this page started from; the engine refuses it when something else (a
+      // pipeline's Add to edit, another tab) saved in between, and the newer timeline is loaded instead.
+      const body = state.editRev === null ? doc : { ...doc, rev: state.editRev };
+      let r = null;
+      try { r = await call('/api/edit', { method: 'POST', body }); } catch (_) { return; }
+      if (r.ok && r.data && typeof r.data.rev === 'number') state.editRev = r.data.rev;
+      else if (r.status === 409 && r.data && r.data.error === 'edit_changed') {
+        state.editRev = r.data.rev;
+        applyEditDoc(r.data.edit);
+        try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
+        renderSong();
+        renderEditor();
+        measureAll();
+        els.editNote.textContent = 'The timeline changed elsewhere (a pipeline added clips), so the newer one is loaded. Make your last change again.';
+      }
+    }, 400);
   }
 
   function applyEditDoc(v) {
@@ -1288,7 +1305,13 @@
   async function loadEditServer() {
     try {
       const r = await call('/api/edit');
-      if (r.ok && r.data && r.data.edit && (r.data.edit.clips.length || !state.edit.length)) applyEditDoc(r.data.edit);
+      if (r.ok && r.data && r.data.edit) {
+        const rev = typeof r.data.rev === 'number' ? r.data.rev : null;
+        // First read: an older local copy wins over an empty saved one. Later: a newer saved timeline always wins.
+        const take = state.editRev === null ? (r.data.edit.clips.length || !state.edit.length) : rev !== state.editRev;
+        if (take) applyEditDoc(r.data.edit);
+        state.editRev = rev;
+      }
     } catch (_) { /* offline: keep the local copy */ }
     renderSong();
     renderEditor();
@@ -2270,7 +2293,7 @@
   // reload. The full price shows before it starts; a step that costs money waits for a click here.
 
   const pipe = { list: null, runs: [], view: null, image: null, subject: '', tag: '', timer: null, editSeen: new Set(), busy: false };
-  const RUN_LABEL = { waiting: 'Waiting for you', running: 'Running', failed: 'Stopped', done: 'Finished' };
+  const RUN_LABEL = { waiting: 'Waiting for you', running: 'Running', failed: 'Failed', done: 'Finished' };
   const STEP_LABEL = { pending: 'Next', waiting: 'Waiting for your click', running: 'Running', done: 'Done', failed: 'Failed' };
   const STEP_ERRORS = {
     missing_key: (s) => `Add ${s.key || 'the provider key'} in Settings, then press Run again.`,
@@ -2291,10 +2314,21 @@
   }
   function stepPrice(s) {
     const p = s.price || {};
-    if (!s.paid) return p.local ? 'Free · your ComfyUI' : 'Free';
+    if (!s.paid) return p.local ? 'Free · local' : 'Free';
     if (p.cents) return `≈ ${cents(p.cents)}`;
     if (p.credits) return `${p.credits} ${p.credits_vendor || ''} cr`.trim();
     return 'No published price';
+  }
+
+  // A button that spends money: ember, with the cost first. Free and local actions stay quiet.
+  function actionButton(step, verb, onClick, id) {
+    const paid = step && step.paid;
+    const b = paid
+      ? el('button', { type: 'button', class: 'pill pay', id }, [`Pay ${stepPrice(step)} · ${verb}`])
+      : el('button', { type: 'button', class: 'pill quiet', id }, [verb.charAt(0).toUpperCase() + verb.slice(1)]);
+    if (paid) b.title = 'Spends money on your own key at the provider\'s list price';
+    b.addEventListener('click', () => onClick(b));
+    return b;
   }
 
   async function loadPipelines() {
@@ -2350,7 +2384,7 @@
     if (!top) return;
     const n = top.current + 1;
     els.runChipText.textContent = top.status === 'waiting' ? `Pipeline: step ${n} waits for you`
-      : top.status === 'failed' ? `Pipeline: step ${n} stopped` : `Pipeline: step ${n} running`;
+      : top.status === 'failed' ? `Pipeline: step ${n} failed` : `Pipeline: step ${n} running`;
     els.runChip.dataset.state = top.status;
     els.runChip.onclick = () => openRun(top.id);
   }
@@ -2431,12 +2465,22 @@
     return el('a', { class: 'pipe-thumb', href: o.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open file' }, [media]);
   }
 
+  function failedActions(s, i, onRetry) {
+    const row = el('div', { class: 'pipe-step-acts' }, [actionButton(s, 'run again', (b) => onRetry(i, b), 'pipeGo')]);
+    if (s.error === 'missing_key') {
+      const k = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
+      k.addEventListener('click', () => openSettings(s.key));
+      row.append(k);
+    }
+    return row;
+  }
+
   function stepError(s) {
     const fix = STEP_ERRORS[s.error];
     return fix ? fix(s) : s.error;
   }
 
-  function stepList(steps, run) {
+  function stepList(steps, run, onRetry) {
     const list = el('ol', { class: 'pipe-steps' });
     steps.forEach((s, i) => {
       const status = run ? s.status : 'pending';
@@ -2452,9 +2496,11 @@
           el('p', { class: 'pipe-step-meta' }, meta.filter(Boolean)),
           run ? el('p', { class: 'pipe-step-state' }, [STEP_LABEL[status] || status]) : null,
           status === 'failed' && s.error ? el('p', { class: 'pipe-step-error' }, [stepError(s)]) : null,
+          status === 'done' && s.note ? el('p', { class: 'pipe-step-note' }, [s.note]) : null,
           status === 'running' ? el('div', { class: 'bar indet' }, [el('i')]) : null,
+          status === 'failed' && onRetry ? failedActions(s, i, onRetry) : null,
         ]),
-        status === 'done' ? outThumb(s) : null,
+        (status === 'done' && outThumb(s)) || el('span', { class: 'pipe-thumb empty', 'aria-hidden': 'true' }),
       ]);
       list.append(row);
     });
@@ -2472,7 +2518,7 @@
   function renderSetupForm(v) {
     const p = v.pipeline;
     els.pipelineTitle.textContent = 'Pipeline';
-    const subject = el('input', { id: 'pipeSubject', maxlength: '60', placeholder: p.subject_hint, spellcheck: 'false', value: pipe.subject });
+    const subject = el('textarea', { id: 'pipeSubject', maxlength: '60', rows: '2', placeholder: p.subject_hint, spellcheck: 'false' }, [pipe.subject]);
     subject.addEventListener('input', () => { pipe.subject = subject.value; });
     const tag = el('input', { id: 'pipeTag', maxlength: '32', spellcheck: 'false', value: pipe.tag });
     tag.addEventListener('input', () => { pipe.tag = tag.value; });
@@ -2493,9 +2539,7 @@
     const local = !t.paid_steps;
     const missing = (p.keys || []).filter((k) => !k.set).map((k) => k.env);
     const first = p.steps[0];
-    const go = el('button', { type: 'button', class: 'pill', id: 'pipeStart' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }),
-      first.paid ? `Start · run step 1 (${stepPrice(first)})` : 'Start']);
-    go.addEventListener('click', () => startRun(p, go));
+    const go = actionButton(first.paid ? first : null, first.paid ? `start with ${first.title}` : 'start', (b) => startRun(p, b), 'pipeStart');
     const settingsBtn = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
     settingsBtn.addEventListener('click', () => openSettings(missing[0]));
     els.pipeBody.append(
@@ -2534,7 +2578,8 @@
     image_required: 'Add the start photo first.',
     invalid_subject: 'Say who or what it is in a few words (up to 60 characters).',
     invalid_tag: 'Tag: letters, numbers, - or _, starting with a letter or number.',
-    tag_in_use: 'That @tag is already an Element. Pick another tag.',
+    tag_in_use: 'That @tag is already one of your Elements. Pick another tag.',
+    tag_in_run: 'Another unfinished run uses that @tag. Pick another tag, or finish or forget that run.',
     invalid_image: 'That photo is missing. Add it again.',
   };
 
@@ -2595,42 +2640,61 @@
     }
   }
 
+  // Opens a job's card in the gallery (closing the panel) and points it out.
+  function openInGallery(jobId) {
+    closePanel();
+    const entry = jobId && cards.get(jobId);
+    if (!entry) return;
+    entry.el.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    entry.el.classList.add('flash');
+    setTimeout(() => entry.el.classList.remove('flash'), 1800);
+  }
+
+  function openEditPanel() {
+    loadEditServer();
+    openPanel(els.editor, () => { renderEditor(); requestAnimationFrame(() => { sizePreview(); updateHead(); }); });
+  }
+
+  // The finished run's results, large, with the one thing to do next.
+  function finishedHero(run) {
+    const made = run.steps.filter((s) => s.kind === 'generate' && s.status === 'done');
+    const strip = el('div', { class: 'pipe-results' });
+    for (const s of made) {
+      const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
+      if (!o) continue;
+      const media = o.kind === 'video'
+        ? el('video', { src: o.url, muted: true, loop: true, autoplay: !reduceMotion, playsinline: true, preload: 'metadata', 'aria-label': s.title })
+        : el('img', { src: o.url, alt: s.title, decoding: 'async' });
+      if (media.tagName === 'VIDEO') media.muted = true;
+      strip.append(el('figure', {}, [media, el('figcaption', {}, [s.title])]));
+    }
+    const edit = run.steps.find((s) => s.kind === 'edit');
+    const model = [...run.steps].reverse().find((s) => s.kind === 'generate' && /3D/i.test(s.title));
+    const last = [...made].reverse()[0];
+    const main = edit
+      ? el('button', { type: 'button', class: 'pill quiet', id: 'pipeMain' }, ['Open in Edit'])
+      : el('button', { type: 'button', class: 'pill quiet', id: 'pipeMain' }, [model ? 'Open 3D model' : 'Open in gallery']);
+    main.addEventListener('click', () => (edit ? openEditPanel() : openInGallery((model || last || {}).job)));
+    const useTag = el('button', { type: 'button', class: 'small-btn' }, [`Use @${run.tag}`]);
+    useTag.addEventListener('click', async () => {
+      closePanel();
+      await loadElements(); // the run saved this Element on the engine
+      insertTag(run.tag);
+      setStatus(`@${run.tag} is in the prompt: its picture goes with the request.`);
+    });
+    return el('section', { class: 'pipe-finished' }, [strip, el('div', { class: 'pipe-finished-acts' }, [main, useTag])]);
+  }
+
   function renderRunView(v) {
     const run = v.run;
     const steps = run.steps;
     els.pipelineTitle.textContent = 'Pipeline run';
     const cur = steps[run.current];
+    const retry = (i, b) => clickStep(run, i, b);
     const actions = [];
-    if (cur && (run.status === 'waiting' || run.status === 'failed')) {
-      const again = run.status === 'failed';
-      const label = again ? `Run again · step ${run.current + 1}` : `Run step ${run.current + 1} · ${cur.title}`;
-      const price = cur.paid ? ` (${stepPrice(cur)})` : '';
-      const b = el('button', { type: 'button', class: 'pill', id: 'pipeGo' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }), label + price]);
-      b.addEventListener('click', () => clickStep(run, run.current, b));
-      actions.push(b);
-      if (again && cur.error === 'missing_key') {
-        const s = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
-        s.addEventListener('click', () => openSettings(cur.key));
-        actions.push(s);
-      }
-    }
-    if (run.status === 'done') {
-      if (steps.some((s) => s.kind === 'edit')) {
-        const e = el('button', { type: 'button', class: 'pill' }, [el('span', { class: 'dot', 'aria-hidden': 'true' }), 'Open Edit']);
-        e.addEventListener('click', () => { loadEditServer(); openPanel(els.editor, () => { renderEditor(); requestAnimationFrame(() => { sizePreview(); updateHead(); }); }); });
-        actions.push(e);
-      }
-      const useTag = el('button', { type: 'button', class: 'small-btn' }, [`Use @${run.tag}`]);
-      useTag.addEventListener('click', async () => {
-        closePanel();
-        await loadElements(); // the run saved this Element on the engine
-        insertTag(run.tag);
-        setStatus(`@${run.tag} is in the prompt: its picture goes with the request.`);
-      });
-      actions.push(useTag);
-    }
+    if (cur && run.status === 'waiting') actions.push(actionButton(cur, `run ${cur.title}`, (b) => clickStep(run, run.current, b), 'pipeGo'));
     const back = el('button', { type: 'button', class: 'link-btn plain' }, ['All pipelines']);
-    back.addEventListener('click', () => { closePanel(true); openPanel(els.prompts, loadLibrary); });
+    back.addEventListener('click', () => { closePanel(true); openPanel(els.prompts, () => { loadLibrary(); loadPipelines(); }); });
     const forget = el('button', { type: 'button', class: 'link-btn' }, ['Forget this run']);
     forget.hidden = run.status === 'running';
     forget.addEventListener('click', async () => {
@@ -2644,7 +2708,7 @@
     });
     const lead = run.status === 'waiting'
       ? `Step ${run.current + 1} costs money, so it waits for you. Earlier results are below.`
-      : run.status === 'failed' ? `Step ${run.current + 1} stopped. Run again starts at that step and keeps everything before it.`
+      : run.status === 'failed' ? `Step ${run.current + 1} failed. Run again starts at that step and keeps everything before it.`
       : run.status === 'running' ? 'Working. You can close this panel or reload the page; the run keeps going.'
       : 'All steps are done. The files are also in the gallery.';
     els.pipeBody.append(
@@ -2652,12 +2716,12 @@
         el('div', { class: 'pipe-head-top' }, [el('h3', {}, [run.title || run.pipeline]), el('span', { class: 'run-pill', 'data-state': run.status }, [RUN_LABEL[run.status] || run.status])]),
         el('p', { class: 'muted' }, [`${run.subject} · Element @${run.tag}`]),
       ]),
-      el('p', { class: 'pipe-lead', role: 'status' }, [lead]),
-      stepList(steps, run),
-      el('div', { class: 'pipe-foot' }, [back, forget]),
+      run.status === 'done' ? finishedHero(run) : el('p', { class: 'pipe-lead', role: 'status' }, [lead]),
+      stepList(steps, run, run.status === 'failed' ? retry : null),
       el('div', { class: 'pipe-dock' }, [
         el('div', { class: 'pipe-total small-total' }, [el('span', { class: 'k' }, ['Full list price']), el('strong', {}, [totalText(run.total)])]),
-        el('div', { class: 'panel-actions' }, [...actions, el('span', { class: 'key-note', role: 'status' }, [v.note || ''])]),
+        actions.length || v.note ? el('div', { class: 'panel-actions' }, [...actions, el('span', { class: 'key-note', role: 'status' }, [v.note || ''])]) : null,
+        el('div', { class: 'pipe-foot' }, [back, forget]),
       ]),
     );
   }
