@@ -935,7 +935,10 @@ pub struct ComfyAsset {
 /// flux_schnell.json), with node inputs named as on the built-in node pages. The LTX image to video graph ran live
 /// end to end through this adapter (2026-10-18: ComfyUI and comfy-api-proxy 0.1.6 on an RTX 3080 over an ssh tunnel,
 /// ltx-video-2b-v0.9.5): asset upload, core/ASSET in LoadImage, SaveVideo with format/codec "auto", and the output
-/// download all worked. 20 steps, 768x512, 49 frames for 2 seconds.
+/// download all worked. 20 steps, 768x512, 49 frames for 2 seconds. LTXVImgToVideo strength is 1.0, the node's
+/// default, not the template's 0.15: the node sets the first frame's noise mask to 1 - strength, so 0.15 re-noises
+/// 85% of the start picture and the clip drifts away from it (seen in a live run). 1.0 keeps the first frame, so a
+/// shot starts on its picture and the next shot continues from the last frame.
 fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResult<Value> {
     // The core/ASSET reference shape the official SDK builds: id always, file_path and hash when known.
     let asset = |a: &ComfyAsset| {
@@ -964,7 +967,7 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
                 let a = image.ok_or_else(|| ProviderError::Failed("LTX-Video image to video needs a picture".into()))?;
                 g["78"] = json!({"class_type": "LoadImage", "inputs": {"image": asset(a)}});
                 g["77"] = json!({"class_type": "LTXVImgToVideo", "inputs": {"positive": ["6", 0], "negative": ["7", 0], "vae": ["44", 2],
-                    "image": ["78", 0], "width": w, "height": h, "length": length, "batch_size": 1, "strength": 0.15}});
+                    "image": ["78", 0], "width": w, "height": h, "length": length, "batch_size": 1, "strength": 1.0}});
                 g["69"] = json!({"class_type": "LTXVConditioning", "inputs": {"positive": ["77", 0], "negative": ["77", 1], "frame_rate": 25}});
                 json!(["77", 2])
             } else {
@@ -1214,7 +1217,7 @@ impl Provider for Fake {
         tokio::time::sleep(self.delay).await;
         let kind = Self::kind(&req.mode);
         if self.fail_once.lock().unwrap_or_else(|e| e.into_inner()).remove(kind) {
-            return Err(ProviderError::Failed(format!("Test mode: this {kind} step was set to fail once (AGAVE_FAKE_FAIL).")));
+            return Err(ProviderError::Failed("Test mode: this step was set to fail once, to try Run again.".into()));
         }
         let out = match kind {
             "video" => self.clip(ctx, req).await?,
@@ -1439,6 +1442,7 @@ mod tests {
         let g = comfy_workflow(&r, Some(&a), 7).unwrap();
         assert_eq!(g["78"]["inputs"]["image"], json!({"__type": "core/ASSET", "info": {"id": ASSET, "file_path": "agave-1.png"}}));
         assert_eq!(g["71"]["inputs"]["steps"], 20);
+        assert_eq!(g["77"]["inputs"]["strength"], 1.0, "the first frame is kept, so the look does not drift from the picture");
         assert_eq!(g["77"]["class_type"], "LTXVImgToVideo");
         assert_eq!(g["72"]["inputs"]["latent_image"], json!(["77", 2]));
         assert_eq!(ltxv_frames(5), 121);
