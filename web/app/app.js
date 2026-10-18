@@ -2993,12 +2993,17 @@
       return;
     }
     for (const k of state.keys) {
-      // A slot with a default is an address (your own ComfyUI), not a secret: shown as text, with its default.
-      const addr = !!k.default;
-      const input = el('input', {
-        type: addr ? 'url' : 'password', name: 'value', autocomplete: addr ? 'off' : 'new-password', spellcheck: 'false',
-        'aria-label': `${k.env} value`, placeholder: addr ? k.default : 'Paste key',
-      });
+      // A slot with choices (which client talks to your ComfyUI) is a picker showing its value. A slot with a
+      // default is an address (your own ComfyUI), not a secret: shown as text, with its default.
+      const choice = Array.isArray(k.choices) && k.choices.length > 0;
+      const addr = !choice && !!k.default;
+      const input = choice
+        ? el('select', { name: 'value', class: 'plain-select', 'aria-label': `${k.env} value` },
+          k.choices.map((c) => el('option', { value: c, selected: c === (k.value || k.default) }, [c])))
+        : el('input', {
+          type: addr ? 'url' : 'password', name: 'value', autocomplete: addr ? 'off' : 'new-password', spellcheck: 'false',
+          'aria-label': `${k.env} value`, placeholder: addr ? k.default : 'Paste key',
+        });
       const note = el('p', { class: 'key-note', role: 'status' });
       const btn = el('button', { type: 'submit' }, ['Save']);
       const light = el('span', { class: 'light' + (k.set ? ' set' : ''), 'aria-hidden': 'true' });
@@ -3010,6 +3015,7 @@
         docsLink(k),
       ]);
       if (addr) note.textContent = `Address of your own ComfyUI (comfy-api-proxy), not a key. Empty uses ${k.default}.`;
+      if (choice) note.textContent = 'Which client talks to your ComfyUI. builtin: the studio\'s own (the default). sdk: the official Comfy SDK (comfy-sdk), run through uv; needs uv installed.';
       const form = el('form', { class: 'key-form', autocomplete: 'off' }, [input, btn, note]);
       form.addEventListener('submit', (ev) => saveKey(ev, k, { input, note, btn, light, stateEl }));
       els.keyList.append(el('div', { class: 'key', 'data-env': k.env }, [head, form]));
@@ -3026,13 +3032,14 @@
     row.classList.add('flash');
     setTimeout(() => row.classList.remove('flash'), 1800);
     row.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
-    row.querySelector('input').focus({ preventScroll: true });
+    row.querySelector('input, select').focus({ preventScroll: true });
   }
 
   async function saveKey(ev, k, ui) {
     ev.preventDefault();
     const value = ui.input.value;
-    ui.input.value = '';
+    const choice = Array.isArray(k.choices) && k.choices.length > 0;
+    if (!choice) ui.input.value = '';
     if (!value.trim()) {
       ui.note.textContent = 'Enter a key first.';
       ui.input.focus();
@@ -3044,6 +3051,7 @@
       const r = await call('/api/keys', { method: 'POST', body: { env: k.env, value } });
       if (r.ok) {
         k.set = true;
+        if (choice) k.value = value;
         ui.light.classList.add('set');
         ui.stateEl.textContent = 'Set';
         ui.note.textContent = 'Saved';
@@ -3052,7 +3060,7 @@
       } else {
         ui.input.value = value; // keep what they typed so they can fix it
         const code = r.data && r.data.error;
-        ui.note.textContent = code === 'invalid_url' ? `Use a plain http:// or https:// address, like ${k.default || 'http://127.0.0.1:8189'}.` : (code || `Could not save (${r.status}).`);
+        ui.note.textContent = code === 'invalid_choice' ? `Pick one of: ${(k.choices || []).join(', ')}.` : code === 'invalid_url' ? `Use a plain http:// or https:// address, like ${k.default || 'http://127.0.0.1:8189'}.` : (code || `Could not save (${r.status}).`);
       }
     } catch (_) {
       ui.input.value = value;

@@ -287,6 +287,8 @@ a:hover { color: var(--silver-1); }
   font: 400 14px/1 var(--font-mono);
 }
 .key-form input::placeholder { color: var(--ink-3); }
+/* The ComfyUI client picker sits on the row like a key field, with Save beside it. */
+.key-form select.plain-select { flex: 1 1 180px; width: auto; height: 40px; font: 400 14px/1 var(--font-mono); }
 .key-form input:focus-visible { outline: none; border-color: rgba(244, 242, 238, 0.55); box-shadow: 0 0 0 1px rgba(244, 242, 238, 0.55); }
 .key-form button {
   height: 40px; padding: 0 18px; border-radius: 999px;
