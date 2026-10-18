@@ -2520,19 +2520,45 @@
     loadRuns();
   }
 
-  // A video shows its first frame as a still (it plays on hover or focus), so a thumbnail is never caught mid-frame.
+  // A video shows its first frame as a still, so a thumbnail is never caught mid-frame. Only its start is fetched
+  // until it plays.
   function stillVideo(url, label) {
-    const v = el('video', { src: `${url}#t=0.05`, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-label': label });
+    const v = el('video', { src: `${url}#t=0.05`, muted: true, loop: true, playsinline: true, preload: 'metadata', 'aria-label': label });
     v.muted = true;
-    const host = () => v.closest('a, figure') || v;
-    v.addEventListener('loadeddata', () => {
-      const h = host();
-      if (!reduceMotion) {
-        h.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
-        h.addEventListener('mouseleave', () => { v.pause(); v.currentTime = 0.05; });
-      }
-    }, { once: true });
     return v;
+  }
+
+  // A small thumbnail draws the video's first frame, whole (16:9 box, letterboxed), onto a canvas with high-quality
+  // scaling: the browser's own video scaling turns a frame shrunk ten times into noise.
+  function frameStill(v) {
+    const draw = () => {
+      if (v.readyState < 2 || !v.videoWidth || !v.isConnected) return;
+      const c = el('canvas', { width: '192', height: '108', role: 'img', 'aria-label': v.getAttribute('aria-label') || '' });
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      const k = Math.min(c.width / v.videoWidth, c.height / v.videoHeight);
+      const w = v.videoWidth * k;
+      const h = v.videoHeight * k;
+      ctx.drawImage(v, (c.width - w) / 2, (c.height - h) / 2, w, h);
+      v.replaceWith(c);
+      v.removeAttribute('src');
+      v.load();
+    };
+    v.addEventListener('seeked', draw);
+    v.addEventListener('loadeddata', draw);
+  }
+
+  // Plays a still video while the pointer is over its card or the card has keyboard focus.
+  function playOnHover(host, v) {
+    if (reduceMotion) return;
+    const play = () => { v.play().catch(() => {}); };
+    const stop = () => { if (host.matches(':hover') || host.contains(document.activeElement)) return; v.pause(); v.currentTime = 0.05; };
+    host.addEventListener('mouseenter', play);
+    host.addEventListener('focusin', play);
+    host.addEventListener('mouseleave', stop);
+    host.addEventListener('focusout', () => requestAnimationFrame(stop));
   }
 
   function outThumb(s) {
@@ -2541,7 +2567,9 @@
     const media = o.kind === 'video'
       ? stillVideo(o.url, `${s.title} result`)
       : el('img', { src: o.url, alt: `${s.title} result`, loading: 'lazy', decoding: 'async' });
-    return el('a', { class: 'pipe-thumb', href: o.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open file' }, [media]);
+    const a = el('a', { class: `pipe-thumb ${o.kind}`, href: o.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open file' }, [media]);
+    if (o.kind === 'video') frameStill(media);
+    return a;
   }
 
   function failedActions(s, i, onRetry) {
@@ -2565,7 +2593,8 @@
       const status = run ? s.status : 'pending';
       const what = s.model_name ? `${s.model_name}${s.vendor ? ' · ' + s.vendor : ''}` : (s.detail || '');
       const meta = [!run && s.paid ? `${what} · waits for your click` : what];
-      const row = el('li', { class: `pipe-step ${status}${run && i === run.current && run.status !== 'done' ? ' current' : ''}` }, [
+      const thumb = status === 'done' ? outThumb(s) : null;
+      const row = el('li', { class: `pipe-step ${status}${run && i === run.current && run.status !== 'done' ? ' current' : ''}${thumb ? '' : ' no-thumb'}` }, [
         el('span', { class: 'pipe-num', 'aria-hidden': 'true' }, [status === 'done' ? '✓' : String(i + 1)]),
         el('div', { class: 'pipe-step-main' }, [
           el('div', { class: 'pipe-step-top' }, [
@@ -2579,8 +2608,7 @@
           status === 'running' ? el('div', { class: 'bar indet' }, [el('i')]) : null,
           status === 'failed' && onRetry ? failedActions(s, i, onRetry) : null,
         ]),
-        // The grid keeps the thumbnail column reserved even when there is none, so prices never move.
-        status === 'done' ? outThumb(s) : null,
+        thumb,
       ]);
       list.append(row);
     });
@@ -2603,7 +2631,7 @@
     const tag = el('input', { id: 'pipeTag', maxlength: '32', spellcheck: 'false', value: pipe.tag });
     tag.addEventListener('input', () => { pipe.tag = tag.value; });
     const form = el('div', { class: 'panel-box pipe-form' }, [
-      el('label', { class: 'field' }, [el('span', { class: 'k' }, [p.element_kind === 'product' ? 'The product, in a few words' : 'Who it is, in a few words']), subject]),
+      el('label', { class: 'field' }, [el('span', { class: 'k' }, [p.element_kind === 'product' ? 'The product, in a few words' : p.needs_image ? "What's in it, in a few words" : 'Who it is, in a few words']), subject]),
       el('label', { class: 'field' }, [el('span', { class: 'k' }, ['Element tag']), tag]),
       el('p', { class: 'muted small' }, ['These words and the tag become the run\'s Element, so later steps keep the same look.']),
     ]);
@@ -2739,11 +2767,16 @@
   function finishedHero(run) {
     const made = run.steps.filter((s) => s.kind === 'generate' && s.status === 'done');
     const strip = el('div', { class: 'pipe-results' });
-    for (const s of made) {
+    const isClip = (s) => (s.outputs || []).some((x) => x.kind === 'video');
+    // A run that ends on the Edit timeline shows its clips first (the finished film), then the pictures before them.
+    const shown = run.steps.some((s) => s.kind === 'edit') ? [...made.filter(isClip), ...made.filter((s) => !isClip(s))] : made;
+    for (const s of shown) {
       const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
       if (!o) continue;
       const media = o.kind === 'video' ? stillVideo(o.url, s.title) : el('img', { src: o.url, alt: s.title, decoding: 'async' });
-      strip.append(el('figure', {}, [media, el('figcaption', {}, [s.title])]));
+      const fig = el('figure', o.kind === 'video' ? { tabindex: '0' } : {}, [media, el('figcaption', {}, [s.title])]);
+      if (o.kind === 'video') playOnHover(fig, media);
+      strip.append(fig);
     }
     // A fade on the right edge while more results are off to the side.
     const edge = () => strip.classList.toggle('more', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 4);
