@@ -12,7 +12,8 @@ It talks only to the ComfyUI address in the COMFY_BASE_URL environment variable,
 (your own ComfyUI behind comfy-api-proxy; no key is sent). The gateway picks every file path. Each command prints
 one JSON object on stdout; errors go to stderr with a non-zero exit.
 
-    submit --workflow=<api-format.json> [--image-node=<id> --image=<picture>]   -> {"job_id": "..."}
+    submit --workflow=<api-format.json> [--image-node=<id> --image=<picture>]...   -> {"job_id": "..."}
+                        (one --image-node/--image pair per LoadImage picture, in order)
     status -- <job_id>  -> {"status": "...", "outputs": [{"name", "content_type", "node_id", "type"}], "error": ...}
     fetch --name=<output name> --out=<path> --max-bytes=<n> -- <job_id>       -> {"bytes": n, "content_type": "..."}
     selftest            -> {"ok": true}: the origin and redirect checks against a mock transport (no network)
@@ -119,10 +120,11 @@ def error_text(err) -> str | None:
 def cmd_submit(args) -> dict:
     c = client()
     wf = c.workflows.from_file(args.workflow)
-    if args.image:
-        if not args.image_node:
-            fail("--image needs --image-node")
-        wf.set_input(args.image_node, "image", c.assets.from_file(args.image))
+    nodes, images = args.image_node or [], args.image or []
+    if len(nodes) != len(images):
+        fail("each --image needs its --image-node")
+    for node, path in zip(nodes, images):
+        wf.set_input(node, "image", c.assets.from_file(path))
     job = c.submit(wf)
     return {"job_id": job.id}
 
@@ -231,8 +233,8 @@ def main() -> None:
     sub = p.add_subparsers(dest="command", required=True)
     s = sub.add_parser("submit")
     s.add_argument("--workflow", required=True)
-    s.add_argument("--image-node")
-    s.add_argument("--image")
+    s.add_argument("--image-node", action="append")
+    s.add_argument("--image", action="append")
     st = sub.add_parser("status")
     st.add_argument("job_id")
     f = sub.add_parser("fetch")

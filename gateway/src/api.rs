@@ -262,6 +262,9 @@ pub(crate) struct GenerateReq {
     /// Set by pipeline steps ("Step 3 · Video"); never read from a request.
     #[serde(skip)]
     pub(crate) label: Option<String>,
+    /// Set by pipeline steps: the run's Element photo as an extra guide picture (LTX-Video); never read from a request.
+    #[serde(skip)]
+    pub(crate) guide_url: Option<String>,
 }
 
 /// The requested option if the model allows it, else the first allowed value.
@@ -414,6 +417,10 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         (None, Vec::new())
     };
 
+    if req.guide_url.as_deref().is_some_and(|u| !valid_image_src(u)) {
+        return Err(fail(StatusCode::BAD_REQUEST, "invalid_image_url"));
+    }
+
     // Video starts from an approved still unless the project turns the rule off.
     let project = st.studio.project();
     if project.still_first && req.mode == "t2v" {
@@ -495,6 +502,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         image_urls,
         voice_id,
         label: req.label.clone(),
+        guide_url: req.guide_url.clone(),
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs"));
@@ -1030,6 +1038,7 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
+        guide_url: None,
     };
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), sub);
     (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response()

@@ -14,13 +14,18 @@ esac
 inside() { case "$1" in "$PWD"/*) return 0 ;; *) echo "path outside the work folder: $1" >&2; exit 5 ;; esac; }
 case "$cmd" in
   submit)
-    wf=""; node=""; img=""
+    wf=""; nodes=""
     while [ $# -gt 0 ]; do
-      case "$1" in --workflow=*) wf="${1#*=}" ;; --image-node=*) node="${1#*=}" ;; --image=*) img="${1#*=}" ;; esac; shift
+      case "$1" in
+        --workflow=*) wf="${1#*=}" ;;
+        --image-node=*) nodes="$nodes ${1#*=}" ;;
+        --image=*) img="${1#*=}"; inside "$img"; [ -f "$img" ] || { echo "no picture" >&2; exit 4; } ;;
+      esac; shift
     done
     inside "$wf"; [ -f "$wf" ] || { echo "no workflow file" >&2; exit 4; }
-    if [ -n "$img" ]; then inside "$img"; [ -f "$img" ] || { echo "no picture" >&2; exit 4; }; fi
-    [ "$node" = "78" ] || { echo "picture for node '$node'" >&2; exit 4; }
+    want=" 78"; [ "$mode" = guided ] && want=" 78 79"
+    sorted=$(printf '%s\n' $nodes | sort | tr '\n' ' ' | sed 's/^/ /; s/ $//')
+    [ "$sorted" = "$want" ] || { echo "pictures for nodes '$sorted', wanted '$want'" >&2; exit 4; }
     if [ "$mode" = oddid ]; then echo '{"job_id": "../../etc"}'; else echo '{"job_id": "11111111-2222-4333-a444-555555555555"}'; fi ;;
   status)
     [ "$1" = "--" ] || { echo "no -- before the job id" >&2; exit 4; }; shift

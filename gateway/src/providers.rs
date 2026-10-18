@@ -45,6 +45,9 @@ pub struct SubmitReq {
     pub voice_id: Option<String>,
     /// What the request is for, in a few words ("Step 3 · Video"). Only test mode shows it, on its placeholders.
     pub label: Option<String>,
+    /// An extra picture that keeps the look (a pipeline's Element photo). Only the LTX-Video 0.9.8 graph uses it,
+    /// as an LTXVAddGuide frame.
+    pub guide_url: Option<String>,
 }
 
 pub enum Submitted {
@@ -947,6 +950,11 @@ fn ltxv_frames(seconds: u32) -> u32 {
 
 const LTXV_NEGATIVE: &str = "low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly";
 
+/// Where and how strongly the guide picture (a run's Element photo) steers a later LTX-Video shot: frame_idx counts
+/// from the end when negative (-1 = the last frame), strength is LTXVAddGuide's 0..10. Change them here only.
+pub const LTXV_GUIDE_FRAME_IDX: i64 = -1;
+pub const LTXV_GUIDE_STRENGTH: f64 = 0.5;
+
 /// The sigma schedule the distilled LTX-Video models expect (Lightricks' note in ltxvideo-i2v-distilled.json).
 const LTXV_DISTILLED_SIGMAS: &str = "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0";
 
@@ -966,7 +974,7 @@ pub struct ComfyAsset {
 /// default, not the template's 0.15: the node sets the first frame's noise mask to 1 - strength, so 0.15 re-noises
 /// 85% of the start picture and the clip drifts away from it (seen in a live run). 1.0 keeps the first frame, so a
 /// shot starts on its picture and the next shot continues from the last frame.
-fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResult<Value> {
+fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, guide: Option<&ComfyAsset>, seed: u64) -> PResult<Value> {
     // The core/ASSET reference shape the official SDK builds: id always, file_path and hash when known.
     let asset = |a: &ComfyAsset| {
         let mut info = json!({"id": a.id, "file_path": a.file_path});
@@ -1020,7 +1028,7 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
             let (w, h) = ltxv_size(r.aspect.as_deref());
             let length = ltxv_frames(r.duration.unwrap_or(2));
             let a = image.ok_or_else(|| ProviderError::Failed("LTX-Video image to video needs a picture".into()))?;
-            Ok(json!({
+            let mut g = json!({
                 "38": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5xxl_fp16.safetensors", "type": "ltxv", "device": "default"}},
                 "44": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "ltxv-2b-0.9.8-distilled.safetensors"}},
                 "6": {"class_type": "CLIPTextEncode", "inputs": {"text": r.prompt, "clip": ["38", 0]}},
@@ -1039,7 +1047,26 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, seed: u64) -> PResu
                 "8": {"class_type": "VAEDecode", "inputs": {"samples": ["101", 0], "vae": ["44", 2]}},
                 "80": {"class_type": "CreateVideo", "inputs": {"images": ["8", 0], "fps": 24}},
                 "81": {"class_type": "SaveVideo", "inputs": {"video": ["80", 0], "filename_prefix": "video/agave", "format": "auto", "codec": "auto"}}
-            }))
+            });
+            // An optional guide picture (a later shot gets the run's Element photo, so the look does not drift from
+            // the original). Wired as in Lightricks' example ComfyUI-LTXVideo
+            // example_workflows/low_level/ltxvideo-frame-interpolation.json (35ec43a): text conditioning and latent
+            // -> LTXVAddGuide (image through LTXVPreprocess) -> LTXVConditioning and the sampler; after sampling,
+            // LTXVCropGuides (with LTXVConditioning's output) cuts the guide frames off the latent before VAEDecode.
+            // Both nodes are stock in ComfyUI c06bf5f (comfy_extras/nodes_lt.py: LTXVAddGuide at line 251,
+            // LTXVCropGuides at 649).
+            if let Some(gd) = guide {
+                g["79"] = json!({"class_type": "LoadImage", "inputs": {"image": asset(gd)}});
+                g["83"] = json!({"class_type": "LTXVPreprocess", "inputs": {"image": ["79", 0], "img_compression": 38}});
+                g["96"] = json!({"class_type": "LTXVAddGuide", "inputs": {"positive": ["95", 0], "negative": ["95", 1], "vae": ["44", 2],
+                    "latent": ["95", 2], "image": ["83", 0], "frame_idx": LTXV_GUIDE_FRAME_IDX, "strength": LTXV_GUIDE_STRENGTH}});
+                g["69"]["inputs"]["positive"] = json!(["96", 0]);
+                g["69"]["inputs"]["negative"] = json!(["96", 1]);
+                g["101"]["inputs"]["latent_image"] = json!(["96", 2]);
+                g["103"] = json!({"class_type": "LTXVCropGuides", "inputs": {"positive": ["69", 0], "negative": ["69", 1], "latent": ["101", 0]}});
+                g["8"]["inputs"]["samples"] = json!(["103", 2]);
+            }
+            Ok(g)
         }
         "flux1-schnell-fp8" => {
             let (w, h) = match r.aspect.as_deref().unwrap_or("16:9") {
@@ -1169,7 +1196,12 @@ impl ComfyRun<'_> {
             None => None,
         };
         let seed = req.seed.map(|s| s.unsigned_abs()).unwrap_or_else(|| u64::from_str_radix(&media::random_hex(6), 16).unwrap_or(0));
-        let workflow = comfy_workflow(req, image.as_ref(), seed)?;
+        // A guide picture only goes up for a graph that uses it.
+        let guide = match req.guide_url.as_deref().filter(|_| req.endpoint == "ltxv-0.9.8-distilled-i2v") {
+            Some(src) => Some(self.upload(ctx, &base, src).await?),
+            None => None,
+        };
+        let workflow = comfy_workflow(req, image.as_ref(), guide.as_ref(), seed)?;
         let url = format!("{}/api/v2/jobs", base.as_str().trim_end_matches('/'));
         let body = json!({"workflow": workflow});
         let idem = uuid_key();
@@ -1336,6 +1368,7 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            guide_url: None,
         }
     }
 
@@ -1516,7 +1549,7 @@ mod tests {
         let mut r = req("ltxv-0.9.5-t2v", "16:9");
         r.mode = "t2v".into();
         r.duration = Some(4);
-        let g = comfy_workflow(&r, None, 7).unwrap();
+        let g = comfy_workflow(&r, None, None, 7).unwrap();
         assert_eq!(ltxv_frames(2), 49, "2 seconds is the 49 frames of the tested graph");
         assert_eq!(g["70"]["class_type"], "EmptyLTXVLatentVideo");
         assert_eq!((g["70"]["inputs"]["width"].as_u64(), g["70"]["inputs"]["height"].as_u64(), g["70"]["inputs"]["length"].as_u64()), (Some(768), Some(512), Some(97)));
@@ -1528,19 +1561,19 @@ mod tests {
         assert_eq!(g["81"]["class_type"], "SaveVideo");
         // Image to video loads the uploaded picture as an asset reference.
         r.endpoint = "ltxv-0.9.5-i2v".into();
-        assert!(comfy_workflow(&r, None, 7).is_err());
+        assert!(comfy_workflow(&r, None, None, 7).is_err());
         let a = ComfyAsset { id: ASSET.into(), file_path: "agave-1.png".into(), hash: None };
-        let g = comfy_workflow(&r, Some(&a), 7).unwrap();
+        let g = comfy_workflow(&r, Some(&a), None, 7).unwrap();
         assert_eq!(g["78"]["inputs"]["image"], json!({"__type": "core/ASSET", "info": {"id": ASSET, "file_path": "agave-1.png"}}));
         assert_eq!(g["71"]["inputs"]["steps"], 20);
         assert_eq!(g["77"]["inputs"]["strength"], 1.0, "the first frame is kept, so the look does not drift from the picture");
         assert_eq!(g["77"]["class_type"], "LTXVImgToVideo");
         assert_eq!(g["72"]["inputs"]["latent_image"], json!(["77", 2]));
         assert_eq!(ltxv_frames(5), 121);
-        let g = comfy_workflow(&req("flux1-schnell-fp8", "9:16"), None, 1).unwrap();
+        let g = comfy_workflow(&req("flux1-schnell-fp8", "9:16"), None, None, 1).unwrap();
         assert_eq!((g["27"]["inputs"]["width"].as_u64(), g["27"]["inputs"]["height"].as_u64()), (Some(768), Some(1344)));
         assert_eq!(g["31"]["inputs"]["steps"], 4);
-        assert!(comfy_workflow(&req("some-other-workflow", "1:1"), None, 1).is_err());
+        assert!(comfy_workflow(&req("some-other-workflow", "1:1"), None, None, 1).is_err());
     }
 
     // ---- COMFY_CLIENT=sdk: the same adapter on the Comfy SDK sidecar, driven by a stub script (no uv, no network).
@@ -1678,9 +1711,72 @@ mod tests {
     }
 
     #[test]
+    fn a_guide_picture_is_added_with_ltxv_add_guide_and_cropped_before_decode() {
+        let a = ComfyAsset { id: ASSET.into(), file_path: "agave-1.png".into(), hash: None };
+        let gd = ComfyAsset { id: JOB.into(), file_path: "agave-2.png".into(), hash: None };
+        let g = comfy_workflow(&i2v_req(), Some(&a), Some(&gd), 7).unwrap();
+        assert_eq!((g["79"]["class_type"].as_str(), g["79"]["inputs"]["image"]["info"]["id"].as_str()), (Some("LoadImage"), Some(JOB)));
+        assert_eq!(g["83"]["inputs"]["image"], json!(["79", 0]));
+        let add = &g["96"];
+        assert_eq!(add["class_type"], "LTXVAddGuide");
+        assert_eq!((add["inputs"]["positive"].clone(), add["inputs"]["negative"].clone(), add["inputs"]["latent"].clone()), (json!(["95", 0]), json!(["95", 1]), json!(["95", 2])));
+        assert_eq!((add["inputs"]["image"].clone(), add["inputs"]["vae"].clone()), (json!(["83", 0]), json!(["44", 2])));
+        assert_eq!((add["inputs"]["frame_idx"].as_i64(), add["inputs"]["strength"].as_f64()), (Some(LTXV_GUIDE_FRAME_IDX), Some(LTXV_GUIDE_STRENGTH)));
+        assert_eq!((g["69"]["inputs"]["positive"].clone(), g["69"]["inputs"]["negative"].clone()), (json!(["96", 0]), json!(["96", 1])));
+        assert_eq!(g["101"]["inputs"]["latent_image"], json!(["96", 2]), "the sampler works on the latent with the guide frames");
+        let crop = &g["103"];
+        assert_eq!(crop["class_type"], "LTXVCropGuides");
+        assert_eq!((crop["inputs"]["positive"].clone(), crop["inputs"]["latent"].clone()), (json!(["69", 0]), json!(["101", 0])));
+        assert_eq!(g["8"]["inputs"]["samples"], json!(["103", 2]), "the guide frames are cut off before decoding");
+        assert_eq!(g["95"]["inputs"]["image"], json!(["82", 0]), "the start picture still opens the shot");
+        let stock = ["CLIPLoader", "CheckpointLoaderSimple", "CLIPTextEncode", "LoadImage", "LTXVPreprocess", "LTXVImgToVideo", "LTXVAddGuide",
+            "LTXVConditioning", "CFGGuider", "KSamplerSelect", "ManualSigmas", "RandomNoise", "SamplerCustomAdvanced", "LTXVCropGuides", "VAEDecode",
+            "CreateVideo", "SaveVideo"];
+        assert!(g.as_object().unwrap().values().all(|n| stock.contains(&n["class_type"].as_str().unwrap())), "stock ComfyUI nodes only");
+    }
+
+    #[tokio::test]
+    async fn the_sdk_client_sends_both_pictures_of_a_guided_shot() {
+        let ctx = test_ctx("sdk_guided");
+        std::fs::write(ctx.outputs_dir.join("still.png"), crate::placeholder::picture("1:1", "x", "x", "x")).unwrap();
+        std::fs::write(ctx.outputs_dir.join("face.png"), crate::placeholder::picture("1:1", "y", "y", "y")).unwrap();
+        let dir = ctx.outputs_dir.parent().unwrap().join("sdk_guided_work");
+        let t = sdk("guided", &dir);
+        let mut r = i2v_req();
+        r.guide_url = Some("/outputs/face.png".into());
+        assert!(matches!(ComfyRun { t: &t }.submit(&ctx, BASE, &r).await, Ok(Submitted::Queued(_))), "the stub wants pictures for nodes 78 and 79");
+        assert!(work_files(&dir).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_guide_picture_is_uploaded_only_for_the_098_graph() {
+        let ctx = test_ctx("comfy_guide");
+        std::fs::write(ctx.outputs_dir.join("still.png"), crate::placeholder::picture("1:1", "x", "x", "x")).unwrap();
+        std::fs::write(ctx.outputs_dir.join("face.png"), crate::placeholder::picture("1:1", "y", "y", "y")).unwrap();
+        for (endpoint, uploads) in [("ltxv-0.9.8-distilled-i2v", 2), ("ltxv-0.9.5-i2v", 1)] {
+            let t = FakeComfy::default();
+            t.answer_json("POST", &format!("{BASE}/api/v2/assets"), 201, json!({"id": ASSET}));
+            t.answer_json("POST", &format!("{BASE}/api/v2/assets"), 201, json!({"id": SDK_JOB}));
+            t.answer_json("POST", &format!("{BASE}/api/v2/jobs"), 201, json!({"id": JOB, "status": "queued", "urls": {"self": format!("/api/v2/jobs/{JOB}")}}));
+            let comfy = Comfy { transport: t };
+            let mut r = i2v_req();
+            r.endpoint = endpoint.into();
+            r.guide_url = Some("/outputs/face.png".into());
+            assert!(comfy.submit(&ctx, BASE, &r).await.is_ok());
+            let calls = comfy.transport.calls.lock().unwrap();
+            assert_eq!(calls.iter().filter(|c| c.0 == "UPLOAD").count(), uploads, "{endpoint}");
+            let wf = &calls.iter().find(|c| c.0 == "POST").unwrap().2.as_ref().unwrap()["workflow"];
+            assert_eq!(wf.get("96").is_some(), uploads == 2, "{endpoint}");
+            if uploads == 2 {
+                assert_eq!(wf["79"]["inputs"]["image"]["info"]["id"], SDK_JOB, "the second upload is the guide");
+            }
+        }
+    }
+
+    #[test]
     fn ltxv_098_distilled_uses_stock_nodes_and_keeps_the_first_frame() {
         let a = ComfyAsset { id: ASSET.into(), file_path: "agave-1.png".into(), hash: None };
-        let g = comfy_workflow(&i2v_req(), Some(&a), 7).unwrap();
+        let g = comfy_workflow(&i2v_req(), Some(&a), None, 7).unwrap();
         assert_eq!(g["44"]["inputs"]["ckpt_name"], "ltxv-2b-0.9.8-distilled.safetensors");
         assert_eq!(g["95"]["inputs"]["strength"], 1.0);
         assert_eq!((g["95"]["inputs"]["width"].as_u64(), g["95"]["inputs"]["height"].as_u64(), g["95"]["inputs"]["length"].as_u64()), (Some(768), Some(512), Some(49)));
@@ -1688,7 +1784,10 @@ mod tests {
         assert_eq!(g["99"]["inputs"]["cfg"], 1);
         assert_eq!(g["98"]["inputs"]["sigmas"], "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0");
         assert_eq!(g["78"]["inputs"]["image"]["info"]["id"], ASSET);
+        assert!(g.get("96").is_none() && g.get("103").is_none(), "no guide nodes without a guide");
+        assert_eq!(g["8"]["inputs"]["samples"], json!(["101", 0]));
         let stock = ["CLIPLoader", "CheckpointLoaderSimple", "CLIPTextEncode", "LoadImage", "LTXVPreprocess", "LTXVImgToVideo", "LTXVConditioning",
+            "LTXVAddGuide", "LTXVCropGuides",
             "CFGGuider", "KSamplerSelect", "ManualSigmas", "RandomNoise", "SamplerCustomAdvanced", "VAEDecode", "CreateVideo", "SaveVideo"];
         for (id, n) in g.as_object().unwrap() {
             assert!(stock.contains(&n["class_type"].as_str().unwrap()), "node {id} is not a stock ComfyUI node");

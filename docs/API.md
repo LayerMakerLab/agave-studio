@@ -155,7 +155,9 @@ SaveVideo mp4 as type "image"). Job answers are read under the 64 MB JSON cap, f
 An output with an odd name (a "..", a leading slash, characters other than letters, digits and ._-/) or content type is
 left out. comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6,
 ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and ran live on 2026-10-18 through
-both clients.
+both clients. A pipeline step can add a guide picture to it (the run's Element photo, uploaded as a second asset):
+LoadImage -> LTXVPreprocess -> LTXVAddGuide after LTXVImgToVideo, and LTXVCropGuides cuts the guide frames off before
+VAEDecode. Its frame_idx and strength are LTXV_GUIDE_FRAME_IDX and LTXV_GUIDE_STRENGTH in providers.rs (-1 and 0.5).
 
 Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
 - `builtin` (default): the gateway's own Rust client, making the HTTP calls above.
@@ -164,7 +166,7 @@ Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
   COMFY_BASE_URL; no key), stdin closed, a timeout (submit 300 s, status 60 s, fetch 600 s; then the whole group gets
   SIGTERM and, 1.5 s later, SIGKILL, so the Python child uv starts cannot keep running) and a 1 MB cap on what it
   prints. Commands:
-  `submit --workflow=<file> [--image-node=<id> --image=<file>]` -> {"job_id"}, `status -- <job_id>` ->
+  `submit --workflow=<file> [--image-node=<id> --image=<file>]...` (a pair per picture) -> {"job_id"}, `status -- <job_id>` ->
   {"status","outputs":[{name,content_type,node_id,type}],"error"}, `fetch --name=<name> --out=<file>
   --max-bytes=<n> -- <job_id>` (options as --flag=value and `--` before the job id, so no value is read as an option).
   The sidecar's httpx client follows no redirects, treats a 3xx as an error and refuses any request off

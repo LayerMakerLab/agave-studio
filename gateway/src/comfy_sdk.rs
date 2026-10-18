@@ -3,7 +3,7 @@
 //! the built-in HTTP client, so submit, poll, output classification, timeouts and size caps stay shared
 //! (providers.rs). This file only turns those calls into sidecar commands:
 //!   Upload   -> the picture is written to data/comfy-sdk and handed to `submit --image` (the SDK uploads it itself)
-//!   Json     -> `submit --workflow=<file> [--image-node=<id> --image=<file>]`  -> {"job_id"}
+//!   Json     -> `submit --workflow=<file> [--image-node=<id> --image=<file>]...`  -> {"job_id"} (one pair per picture)
 //!   Get      -> `status -- <job_id>`  -> {"status", "outputs": [{name, content_type, node_id, type}], "error"}
 //!   Download -> `fetch --name=<name> --out=<file> --max-bytes=<n> -- <job_id>`
 //!
@@ -239,8 +239,9 @@ impl SdkTransport {
 
     async fn submit(&self, origin: &str, body: &Value) -> PResult<Value> {
         let wf = body.get("workflow").filter(|w| w.is_object()).ok_or_else(|| failed("no workflow to send"))?;
-        // The LoadImage node that carries a picture written by Upload: the SDK uploads that file itself.
-        let mut image: Option<(String, PathBuf)> = None;
+        // The LoadImage nodes that carry a picture written by Upload (the start picture, and a guide picture when
+        // there is one): the SDK uploads those files itself.
+        let mut images: Vec<(String, PathBuf)> = Vec::new();
         for (node, v) in wf.as_object().into_iter().flatten() {
             let Some(id) = v.pointer("/inputs/image/info/id").and_then(Value::as_str) else { continue };
             if v.pointer("/inputs/image/__type").and_then(Value::as_str) != Some("core/ASSET") {
@@ -250,13 +251,13 @@ impl SdkTransport {
             let (Some(file), true) = (file, node.len() <= 32 && node.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) else {
                 return Err(failed("the workflow names a picture the studio did not prepare"));
             };
-            image = Some((node.clone(), file));
+            images.push((node.clone(), file));
         }
         let wf_file = self.file("wf", "json");
         fsutil::write_private(&wf_file, &serde_json::to_vec(wf).unwrap_or_default()).map_err(|_| failed("could not write the workflow"))?;
         // Options as --name=value, so no value can be read as another option.
         let mut args: Vec<OsString> = vec!["submit".into(), opt("--workflow", &wf_file)];
-        if let Some((node, file)) = &image {
+        for (node, file) in &images {
             args.extend([opt("--image-node", Path::new(node)), opt("--image", file)]);
         }
         let res = self.run(origin, args, self.submit_timeout).await;

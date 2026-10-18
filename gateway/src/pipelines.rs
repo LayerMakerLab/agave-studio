@@ -49,6 +49,8 @@ pub enum Kind {
         duration: Option<u32>,
         resolution: Option<&'static str>,
         from: From,
+        /// Also passes the run's Element photo as a guide picture, so a later shot keeps the original look.
+        guide: bool,
     },
     /// Free: the last frame of an earlier step's clip, as a picture (the gallery's Continue).
     LastFrame { from: usize },
@@ -79,13 +81,23 @@ pub struct Pipeline {
 }
 
 const fn generate(title: &'static str, model: &'static str, mode: &'static str, prompt: &'static str, from: From) -> Step {
-    Step { title, kind: Kind::Generate { model, mode, prompt, recipe: None, aspect: None, duration: None, resolution: None, from } }
+    Step { title, kind: Kind::Generate { model, mode, prompt, recipe: None, aspect: None, duration: None, resolution: None, from, guide: false } }
+}
+
+/// The same step, with the run's Element photo as a guide picture.
+const fn guided(step: Step) -> Step {
+    match step.kind {
+        Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, .. } => {
+            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide: true } }
+        }
+        other => Step { title: step.title, kind: other },
+    }
 }
 
 const fn with(step: Step, aspect: Option<&'static str>, duration: Option<u32>, resolution: Option<&'static str>, recipe: Option<&'static str>) -> Step {
     match step.kind {
-        Kind::Generate { model, mode, prompt, from, .. } => {
-            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from } }
+        Kind::Generate { model, mode, prompt, from, guide, .. } => {
+            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide } }
         }
         other => Step { title: step.title, kind: other },
     }
@@ -215,7 +227,8 @@ pub const PIPELINES: &[Pipeline] = &[
                 None,
             ),
             Step { title: "Last frame", kind: Kind::LastFrame { from: 1 } },
-            with(
+            // Shot 2 starts from shot 1's last frame and is also guided by the Element photo, so it keeps the face.
+            guided(with(
                 generate(
                     "Shot 2",
                     "comfy/ltxv-098-distilled-i2v",
@@ -227,7 +240,7 @@ pub const PIPELINES: &[Pipeline] = &[
                 Some(2),
                 None,
                 None,
-            ),
+            )),
             Step { title: "Add to edit", kind: Kind::Edit { from: &[1, 3] } },
         ],
     },
@@ -244,13 +257,14 @@ pub fn shape(p: &Pipeline) -> String {
         .steps
         .iter()
         .map(|s| match &s.kind {
-            Kind::Generate { model, mode, from, .. } => {
+            Kind::Generate { model, mode, from, guide, .. } => {
                 let src = match from {
                     From::Nothing => "-".to_string(),
                     From::Start => "start".to_string(),
                     From::Step(j) => j.to_string(),
                 };
-                format!("gen:{model}:{mode}:{src}")
+                // A guided step is a different step (older runs of it are not resumed); unguided ones keep their print.
+                format!("gen:{model}:{mode}:{src}{}", if *guide { ":guide" } else { "" })
             }
             Kind::LastFrame { from } => format!("frame:{from}"),
             Kind::Element { from } => format!("element:{from:?}"),
@@ -748,6 +762,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
+        guide_url: None,
     };
     crate::jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), req);
     run.steps[i].status = "running".into();
@@ -759,7 +774,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
 async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
     run.steps[i] = StepRun { status: "pending".into(), ..Default::default() };
     run.status = "running".into();
-    let Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from } = &p.steps[i].kind else {
+    let Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide } = &p.steps[i].kind else {
         if let Kind::LastFrame { from } = p.steps[i].kind {
             return start_last_frame(st, run, i, from);
         }
@@ -783,6 +798,8 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
         image_url,
         recipe: recipe.map(String::from),
         label: Some(format!("Step {} · {}", i + 1, p.steps[i].title)),
+        // The picture this run saved as its Element (the start photo or an earlier step's).
+        guide_url: if *guide { run.element.as_ref().map(|m| m.image.clone()) } else { None },
         ..Default::default()
     };
     match submit_generate(st, req) {
@@ -1210,6 +1227,8 @@ mod tests {
         assert!(!seen[0].prompt.contains("walk") && !seen[1].prompt.contains("face"), "the shots work for any subject");
         assert_eq!(seen[0].label.as_deref(), Some("Step 2 · Shot 1"));
         assert_eq!(seen[1].image_url.as_deref(), Some(out(&run, 2).as_str()), "shot 2 starts from shot 1's last frame");
+        assert_eq!(seen[0].guide_url, None, "shot 1 starts from the photo itself and needs no guide");
+        assert_eq!(seen[1].guide_url.as_deref(), Some(img.as_str()), "shot 2 is also guided by the Element photo");
         assert!(out(&run, 2).ends_with(".png"));
         // The last frame was taken as a local job, like Continue, outside the engine lock.
         let frame_job = run["steps"][2]["job"].as_str().unwrap();
@@ -1217,6 +1236,17 @@ mod tests {
         let edit: Vec<String> = st.studio.edit().clips.into_iter().map(|c| c.url).collect();
         assert_eq!(edit, vec![out(&run, 1), out(&run, 3)]);
         assert!(run["steps"][4]["note"].is_null());
+    }
+
+    #[test]
+    fn only_later_comfy_shots_are_guided_by_the_element() {
+        let guided: Vec<(&str, usize)> = PIPELINES
+            .iter()
+            .flat_map(|p| p.steps.iter().enumerate().filter(|(_, s)| matches!(s.kind, Kind::Generate { guide: true, .. })).map(move |(i, _)| (p.id, i)))
+            .collect();
+        assert_eq!(guided, vec![("ltx-short-on-comfy", 3)]);
+        // Unguided pipelines keep their fingerprint; the guided one has a new one.
+        assert_ne!(shape(find("ltx-short-on-comfy").unwrap()), "");
     }
 
     #[tokio::test]
