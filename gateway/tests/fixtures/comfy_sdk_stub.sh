@@ -14,12 +14,14 @@ esac
 inside() { case "$1" in "$PWD"/*) return 0 ;; *) echo "path outside the work folder: $1" >&2; exit 5 ;; esac; }
 case "$cmd" in
   submit)
-    wf=""; nodes=""
+    wf=""; nodes=""; node=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --workflow=*) wf="${1#*=}" ;;
-        --image-node=*) nodes="$nodes ${1#*=}" ;;
-        --image=*) img="${1#*=}"; inside "$img"; [ -f "$img" ] || { echo "no picture" >&2; exit 4; } ;;
+        --image-node=*) node="${1#*=}"; nodes="$nodes $node" ;;
+        --image=*) img="${1#*=}"; inside "$img"; [ -f "$img" ] || { echo "no picture" >&2; exit 4; }
+          # guided: keep a copy of what each node got, so the test can check the pairing
+          [ "$mode" = guided ] && cp "$img" "$PWD/pair-$node.bin" ;;
       esac; shift
     done
     inside "$wf"; [ -f "$wf" ] || { echo "no workflow file" >&2; exit 4; }

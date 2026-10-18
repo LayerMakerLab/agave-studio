@@ -495,7 +495,7 @@ endpoint = "ltxv-0.9.8-distilled-i2v"   # 2026-10-18: the graph follows Lightric
 modality = "video"
 modes = ["i2v"]
 key = "COMFY_BASE_URL"
-verified = true   # ran live 2026-10-18 on the PC (comfy-api-proxy 0.1.6, ltxv-2b-0.9.8-distilled.safetensors, t5xxl_fp16): the short film pipeline, 5/5 steps, through both COMFY_CLIENT=builtin and sdk
+verified = true   # ran live 2026-10-18 on the PC (comfy-api-proxy 0.1.6, ltxv-2b-0.9.8-distilled.safetensors, t5xxl_fp16): the unguided graph in the short film pipeline, 5/5 steps, through both COMFY_CLIENT=builtin and sdk; the guided graph (the Element photo as shot 2's last-frame keyframe, LTXVAddGuide frame_idx -1, strength 1.0, cropped by LTXVCropGuides) ran as shot 2 on 3 seeds through the SDK client (sweep script). The full guided pipeline run comes after this change
 params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 2 s = 49 frames (8n+1 at 24 fps)
 
 [[model]]

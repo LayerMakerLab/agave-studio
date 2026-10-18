@@ -157,7 +157,9 @@ left out. comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 
 ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and ran live on 2026-10-18 through
 both clients. A pipeline step can add a guide picture to it (the run's Element photo, uploaded as a second asset):
 LoadImage -> LTXVPreprocess -> LTXVAddGuide after LTXVImgToVideo, and LTXVCropGuides cuts the guide frames off before
-VAEDecode. Its frame_idx and strength are LTXV_GUIDE_FRAME_IDX and LTXV_GUIDE_STRENGTH in providers.rs (-1 and 0.5).
+VAEDecode. Its frame_idx and strength are LTXV_GUIDE_FRAME_IDX and LTXV_GUIDE_STRENGTH in providers.rs (-1 and 1.0):
+the Element photo is a later shot's last-frame keyframe, so the shot ends back on the Element's look and close to its
+pose. It is not a general look keeper. Tested live on 2026-10-18 with 3 seeds; a brief mid-shot wobble is possible.
 
 Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
 - `builtin` (default): the gateway's own Rust client, making the HTTP calls above.

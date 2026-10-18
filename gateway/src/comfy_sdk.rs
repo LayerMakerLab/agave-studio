@@ -332,6 +332,15 @@ fn opt(flag: &str, value: &Path) -> OsString {
     s
 }
 
+/// Pictures written for a call that never reached submit (a later step failed) are removed with the transport.
+impl Drop for SdkTransport {
+    fn drop(&mut self) {
+        for f in self.take_uploads() {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+}
+
 /// The ComfyUI origin a call goes to (already checked by comfy_base/on_base) and the parsed URL.
 fn split(url: &str) -> PResult<(String, reqwest::Url)> {
     let u = reqwest::Url::parse(url).map_err(|_| failed("bad ComfyUI link"))?;

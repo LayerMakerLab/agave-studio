@@ -952,8 +952,11 @@ const LTXV_NEGATIVE: &str = "low quality, worst quality, deformed, distorted, di
 
 /// Where and how strongly the guide picture (a run's Element photo) steers a later LTX-Video shot: frame_idx counts
 /// from the end when negative (-1 = the last frame), strength is LTXVAddGuide's 0..10. Change them here only.
+/// With frame_idx -1 the Element photo is a later shot's last-frame keyframe: the shot ends back on the Element's look
+/// and close to its pose. It is not a general look keeper. Tested live on 2026-10-18 with 3 seeds (strength 0.0 and
+/// 0.5 drifted to a different man; 1.0 came back); a brief mid-shot wobble is possible.
 pub const LTXV_GUIDE_FRAME_IDX: i64 = -1;
-pub const LTXV_GUIDE_STRENGTH: f64 = 0.5;
+pub const LTXV_GUIDE_STRENGTH: f64 = 1.0;
 
 /// The sigma schedule the distilled LTX-Video models expect (Lightricks' note in ltxvideo-i2v-distilled.json).
 const LTXV_DISTILLED_SIGMAS: &str = "1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250, 0.4219, 0.0";
@@ -1048,8 +1051,9 @@ fn comfy_workflow(r: &SubmitReq, image: Option<&ComfyAsset>, guide: Option<&Comf
                 "80": {"class_type": "CreateVideo", "inputs": {"images": ["8", 0], "fps": 24}},
                 "81": {"class_type": "SaveVideo", "inputs": {"video": ["80", 0], "filename_prefix": "video/agave", "format": "auto", "codec": "auto"}}
             });
-            // An optional guide picture (a later shot gets the run's Element photo, so the look does not drift from
-            // the original). Wired as in Lightricks' example ComfyUI-LTXVideo
+            // An optional guide picture: a later shot gets the run's Element photo as its last-frame keyframe
+            // (LTXV_GUIDE_FRAME_IDX -1), so the shot ends back on the Element's look and close to its pose; it does
+            // not hold the look through the middle of the shot. Wired as in Lightricks' example ComfyUI-LTXVideo
             // example_workflows/low_level/ltxvideo-frame-interpolation.json (35ec43a): text conditioning and latent
             // -> LTXVAddGuide (image through LTXVPreprocess) -> LTXVConditioning and the sampler; after sampling,
             // LTXVCropGuides (with LTXVConditioning's output) cuts the guide frames off the latent before VAEDecode.
@@ -1721,7 +1725,7 @@ mod tests {
         assert_eq!(add["class_type"], "LTXVAddGuide");
         assert_eq!((add["inputs"]["positive"].clone(), add["inputs"]["negative"].clone(), add["inputs"]["latent"].clone()), (json!(["95", 0]), json!(["95", 1]), json!(["95", 2])));
         assert_eq!((add["inputs"]["image"].clone(), add["inputs"]["vae"].clone()), (json!(["83", 0]), json!(["44", 2])));
-        assert_eq!((add["inputs"]["frame_idx"].as_i64(), add["inputs"]["strength"].as_f64()), (Some(LTXV_GUIDE_FRAME_IDX), Some(LTXV_GUIDE_STRENGTH)));
+        assert_eq!((add["inputs"]["frame_idx"].as_i64(), add["inputs"]["strength"].as_f64()), (Some(-1), Some(1.0)), "the Element photo is a full-strength keyframe on the last frame");
         assert_eq!((g["69"]["inputs"]["positive"].clone(), g["69"]["inputs"]["negative"].clone()), (json!(["96", 0]), json!(["96", 1])));
         assert_eq!(g["101"]["inputs"]["latent_image"], json!(["96", 2]), "the sampler works on the latent with the guide frames");
         let crop = &g["103"];
@@ -1745,7 +1749,20 @@ mod tests {
         let mut r = i2v_req();
         r.guide_url = Some("/outputs/face.png".into());
         assert!(matches!(ComfyRun { t: &t }.submit(&ctx, BASE, &r).await, Ok(Submitted::Queued(_))), "the stub wants pictures for nodes 78 and 79");
+        // The stub copied what each node got: 78 the start picture, 79 the guide.
+        let got = |node: &str| std::fs::read(dir.join(format!("pair-{node}.bin"))).unwrap();
+        assert_eq!(got("78"), std::fs::read(ctx.outputs_dir.join("still.png")).unwrap());
+        assert_eq!(got("79"), std::fs::read(ctx.outputs_dir.join("face.png")).unwrap());
+        for n in ["78", "79"] {
+            std::fs::remove_file(dir.join(format!("pair-{n}.bin"))).unwrap();
+        }
         assert!(work_files(&dir).is_empty());
+        // A guide that cannot be loaded after the start picture went up: the picture written for it is removed.
+        let t = sdk("guided", &dir);
+        r.guide_url = Some("/outputs/missing.png".into());
+        assert!(ComfyRun { t: &t }.submit(&ctx, BASE, &r).await.is_err());
+        drop(t);
+        assert!(work_files(&dir).is_empty(), "{:?}", work_files(&dir));
     }
 
     #[tokio::test]

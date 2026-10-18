@@ -49,7 +49,8 @@ pub enum Kind {
         duration: Option<u32>,
         resolution: Option<&'static str>,
         from: From,
-        /// Also passes the run's Element photo as a guide picture, so a later shot keeps the original look.
+        /// Also passes the run's Element photo as the shot's last-frame keyframe (providers.rs LTXV_GUIDE_*), so the
+        /// shot ends back on the Element's look. It does not hold the look through the middle of the shot.
         guide: bool,
     },
     /// Free: the last frame of an earlier step's clip, as a picture (the gallery's Continue).
@@ -227,13 +228,14 @@ pub const PIPELINES: &[Pipeline] = &[
                 None,
             ),
             Step { title: "Last frame", kind: Kind::LastFrame { from: 1 } },
-            // Shot 2 starts from shot 1's last frame and is also guided by the Element photo, so it keeps the face.
+            // Shot 2 starts from shot 1's last frame, and the Element photo is its last-frame keyframe: the shot ends
+            // back on the Element's look and close to its pose. Its prompt therefore settles back on the subject.
             guided(with(
                 generate(
                     "Shot 2",
                     "comfy/ltxv-098-distilled-i2v",
                     "i2v",
-                    "{subject}, the same subtle motion continues, a slight turn, a slow pan to the right. The same scene and lighting as before, nothing new enters the frame. Real-life footage, steady exposure.",
+                    "{subject} continues naturally and settles, a slow push-in. The same scene and light as before, nothing new enters the frame. Real-life footage, steady exposure.",
                     From::Step(2),
                 ),
                 Some("16:9"),
@@ -1245,8 +1247,13 @@ mod tests {
             .flat_map(|p| p.steps.iter().enumerate().filter(|(_, s)| matches!(s.kind, Kind::Generate { guide: true, .. })).map(move |(i, _)| (p.id, i)))
             .collect();
         assert_eq!(guided, vec![("ltx-short-on-comfy", 3)]);
-        // Unguided pipelines keep their fingerprint; the guided one has a new one.
-        assert_ne!(shape(find("ltx-short-on-comfy").unwrap()), "");
+        // The unguided pipelines keep the fingerprints they had before guides existed (so their saved runs resume);
+        // the guided film has a new one (a run saved before it is not resumed against different steps).
+        assert_eq!(shape(find("product-to-3d").unwrap()), "be3d6081cbfb98a4");
+        assert_eq!(shape(find("character-to-edit").unwrap()), "50f402fc5d8c84f7");
+        let film = shape(find("ltx-short-on-comfy").unwrap());
+        assert_ne!(film, "a219acaba968016c", "the film's fingerprint before shot 2 was guided");
+        assert_eq!(film, "d241dfcef3544c4a");
     }
 
     #[tokio::test]
