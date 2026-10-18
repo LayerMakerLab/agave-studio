@@ -13,8 +13,11 @@ Never return a key value from any endpoint. Never log a key.
            "key":"FAL_KEY","ready":true|false}
 - GET  /api/presets -> {"camera":[{"id":"dolly_in","name":"Dolly in","group":"push"}], "styles":[{"id":"film_35","name":"35mm film"}]}
 - GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://...","default":null}]}
-  (`default` is set only for COMFY_BASE_URL, an address used when nothing is saved; values are never returned)
-- POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot)
+  (`default` is set only for the two ComfyUI settings, used when nothing is saved; key values are never returned.
+  COMFY_CLIENT, a setting with fixed values and not a secret, also carries `"choices":["builtin","sdk"]` and its
+  current `"value"`.)
+- POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot;
+  COMFY_CLIENT takes only "builtin" or "sdk", else 400 invalid_choice)
 - GET  /api/voices -> {"voices":[{"id":"21m00Tcm4TlvDq8ikWAM","name":"Rachel","category":"premade"}]}
   The voices on the user's ElevenLabs account (needs ELEVENLABS_API_KEY; 412 key_missing without it). Text to speech
   (`elevenlabs/multilingual-v2`) needs a `voice_id` from this list in POST /api/generate.
@@ -141,14 +144,30 @@ every 2 s moves runs on with no page open. The last frame is taken by ffmpeg as 
 shown in the gallery like other jobs), so a restart in the middle fails that step instead of losing it.
 
 ## Your own ComfyUI (Comfy API v2)
-Provider `comfy`: open-weights workflows (LTX-Video 0.9.5 text or image to video, FLUX.1 schnell) on your own ComfyUI
+Provider `comfy`: open-weights workflows (LTX-Video 0.9.5 text or image to video, LTX-Video 2B 0.9.8 distilled image to
+video, FLUX.1 schnell) on your own ComfyUI
 behind comfy-api-proxy. `COMFY_BASE_URL` (default http://127.0.0.1:8189, no key) is an address, not a secret: http or
 https with a host and port only, no path, user name, password, query or fragment (400 invalid_url on POST /api/keys). Pictures go up with POST
 {base}/api/v2/assets and into the workflow as core/ASSET references; the job goes to POST {base}/api/v2/jobs and is
 polled at its own `urls.self`; outputs are downloaded from their `url`. Every link must stay on the base origin.
 An output counts as video or image by its content type, then its file name, then its `type` (the proxy reports a
 SaveVideo mp4 as type "image"). Job answers are read under the 64 MB JSON cap, files under the download cap.
-comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6, ltx-video-2b-v0.9.5).
+An output with an odd name (a "..", a leading slash, characters other than letters, digits and ._-/) or content type is
+left out. comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6,
+ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and has not run live yet.
+
+Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
+- `builtin` (default): the gateway's own Rust client, making the HTTP calls above.
+- `sdk`: the official Comfy SDK. The gateway runs `uv run --quiet --script tools/comfy-sdk/agave_comfy.py` (PEP 723,
+  pinned to comfy-sdk 0.5.0) with an argument array, a cleared environment (PATH, HOME, COMFY_BASE_URL; no key),
+  stdin closed, a timeout (submit 300 s, status 60 s, fetch 600 s) and a 1 MB cap on what it prints. Commands:
+  `submit --workflow <file> [--image-node <id> --image <file>]` -> {"job_id"}, `status <job_id>` ->
+  {"status","outputs":[{name,content_type,node_id,type}],"error"}, `fetch <job_id> --name <name> --out <file>
+  --max-bytes <n>`. The SDK uploads the picture (assets.from_file, Workflow.set_input), submits (Comfy.submit), reads
+  the job (jobs.get) and downloads the output (Output.to_stream). The gateway picks every file path (under
+  data/comfy-sdk, removed after each call) and checks the answers like the proxy's: a UUID-shaped job id, a known
+  status, safe output names and content types. Both clients share the same submit, poll, output classification
+  and caps. Without uv the job fails with a message naming COMFY_CLIENT.
 
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture

@@ -29,7 +29,8 @@ show their credit cost). Keys are stored only on your computer, and the app has 
 - **Direct:** 20 camera moves, 10 looks, a prompt library, and Elements: saved characters or products you call
   with `@tag`.
 - **Pipelines:** Library flows that run several steps in a row (product photo to hero still, video and 3D model;
-  character sheet to two joined clips; a free short film from your photo on your own ComfyUI with LTX-Video). The full price shows
+  character sheet to two joined clips; a free short film from your photo on your own ComfyUI with LTX-Video 2B
+  0.9.8 distilled). The full price shows
   first and every paid step waits for your click.
 - **Edit:** trim and join clips, auto captions, remove pauses, reframe to 9:16, clean up voice, and set loudness
   to -14 LUFS.
@@ -70,6 +71,11 @@ variables with the same names also work.
 | [ElevenLabs](https://elevenlabs.io) | `ELEVENLABS_API_KEY` | Text to speech |
 | [Meshy](https://www.meshy.ai) | `MESHY_API_KEY` | Image to 3D (GLB, USDZ, STL, 3MF) |
 | [Your own ComfyUI](https://docs.comfy.org/development/comfyui-server/api-proxy) | `COMFY_BASE_URL` (an address, not a key; default `http://127.0.0.1:8189`) | LTX-Video (and FLUX.1 schnell, if installed) on your own GPU, free, through comfy-api-proxy |
+| [Comfy SDK](https://docs.comfy.org/development/api-development/sdks) (optional) | `COMFY_CLIENT` (`builtin` or `sdk`; not a key) | `sdk` runs your ComfyUI jobs through the official Comfy SDK (comfy-sdk 0.5.0) in `tools/comfy-sdk/agave_comfy.py`, started with [uv](https://docs.astral.sh/uv/); needs uv, which fetches comfy-sdk on first use. `builtin` (default) is the studio's own client |
+
+Which path uses the official Comfy SDK: only `COMFY_CLIENT=sdk`. Then every ComfyUI job (upload, submit, status,
+download) goes through comfy-sdk in `tools/comfy-sdk/agave_comfy.py`; the gateway keeps the same checks, caps and
+output handling as with its built-in client. Settings shows the choice under COMFY_CLIENT.
 
 Every model id and request shape in `models.toml` was checked against the provider's own docs or API schema; each
 entry notes what was checked and when. Not every model has had a live run yet, so if one fails, please open an issue.
@@ -104,6 +110,7 @@ These need macOS 14 or later and Xcode's Swift tools.
 | `engine/promptcraft/` | C++ camera and style phrases, linked into the gateway |
 | `web/` | The site (`/`) and the studio (`/app/`): plain HTML, CSS and JavaScript, no build step |
 | `native/` | Optional macOS tools: speech, vision and the Mac app |
+| `tools/comfy-sdk/` | The Comfy SDK client for `COMFY_CLIENT=sdk` (run with uv) |
 | `docs/API.md` | The gateway's HTTP API |
 
 ## Develop
