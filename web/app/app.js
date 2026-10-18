@@ -1256,12 +1256,14 @@
     // Undo only covers Remove pauses until the timeline changes again.
     if (state.undo && JSON.stringify(state.edit) !== state.undoAfter) { state.undo = null; els.undoBtn.hidden = true; }
     const doc = editDoc();
+    // The rev is taken together with the doc: it says which saved timeline this copy was made from. The engine
+    // refuses it when something else (a pipeline's Add to edit, another tab) saved in between.
+    const rev = state.editRev;
     try { localStorage.setItem('agave.edit', JSON.stringify(doc)); } catch (_) { /* private mode */ }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
-      // The rev says which saved timeline this page started from; the engine refuses it when something else (a
-      // pipeline's Add to edit, another tab) saved in between, and the newer timeline is loaded instead.
-      const body = state.editRev === null ? doc : { ...doc, rev: state.editRev };
+      saveTimer = null;
+      const body = rev === null ? doc : { ...doc, rev };
       let r = null;
       try { r = await call('/api/edit', { method: 'POST', body }); } catch (_) { return; }
       if (r.ok && r.data && typeof r.data.rev === 'number') state.editRev = r.data.rev;
@@ -1309,7 +1311,11 @@
         const rev = typeof r.data.rev === 'number' ? r.data.rev : null;
         // First read: an older local copy wins over an empty saved one. Later: a newer saved timeline always wins.
         const take = state.editRev === null ? (r.data.edit.clips.length || !state.edit.length) : rev !== state.editRev;
-        if (take) applyEditDoc(r.data.edit);
+        if (take) {
+          // A save still waiting to go out was made from the older timeline: drop it.
+          if (state.editRev !== null) { clearTimeout(saveTimer); saveTimer = null; }
+          applyEditDoc(r.data.edit);
+        }
         state.editRev = rev;
       }
     } catch (_) { /* offline: keep the local copy */ }
@@ -2303,6 +2309,8 @@
   };
 
   const cents = (c) => `$${(c / 100).toFixed(2)}`;
+  // Element.append turns null into the text "null", so empty parts are dropped first.
+  const appendAll = (parent, kids) => parent.append(...kids.filter((k) => k !== null && k !== undefined && k !== false));
   // "≈ $0.39 + 30 Meshy cr", "Free", from a pipeline total.
   function totalText(t) {
     if (!t) return '';
@@ -2410,7 +2418,7 @@
         el('h4', {}, [p.title]),
         el('p', { class: 'muted' }, [p.blurb]),
         el('div', { class: 'pipe-card-foot' }, [
-          el('span', { class: 'pipe-price' }, [local ? 'Free · runs on your ComfyUI' : totalText(p.total)]),
+          el('span', { class: 'pipe-price', title: local ? 'Runs on your own ComfyUI: nothing is billed' : null }, [local ? 'Free · local' : totalText(p.total)]),
           go,
         ]),
       ]));
@@ -2455,13 +2463,27 @@
     loadRuns();
   }
 
+  // A video shows its first frame as a still (it plays on hover or focus), so a thumbnail is never caught mid-frame.
+  function stillVideo(url, label) {
+    const v = el('video', { src: `${url}#t=0.05`, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-label': label });
+    v.muted = true;
+    const host = () => v.closest('a, figure') || v;
+    v.addEventListener('loadeddata', () => {
+      const h = host();
+      if (!reduceMotion) {
+        h.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
+        h.addEventListener('mouseleave', () => { v.pause(); v.currentTime = 0.05; });
+      }
+    }, { once: true });
+    return v;
+  }
+
   function outThumb(s) {
     const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
     if (!o) return null;
     const media = o.kind === 'video'
-      ? el('video', { src: o.url, muted: true, loop: true, autoplay: !reduceMotion, playsinline: true, preload: 'metadata', 'aria-label': `${s.title} result` })
+      ? stillVideo(o.url, `${s.title} result`)
       : el('img', { src: o.url, alt: `${s.title} result`, loading: 'lazy', decoding: 'async' });
-    if (media.tagName === 'VIDEO') media.muted = true;
     return el('a', { class: 'pipe-thumb', href: o.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open file' }, [media]);
   }
 
@@ -2484,7 +2506,7 @@
     const list = el('ol', { class: 'pipe-steps' });
     steps.forEach((s, i) => {
       const status = run ? s.status : 'pending';
-      const what = s.model_name ? `${s.model_name}${s.vendor ? ' · ' + s.vendor : ''}` : { element: 'Saves the picture as the run\'s Element', last_frame: 'Takes the last frame of the clip', edit: 'Puts the clips on the Edit timeline' }[s.kind];
+      const what = s.model_name ? `${s.model_name}${s.vendor ? ' · ' + s.vendor : ''}` : (s.detail || '');
       const meta = [!run && s.paid ? `${what} · waits for your click` : what];
       const row = el('li', { class: `pipe-step ${status}${run && i === run.current && run.status !== 'done' ? ' current' : ''}` }, [
         el('span', { class: 'pipe-num', 'aria-hidden': 'true' }, [status === 'done' ? '✓' : String(i + 1)]),
@@ -2500,7 +2522,8 @@
           status === 'running' ? el('div', { class: 'bar indet' }, [el('i')]) : null,
           status === 'failed' && onRetry ? failedActions(s, i, onRetry) : null,
         ]),
-        (status === 'done' && outThumb(s)) || el('span', { class: 'pipe-thumb empty', 'aria-hidden': 'true' }),
+        // The grid keeps the thumbnail column reserved even when there is none, so prices never move.
+        status === 'done' ? outThumb(s) : null,
       ]);
       list.append(row);
     });
@@ -2542,7 +2565,7 @@
     const go = actionButton(first.paid ? first : null, first.paid ? `start with ${first.title}` : 'start', (b) => startRun(p, b), 'pipeStart');
     const settingsBtn = el('button', { type: 'button', class: 'small-btn' }, ['Open Settings']);
     settingsBtn.addEventListener('click', () => openSettings(missing[0]));
-    els.pipeBody.append(
+    appendAll(els.pipeBody, [
       el('div', { class: 'pipe-head' }, [el('h3', {}, [p.title]), el('p', { class: 'muted' }, [p.blurb])]),
       form,
       stepList(p.steps, null),
@@ -2556,7 +2579,7 @@
           : `On your own keys, at the providers' list prices (rounded up per step). ${t.paid_steps} step${t.paid_steps === 1 ? '' : 's'} cost money, and each one waits for your click. Free steps run on their own.`]),
       ]),
       el('div', { class: 'panel-actions' }, [go, el('span', { class: 'key-note', id: 'pipeNote', role: 'status' }, [v.note || ''])])]),
-    );
+    ]);
   }
 
   async function uploadPipePhoto(file) {
@@ -2662,12 +2685,14 @@
     for (const s of made) {
       const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
       if (!o) continue;
-      const media = o.kind === 'video'
-        ? el('video', { src: o.url, muted: true, loop: true, autoplay: !reduceMotion, playsinline: true, preload: 'metadata', 'aria-label': s.title })
-        : el('img', { src: o.url, alt: s.title, decoding: 'async' });
-      if (media.tagName === 'VIDEO') media.muted = true;
+      const media = o.kind === 'video' ? stillVideo(o.url, s.title) : el('img', { src: o.url, alt: s.title, decoding: 'async' });
       strip.append(el('figure', {}, [media, el('figcaption', {}, [s.title])]));
     }
+    // A fade on the right edge while more results are off to the side.
+    const edge = () => strip.classList.toggle('more', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 4);
+    strip.addEventListener('scroll', edge, { passive: true });
+    requestAnimationFrame(edge);
+    strip.querySelectorAll('img, video').forEach((m) => m.addEventListener(m.tagName === 'IMG' ? 'load' : 'loadeddata', edge, { once: true }));
     const edit = run.steps.find((s) => s.kind === 'edit');
     const model = [...run.steps].reverse().find((s) => s.kind === 'generate' && /3D/i.test(s.title));
     const last = [...made].reverse()[0];
@@ -2711,7 +2736,7 @@
       : run.status === 'failed' ? `Step ${run.current + 1} failed. Run again starts at that step and keeps everything before it.`
       : run.status === 'running' ? 'Working. You can close this panel or reload the page; the run keeps going.'
       : 'All steps are done. The files are also in the gallery.';
-    els.pipeBody.append(
+    appendAll(els.pipeBody, [
       el('div', { class: 'pipe-head' }, [
         el('div', { class: 'pipe-head-top' }, [el('h3', {}, [run.title || run.pipeline]), el('span', { class: 'run-pill', 'data-state': run.status }, [RUN_LABEL[run.status] || run.status])]),
         el('p', { class: 'muted' }, [`${run.subject} · Element @${run.tag}`]),
@@ -2723,7 +2748,7 @@
         actions.length || v.note ? el('div', { class: 'panel-actions' }, [...actions, el('span', { class: 'key-note', role: 'status' }, [v.note || ''])]) : null,
         el('div', { class: 'pipe-foot' }, [back, forget]),
       ]),
-    );
+    ]);
   }
 
   // ---------- project look ----------
