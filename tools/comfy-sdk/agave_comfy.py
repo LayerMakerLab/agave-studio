@@ -14,7 +14,11 @@ one JSON object on stdout; errors go to stderr with a non-zero exit.
 
     submit --workflow <api-format.json> [--image-node <id> --image <picture>]   -> {"job_id": "..."}
     status <job_id>     -> {"status": "...", "outputs": [{"name", "content_type", "node_id", "type"}], "error": ...}
-    fetch <job_id> --name <output name> --out <path> --max-bytes <n>          -> {"bytes": n, "content_type": "..."}
+    fetch --name=<output name> --out=<path> --max-bytes=<n> -- <job_id>       -> {"bytes": n, "content_type": "..."}
+    selftest            -> {"ok": true}: the origin and redirect checks against a mock transport (no network)
+
+Every request stays on COMFY_BASE_URL's origin (scheme, host and port): redirects are not followed, a 3xx answer is
+an error, and a request to any other address is refused before it is sent.
 """
 
 from __future__ import annotations
@@ -30,15 +34,61 @@ def fail(message: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def client():
+class OffOrigin(Exception):
+    """A request or redirect that would leave the ComfyUI address."""
+
+
+def origin(url) -> tuple[str, str, int]:
+    import httpx
+
+    u = httpx.URL(str(url))
+    port = u.port or {"http": 80, "https": 443}.get(u.scheme, 0)
+    return (u.scheme, u.host, port)
+
+
+def http_client(base: str, transport=None):
+    """The httpx client every SDK call goes through: no redirects, and nothing off the base origin."""
+    import httpx
+
+    want = origin(base)
+
+    def on_request(request):
+        if origin(request.url) != want:
+            raise OffOrigin(f"refusing a request to another address ({request.url.scheme}://{request.url.host})")
+
+    def on_response(response):
+        if 300 <= response.status_code < 400:
+            raise OffOrigin(f"refusing a redirect ({response.status_code}) from the ComfyUI address")
+
+    kw = {"timeout": 60, "follow_redirects": False, "event_hooks": {"request": [on_request], "response": [on_response]}}
+    if transport is not None:
+        kw["transport"] = transport
+    return httpx.Client(**kw)
+
+
+def client(transport=None):
     base = os.environ.get("COMFY_BASE_URL", "").strip()
     # Never fall back to Comfy Cloud (the SDK's default when COMFY_BASE_URL is empty), and never send a key.
     if not base.startswith(("http://", "https://")):
         fail("COMFY_BASE_URL must be set to your ComfyUI address (http:// or https://)", 2)
     os.environ.pop("COMFY_API_KEY", None)
+    from comfy_low import ComfyLow
     from comfy_sdk import Comfy
+    from comfy_sdk.assets import AssetFactory
+    from comfy_sdk.jobs import JobFactory
 
-    return Comfy(timeout=60, client_info="agave-studio")
+    c = Comfy(timeout=60, client_info="agave-studio")
+    # comfy-sdk 0.5.0's Comfy takes no httpx client, and its transport builds one with follow_redirects=True
+    # (comfy_low/transport.py:1025). ComfyLow's own `client=` parameter (transport.py:1018) is the supported way to
+    # pass one in, so the client's namespaces are rebuilt on a ComfyLow that uses ours (pinned version, so the
+    # layout below is fixed).
+    low = ComfyLow(c._low.base_url, None, client=http_client(base, transport), client_info="agave-studio",
+                   router_base_url=c._low.router_base_url)
+    c._low.close()
+    c._low = low
+    c.assets = AssetFactory(low)
+    c.jobs = JobFactory(low)
+    return c
 
 
 class CappedFile:
@@ -99,6 +149,66 @@ def cmd_fetch(args) -> dict:
     return {"bytes": written, "content_type": match[0].content_type}
 
 
+def cmd_selftest(_args) -> dict:
+    """Checks the origin and redirect rules with httpx.MockTransport: nothing leaves this process."""
+    import httpx
+
+    base = "http://127.0.0.1:8189"
+    seen = []
+    job = "7f3d2c1b-9a8e-4d6f-b012-3c4d5e6f7a8b"
+    asset = "9f8a1c0d-2b3e-4f56-8a7b-1c2d3e4f5a6b"
+    now = "2026-10-18T00:00:00+00:00"
+
+    def handler(request):
+        seen.append(str(request.url))
+        path = request.url.path
+        if request.method == "POST" and path == "/api/v2/jobs":
+            return httpx.Response(307, headers={"Location": "http://evil.test/api/v2/jobs"})
+        if path == f"/api/v2/jobs/{job}":
+            out = {"node_id": "81", "name": "video/agave_00001_.mp4", "type": "image", "content_type": "video/mp4",
+                   "size_bytes": 7, "id": asset, "hash": None, "url": f"{base}/api/v2/assets/{asset}/content",
+                   "url_expires_at": now, "job_id": job}
+            return httpx.Response(200, json={
+                "id": job, "status": "succeeded", "created_at": now, "started_at": now, "completed_at": now,
+                "expires_at": now, "queue_position": None, "progress": None, "outputs": [out], "error": None,
+                "urls": {"self": f"/api/v2/jobs/{job}", "events": "/e", "cancel": "/c"}})
+        if path == f"/api/v2/assets/{asset}/content":
+            return httpx.Response(302, headers={"Location": "http://127.0.0.1:11434/api/tags"})
+        return httpx.Response(404, json={"error": {"code": "not_found", "message": path}})
+
+    os.environ["COMFY_BASE_URL"] = base
+    c = client(transport=httpx.MockTransport(handler))
+    checks = {}
+
+    # 1. An asset download that redirects to another local service is refused, and nothing reaches it.
+    j = c.jobs.get(job)
+    import io
+
+    try:
+        j.outputs[0].to_stream(io.BytesIO())
+        checks["download_redirect_refused"] = False
+    except Exception as e:
+        checks["download_redirect_refused"] = "redirect" in str(e) or isinstance(e, OffOrigin)
+    # 2. A job POST answered with a 307 to another host is refused.
+    wf = c.workflows.from_json({"1": {"class_type": "SaveImage", "inputs": {}}})
+    try:
+        c.submit(wf)
+        checks["submit_redirect_refused"] = False
+    except Exception as e:
+        checks["submit_redirect_refused"] = "redirect" in str(e) or isinstance(e, OffOrigin)
+    # 3. A request to any other address is refused before it is sent.
+    try:
+        c._low._client.get("http://192.168.1.5:8188/api/v2/jobs")
+        checks["other_origin_refused"] = False
+    except OffOrigin:
+        checks["other_origin_refused"] = True
+    checks["nothing_left_the_base"] = all(u.startswith(base + "/") for u in seen)
+    checks["no_redirect_followed"] = not any("11434" in u or "evil.test" in u for u in seen)
+    if not all(checks.values()):
+        fail("selftest failed: " + json.dumps(checks))
+    return {"ok": True, "checks": checks}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="agave_comfy")
     sub = p.add_subparsers(dest="command", required=True)
@@ -110,11 +220,12 @@ def main() -> None:
     st.add_argument("job_id")
     f = sub.add_parser("fetch")
     f.add_argument("job_id")
+    sub.add_parser("selftest")
     f.add_argument("--name", required=True)
     f.add_argument("--out", required=True)
     f.add_argument("--max-bytes", type=int, required=True)
     args = p.parse_args()
-    run = {"submit": cmd_submit, "status": cmd_status, "fetch": cmd_fetch}[args.command]
+    run = {"submit": cmd_submit, "status": cmd_status, "fetch": cmd_fetch, "selftest": cmd_selftest}[args.command]
     try:
         result = run(args)
     except SystemExit:
