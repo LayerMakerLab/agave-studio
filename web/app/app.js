@@ -1254,43 +1254,92 @@
 
   // Timeline sync. The local copy is based on the saved timeline `state.editRev` (clip urls in `state.editBase`).
   // Changes go out 400 ms after the last one; only one save is in flight at a time, and changes made meanwhile go
-  // out when it returns. When something else saved first (a pipeline's Add to edit, another tab), the engine
-  // answers 409 and the local copy is rebased on the newer timeline: every local change is kept, and clips newly
-  // added there are appended. Nothing ever drops a user's edit.
+  // out when it returns. Every save carries the rev it is based on (before the first read, the page reads first).
+  // When something else saved first (a pipeline's Add to edit, another tab), the engine answers 409 and the local
+  // copy is rebased on the newer timeline: every local change is kept, and clips newly added there are appended.
+  // A change that could not be sent is retried with backoff, and is marked unsent in localStorage (with the clips
+  // it was based on) so a reload rebases it instead of losing it. Nothing ever drops a user's edit.
+  const UNSENT_KEY = 'agave.edit.unsent';
+  const SAVE_RETRY_MS = [1000, 2000, 5000, 10000, 20000, 30000];
   let saveTimer = null;
   let saving = false; // a POST is in flight
   let dirty = false; // local changes not yet sent
+  let refused = false; // the engine refused the doc as invalid (4xx): no retries until the next change
+  let retryTimer = null;
+  let retries = 0;
   const clipUrls = (clips) => new Set((clips || []).map((c) => c && c.url));
   const editPending = () => saveTimer !== null || saving || dirty;
 
+  // Undo restores a snapshot of the clips, so it would drop clips added since: it ends when clips arrive from elsewhere.
+  function dropUndo() {
+    state.undo = null;
+    els.undoBtn.hidden = true;
+  }
+
+  // The local copy, and whether it holds changes the engine has not saved yet (with the clips they were based on).
+  function writeLocal(unsent) {
+    try {
+      localStorage.setItem('agave.edit', JSON.stringify(editDoc()));
+      if (unsent) localStorage.setItem(UNSENT_KEY, JSON.stringify({ rev: state.editRev, base: [...state.editBase] }));
+      else if (unsent === false) localStorage.removeItem(UNSENT_KEY);
+    } catch (_) { /* private mode */ }
+  }
+
   function saveEdit() {
     // Undo only covers Remove pauses until the timeline changes again.
-    if (state.undo && JSON.stringify(state.edit) !== state.undoAfter) { state.undo = null; els.undoBtn.hidden = true; }
+    if (state.undo && JSON.stringify(state.edit) !== state.undoAfter) dropUndo();
     dirty = true;
-    try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
+    refused = false;
+    writeLocal(true);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { saveTimer = null; flushEdit(); }, 400);
   }
 
+  function retryLater() {
+    clearTimeout(retryTimer);
+    const ms = SAVE_RETRY_MS[Math.min(retries, SAVE_RETRY_MS.length - 1)];
+    retries++;
+    retryTimer = setTimeout(() => { retryTimer = null; flushEdit(); }, ms);
+  }
+
   async function flushEdit() {
-    if (saving) return; // the save in flight sends the rest when it returns
+    if (saving || refused || !dirty) return; // the save in flight sends the rest when it returns
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    if (state.editRev === null) {
+      // No read has come back yet: read first (it rebases this change onto the saved timeline and sends it).
+      await loadEditServer();
+      if (state.editRev === null) retryLater();
+      return;
+    }
     // The doc and the rev it is based on are taken together, at send time.
     const doc = editDoc();
     const rev = state.editRev;
     dirty = false;
     saving = true;
     let r = null;
-    try { r = await call('/api/edit', { method: 'POST', body: rev === null ? doc : { ...doc, rev } }); } catch (_) { r = null; }
+    try { r = await call('/api/edit', { method: 'POST', body: { ...doc, rev } }); } catch (_) { r = null; }
     saving = false;
     if (r && r.ok && r.data && typeof r.data.rev === 'number') {
+      retries = 0;
       state.editRev = r.data.rev;
       state.editBase = clipUrls(doc.clips);
+      writeLocal(dirty ? true : false);
     } else if (r && r.status === 409 && r.data && r.data.error === 'edit_changed' && r.data.edit) {
       rebaseEdit(r.data.edit, r.data.rev);
       dirty = true;
-    } else {
-      // Offline or refused: the change stays local and goes out with the next one.
+      writeLocal(true);
+    } else if (r && r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429) {
+      // The engine refused this timeline as it is: retrying the same doc cannot help. It stays here, marked unsent.
       dirty = true;
+      refused = true;
+      const why = r.data && typeof r.data.error === 'string' ? ` (${r.data.error})` : '';
+      els.editNote.textContent = `The engine could not save this timeline${why}. It is kept in this browser; your next change tries again.`;
+      return;
+    } else {
+      // Offline or the engine is busy: try again soon, then less often.
+      dirty = true;
+      retryLater();
       return;
     }
     if (dirty && saveTimer === null) flushEdit();
@@ -1300,19 +1349,22 @@
   // timeline has that are new there: in neither the old base nor the local copy. A clip removed here stays removed.
   function rebaseEdit(saved, rev) {
     const local = clipUrls(state.edit);
-    const added = (Array.isArray(saved.clips) ? saved.clips : [])
+    const fresh = (Array.isArray(saved.clips) ? saved.clips : [])
       .filter((c) => c && !state.editBase.has(c.url) && !local.has(c.url))
-      .map(normClip).filter(Boolean)
-      .slice(0, Math.max(0, MAX_EDIT_CLIPS - state.edit.length));
+      .map(normClip).filter(Boolean);
+    const added = fresh.slice(0, Math.max(0, MAX_EDIT_CLIPS - state.edit.length));
     state.editRev = typeof rev === 'number' ? rev : state.editRev;
     state.editBase = clipUrls(saved.clips);
-    if (!added.length) return;
+    if (!fresh.length) return;
+    dropUndo();
     state.edit.push(...added);
-    if (state.editSel < 0) state.editSel = 0;
-    try { localStorage.setItem('agave.edit', JSON.stringify(editDoc())); } catch (_) { /* private mode */ }
+    if (state.editSel < 0 && state.edit.length) state.editSel = 0;
+    writeLocal(true);
     keepCaret(() => { renderEditor(); measureAll(); });
     const n = added.length;
-    els.editNote.textContent = `${n} clip${n === 1 ? ' was' : 's were'} added elsewhere (a pipeline or another tab), so ${n === 1 ? 'it is' : 'they are'} now at the end of the timeline.`;
+    const cut = fresh.length - n;
+    els.editNote.textContent = (n ? `${n} clip${n === 1 ? ' was' : 's were'} added elsewhere (a pipeline or another tab), so ${n === 1 ? 'it is' : 'they are'} now at the end of the timeline.` : '')
+      + (cut ? `${n ? ' ' : ''}${cut} clip${cut === 1 ? '' : 's'} added elsewhere did not fit: the timeline holds ${MAX_EDIT_CLIPS}.` : '');
   }
 
   // Re-renders without taking focus and the caret out of the caption being typed.
@@ -1348,8 +1400,15 @@
     state.ph = 0;
   }
 
+  // The local copy from the last visit. With an unsent marker it holds changes the engine never saved: they are
+  // rebased onto the saved timeline at the first read (on the clips they were based on). Without one, the copy was
+  // the saved timeline, so its own clips are the base.
   function loadEdit() {
     try { applyEditDoc(JSON.parse(localStorage.getItem('agave.edit') || '[]')); } catch (_) { applyEditDoc([]); }
+    let unsent = null;
+    try { unsent = JSON.parse(localStorage.getItem(UNSENT_KEY) || 'null'); } catch (_) { unsent = null; }
+    state.editBase = unsent && Array.isArray(unsent.base) ? new Set(unsent.base) : clipUrls(state.edit);
+    if (unsent) dirty = true;
   }
 
   // The engine keeps the timeline (data/studio.json), so it survives a restart.
@@ -1359,20 +1418,28 @@
       if (r.ok && r.data && r.data.edit) {
         const rev = typeof r.data.rev === 'number' ? r.data.rev : null;
         const first = state.editRev === null;
-        if (first && editPending()) {
-          // Changed here before the first read came back: keep the change and add the saved clips to it.
-          rebaseEdit(r.data.edit, rev);
+        // The engine's rev only goes up (it is stored with the timeline), so a late read never undoes a newer save.
+        const newer = rev !== null && (first || rev > state.editRev);
+        if (newer && editPending()) {
+          if (first || (!saving && saveTimer === null)) {
+            // Unsent changes (from before this read, a failed save or the last visit): keep them, add the saved
+            // timeline's new clips, and send them on the new rev.
+            rebaseEdit(r.data.edit, rev);
+            if (!refused) flushEdit();
+          }
+          // Otherwise a save is on its way: it gets a 409 and rebases, so leave the copy and the rev alone.
         } else if (first) {
           // First read: an older local copy wins over an empty saved one.
-          if (r.data.edit.clips.length || !state.edit.length) applyEditDoc(r.data.edit);
+          if (r.data.edit.clips.length || !state.edit.length) { applyEditDoc(r.data.edit); dropUndo(); writeLocal(false); }
           state.editRev = rev;
           state.editBase = clipUrls(r.data.edit.clips);
-        } else if (rev !== state.editRev && !editPending()) {
-          // A newer saved timeline and nothing local waiting: take it. When a local change is on its way, leave the
-          // copy and the rev alone; that save gets a 409 and rebases onto the newer timeline.
+        } else if (newer) {
+          // A newer saved timeline and nothing local waiting: take it.
           applyEditDoc(r.data.edit);
+          dropUndo();
           state.editRev = rev;
           state.editBase = clipUrls(r.data.edit.clips);
+          writeLocal(false);
         }
       }
     } catch (_) { /* offline: keep the local copy */ }
@@ -2774,7 +2841,7 @@
       const o = (s.outputs || []).find((x) => x.kind === 'video') || (s.outputs || []).find((x) => x.kind === 'image');
       if (!o) continue;
       const media = o.kind === 'video' ? stillVideo(o.url, s.title) : el('img', { src: o.url, alt: s.title, decoding: 'async' });
-      const fig = el('figure', o.kind === 'video' ? { tabindex: '0' } : {}, [media, el('figcaption', {}, [s.title])]);
+      const fig = el('figure', o.kind === 'video' && !reduceMotion ? { tabindex: '0' } : {}, [media, el('figcaption', {}, [s.title])]);
       if (o.kind === 'video') playOnHover(fig, media);
       strip.append(fig);
     }
