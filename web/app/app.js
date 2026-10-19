@@ -2917,7 +2917,7 @@
     const cur = steps[run.current];
     const retry = (i, b) => clickStep(run, i, b);
     const actions = [];
-    if (cur && run.status === 'waiting') actions.push(actionButton(cur, `run ${cur.title}`, (b) => clickStep(run, run.current, b), 'pipeGo'));
+    if (cur && run.status === 'waiting' && !run.removed) actions.push(actionButton(cur, `run ${cur.title}`, (b) => clickStep(run, run.current, b), 'pipeGo'));
     const back = el('button', { type: 'button', class: 'link-btn plain' }, ['All pipelines']);
     back.addEventListener('click', () => { closePanel(true); openPanel(els.prompts, () => { loadLibrary(); loadPipelines(); }); });
     const forget = el('button', { type: 'button', class: 'link-btn' }, ['Forget this run']);
