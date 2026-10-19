@@ -246,16 +246,17 @@ code { font: 500 .92em var(--font-mono); color: var(--ember-2); }
   position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
   padding: 32px 10px 9px; background: linear-gradient(180deg, rgba(8, 8, 10, 0), rgba(8, 8, 10, .8)); pointer-events: none; text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
 }
-.m figcaption span { font: 600 13px/1.2 var(--font-sans); color: var(--ink); opacity: 0; transition: opacity .12s var(--e-in); }
+.m figcaption > span { font: 600 13px/1.2 var(--font-sans); color: var(--ink); opacity: 0; transition: opacity .12s var(--e-in); }
 .m figcaption em { order: -1; min-width: 0; font: 500 11px/1.2 var(--font-mono); font-style: normal; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (hover: hover) {
   .m:hover img, .m:hover video { transform: scale(1.035); transition: transform .6s var(--e-out); }
-  .m:hover figcaption span { opacity: 1; transition: opacity .24s var(--e-out); }
+  .m:hover figcaption > span { opacity: 1; transition: opacity .24s var(--e-out); }
 }
 @media (hover: none) {
   .m figcaption { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 3px; }
-  .m figcaption span { opacity: 1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m figcaption > span { opacity: 1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .m figcaption em { order: 0; max-width: 100%; }
+  .m figcaption em .by { display: none; }
 }
 
 /* Pipelines: one lane at a time; paid steps are picture cells, free steps are the links between them. */
@@ -288,7 +289,7 @@ code { font: 500 .92em var(--font-mono); color: var(--ember-2); }
   position: relative; flex: 0 0 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   padding: 0 10px; text-align: center; color: var(--ink-2); font: 500 12.5px/1.3 var(--font-sans);
 }
-.link::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); z-index: 0; transform: translateY(-30px); }
+.link::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); z-index: 0; transform: translateY(-40px); }
 .link > * { position: relative; }
 .link .fee { color: var(--dim); font-size: 11.5px; }
 .fine { margin: 14px 0 0; max-width: 84ch; color: var(--dim); font-size: 13px; }
