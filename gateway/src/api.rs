@@ -1127,6 +1127,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_saved_key_is_never_sent_back() {
+        let st = AppState::for_tests("api_keys_no_echo");
+        let mut req = post_json("/api/keys", r#"{"env":"FAL_KEY","value":"abcdefgh1234secret"}"#);
+        req.extensions_mut().insert(from([127, 0, 0, 1]));
+        assert_eq!(router(st.clone()).oneshot(req).await.expect("response").status(), StatusCode::OK);
+        let v = body_json(router(st).oneshot(get_req("/api/keys")).await.expect("response")).await;
+        let slot = v["keys"].as_array().unwrap().iter().find(|k| k["env"] == "FAL_KEY").cloned().unwrap();
+        assert_eq!(slot["set"], true);
+        assert!(!v.to_string().contains("abcdefgh1234secret"), "a saved value is never sent back");
+    }
+
+    #[tokio::test]
     async fn keys_post_rejects_bad_value_without_echo() {
         let app = router(AppState::for_tests("api_keys_badvalue"));
         let mut req = post_json("/api/keys", r#"{"env":"FAL_KEY","value":"short"}"#);

@@ -2556,7 +2556,8 @@
   }
 
   function renderRunChip() {
-    const open = pipe.runs.filter((r) => r.status !== 'done');
+    // A run of a pipeline that is no longer in the studio can never go on, so it never asks for attention.
+    const open = pipe.runs.filter((r) => r.status !== 'done' && !r.removed);
     const top = open.find((r) => r.status === 'waiting') || open.find((r) => r.status === 'failed') || open[0];
     els.runChip.hidden = !top;
     if (!top) return;
@@ -2604,7 +2605,7 @@
     for (const r of runs) {
       const b = el('button', { type: 'button', class: 'run-row', 'data-state': r.status }, [
         el('span', { class: 'run-dot', 'aria-hidden': 'true' }),
-        el('span', { class: 'run-row-title' }, [r.title || r.pipeline]),
+        el('span', { class: 'run-row-title' }, [r.title || (r.removed ? 'Removed pipeline' : r.pipeline)]),
         el('span', { class: 'run-row-sub' }, [`${r.subject} · @${r.tag}`]),
         el('span', { class: 'run-row-state' }, [r.status === 'done' ? RUN_LABEL.done : `${RUN_LABEL[r.status] || r.status} · step ${r.current + 1}`]),
       ]);
@@ -2711,7 +2712,7 @@
         el('div', { class: 'pipe-step-main' }, [
           el('div', { class: 'pipe-step-top' }, [
             el('span', { class: 'pipe-step-title' }, [s.title]),
-            el('span', { class: 'pipe-step-price' + (s.paid ? ' paid' : ''), title: s.paid ? 'Costs money: waits for your click' : 'Free: runs on its own' }, [stepPrice(s)]),
+            s.kind === 'removed' ? null : el('span', { class: 'pipe-step-price' + (s.paid ? ' paid' : ''), title: s.paid ? 'Costs money: waits for your click' : 'Free: runs on its own' }, [stepPrice(s)]),
           ]),
           el('p', { class: 'pipe-step-meta' }, meta.filter(Boolean)),
           run ? el('p', { class: 'pipe-step-state' }, [STEP_LABEL[status] || status]) : null,
@@ -2930,20 +2931,21 @@
         closePanel();
       }
     });
-    const lead = run.status === 'waiting'
+    const lead = run.removed ? 'This pipeline is no longer in the studio, so this run cannot go on. Its files are below and in the gallery.'
+      : run.status === 'waiting'
       ? `Step ${run.current + 1} costs money, so it waits for you. Earlier results are below.`
       : run.status === 'failed' ? `Step ${run.current + 1} failed. Run again starts at that step and keeps everything before it.`
       : run.status === 'running' ? 'Working. You can close this panel or reload the page; the run keeps going.'
       : 'All steps are done. The files are also in the gallery.';
     appendAll(els.pipeBody, [
       el('div', { class: 'pipe-head' }, [
-        el('div', { class: 'pipe-head-top' }, [el('h3', {}, [run.title || run.pipeline]), el('span', { class: 'run-pill', 'data-state': run.status }, [RUN_LABEL[run.status] || run.status])]),
+        el('div', { class: 'pipe-head-top' }, [el('h3', {}, [run.title || (run.removed ? 'Removed pipeline' : run.pipeline)]), el('span', { class: 'run-pill', 'data-state': run.status }, [RUN_LABEL[run.status] || run.status])]),
         el('p', { class: 'muted' }, [`${run.subject} · Element @${run.tag}`]),
       ]),
-      run.status === 'done' ? finishedHero(run) : el('p', { class: 'pipe-lead', role: 'status' }, [lead]),
-      stepList(steps, run, run.status === 'failed' ? retry : null),
+      run.status === 'done' && !run.removed ? finishedHero(run) : el('p', { class: 'pipe-lead', role: 'status' }, [lead]),
+      stepList(steps, run, run.status === 'failed' && !run.removed ? retry : null),
       el('div', { class: 'pipe-dock' }, [
-        el('div', { class: 'pipe-total small-total' }, [el('span', { class: 'k' }, ['Full list price']), el('strong', {}, [totalText(run.total)])]),
+        run.removed ? null : el('div', { class: 'pipe-total small-total' }, [el('span', { class: 'k' }, ['Full list price']), el('strong', {}, [totalText(run.total)])]),
         actions.length || v.note ? el('div', { class: 'panel-actions' }, [...actions, el('span', { class: 'key-note', role: 'status' }, [v.note || ''])]) : null,
         el('div', { class: 'pipe-foot' }, [back, forget]),
       ]),

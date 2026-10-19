@@ -118,7 +118,9 @@ survives a reload or a restart. Generation steps go through the same checks as P
   the cent per step); Meshy steps count credits.
 - GET /api/pipelines/runs -> {"runs":[Run]} newest first (moves running runs on first).
   Run = {id:"p_<16 hex>",pipeline,title,created_at,subject,image,tag,status:"waiting"|"running"|"failed"|"done",current,
-         steps:[...step fields above, status:"pending"|"waiting"|"running"|"done"|"failed",job,outputs,error,key],total}
+         steps:[...step fields above, status:"pending"|"waiting"|"running"|"done"|"failed",job,outputs,error,key],total,removed}
+  `removed` is true for a run of a pipeline that is no longer in the studio: its title and total are null, its steps
+  show as "Step N" with kind "removed", its files stay, and it cannot go on (a step in flight fails with a note).
 - POST /api/pipelines/runs {"pipeline","subject" (1-60 chars, also the Element's words),"image":"/outputs/..." (when
   needs_image),"tag"} -> 201 {"run"} | 400 unknown_pipeline/invalid_subject/image_required/invalid_image/invalid_tag |
   409 tag_in_use (that @tag is already an Element) | 409 tag_in_run (another run that is not finished holds it; a failed
@@ -127,7 +129,7 @@ survives a reload or a restart. Generation steps go through the same checks as P
   the Element alone, when the tag now belongs to an Element the run did not make.
 - POST /api/pipelines/runs/{id}/step {"step":n} -> {"run"}: the user's click. Only the current step, when it is
   waiting or failed (409 step_not_ready otherwise; 409 pipeline_changed for a run saved by an older version of its
-  pipeline, which is failed instead of resumed). A refused request (for example 412 missing_key) is recorded on the
+  pipeline, which is failed instead of resumed; 409 unknown_pipeline for a `removed` run). A refused request (for example 412 missing_key) is recorded on the
   step as `error` (and `key`), so the answer is the run either way. A failed step stops the run; clicking it again runs
   only that step and keeps everything before it.
 - POST /api/pipelines/runs/{id}/delete {} -> {"ok":true} | 409 run_busy (a step is waiting on a job). Files and the

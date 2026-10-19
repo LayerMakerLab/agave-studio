@@ -502,18 +502,19 @@ fn output_of(run: &Run, i: usize, kinds: &[&str]) -> Option<String> {
 }
 
 const OLD_RUN: &str = "This run was made by an older version of this pipeline, so it cannot go on. Start a new run.";
+const REMOVED_RUN: &str = "This pipeline is no longer in the studio, so this run cannot go on. Its files stay in the gallery.";
 
 /// Moves a run forward as far as it can go without spending money: picks up finished jobs, runs free steps,
 /// and stops at a paid step (waiting for a click), a running job, a failure or the end.
 async fn advance(st: &AppState, run: &mut Run) {
     let Some(p) = find(&run.pipeline).filter(|p| same_shape(p, run)) else {
-        // A run saved by an older version of its pipeline (or of one that is gone) cannot be resumed safely.
+        // A run saved by an older version of its pipeline, or of one that is gone, cannot be resumed safely.
         if run.status != "done" && run.status != "failed" {
             let i = run.current.min(run.steps.len().saturating_sub(1));
             if run.steps.is_empty() {
                 run.status = "failed".into();
             } else {
-                fail_step(run, i, OLD_RUN);
+                fail_step(run, i, if find(&run.pipeline).is_some() { OLD_RUN } else { REMOVED_RUN });
             }
         }
         return;
@@ -730,7 +731,6 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
         image_url,
         recipe: recipe.map(String::from),
         label: Some(format!("Step {} · {}", i + 1, p.steps[i].title)),
-        // The picture this run saved as its Element (the start photo or an earlier step's).
         ..Default::default()
     };
     match submit_generate(st, req) {
@@ -782,14 +782,19 @@ pub async fn run_ticker(st: AppState) {
     }
 }
 
+/// A run's view. A run of a pipeline that is no longer in the studio keeps its files: its steps are shown as
+/// "Step N" (kind "removed", nothing to pay or run) and the run is marked `removed`.
 fn run_json(st: &AppState, run: &Run) -> Value {
     let p = find(&run.pipeline);
     let mut defs = p.map(|p| steps_json(st, p)).unwrap_or_default().into_iter();
     let steps: Vec<Value> = run
         .steps
         .iter()
-        .map(|s| {
-            let mut v = defs.next().unwrap_or_else(|| json!({}));
+        .enumerate()
+        .map(|(i, s)| {
+            let mut v = defs.next().unwrap_or_else(|| {
+                if p.is_none() { json!({"title": format!("Step {}", i + 1), "kind": "removed", "paid": false}) } else { json!({}) }
+            });
             v["status"] = json!(s.status);
             v["job"] = json!(s.job);
             v["outputs"] = json!(s.outputs);
@@ -801,7 +806,7 @@ fn run_json(st: &AppState, run: &Run) -> Value {
         .collect();
     json!({"id": run.id, "pipeline": run.pipeline, "title": p.map(|p| p.title), "created_at": run.created_at,
            "subject": run.subject, "image": run.image, "tag": run.tag, "status": run.status, "current": run.current,
-           "steps": steps, "total": p.map(|p| total_json(st, p))})
+           "steps": steps, "total": p.map(|p| total_json(st, p)), "removed": p.is_none()})
 }
 
 // ---------------------------------------------------------------- routes
@@ -829,7 +834,7 @@ pub struct CreateReq {
     tag: Option<String>,
 }
 
-/// POST /api/pipelines/runs: makes a run. A first step that costs money waits for a click; free local steps start.
+/// POST /api/pipelines/runs: makes a run. A first step that costs money waits for a click; free steps start.
 pub async fn create(State(st): State<AppState>, body: Result<Json<CreateReq>, JsonRejection>) -> Response {
     let Ok(Json(b)) = body else { return fail(StatusCode::BAD_REQUEST, "bad_request") };
     let Some(p) = find(&b.pipeline) else { return fail(StatusCode::BAD_REQUEST, "unknown_pipeline") };
@@ -1156,6 +1161,7 @@ mod tests {
         assert_eq!(run["status"], "done", "{run}");
         let seen = fake(&st).seen.lock().unwrap();
         assert_eq!(seen.len(), 4, "four paid generations, each after its own click");
+        assert_eq!(seen[0].label.as_deref(), Some("Step 1 · Character sheet"));
         assert_eq!(seen[3].image_url.as_deref(), Some(out(&run, 4).as_str()), "clip 2 starts from clip 1's last frame");
         assert!(out(&run, 4).ends_with(".png"));
         // The last frame was taken as a local job, like Continue, outside the engine lock.
@@ -1164,6 +1170,48 @@ mod tests {
         let edit: Vec<String> = st.studio.edit().clips.into_iter().map(|c| c.url).collect();
         assert_eq!(edit, vec![out(&run, 3), out(&run, 5)]);
         assert!(run["steps"][6]["note"].is_null());
+    }
+
+    #[tokio::test]
+    async fn runs_of_a_removed_pipeline_stay_listed_with_their_files_and_never_run() {
+        let st = fake_state(crate::fsutil::test_dir("pipe_removed"), 0);
+        let out = |url: &str| Output { url: url.into(), kind: "video".into() };
+        let run = |id: &str, status: &str, current: usize, steps: Vec<StepRun>| Run {
+            id: id.into(),
+            pipeline: "ltx-short-on-comfy".into(),
+            created_at: 1,
+            subject: "x".into(),
+            image: None,
+            tag: "lead".into(),
+            status: status.into(),
+            current,
+            steps,
+            element: None,
+            shape: "d241dfcef3544c4a".into(),
+        };
+        let done = |o: Option<&str>| StepRun { status: "done".into(), outputs: o.map(out).into_iter().collect(), ..Default::default() };
+        st.pipelines.put(run("p_aaaaaaaaaaaaaaa1", "done", 5, vec![done(None), done(Some("/outputs/a.mp4")), done(None), done(Some("/outputs/b.mp4")), done(None)]));
+        st.pipelines.put(run("p_aaaaaaaaaaaaaaa2", "running", 1, vec![done(None), StepRun { status: "running".into(), ..Default::default() }]));
+        let (status, v) = call(&st, "GET", "/api/pipelines/runs", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let get = |id: &str| v["runs"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
+        let finished = get("p_aaaaaaaaaaaaaaa1");
+        assert_eq!((finished["removed"].as_bool(), finished["status"].as_str()), (Some(true), Some("done")));
+        assert_eq!((finished["steps"][1]["title"].as_str(), finished["steps"][1]["kind"].as_str()), (Some("Step 2"), Some("removed")));
+        assert_eq!(finished["steps"][3]["outputs"][0]["url"], "/outputs/b.mp4", "its files are kept");
+        // The one that was mid-step stops with its own message and can never be run again.
+        let stopped = get("p_aaaaaaaaaaaaaaa2");
+        assert_eq!((stopped["status"].as_str(), stopped["steps"][1]["error"].as_str()), (Some("failed"), Some(REMOVED_RUN)));
+        let (status, v) = click(&st, "p_aaaaaaaaaaaaaaa2", 1).await;
+        assert_eq!((status, v["error"].as_str()), (StatusCode::CONFLICT, Some("unknown_pipeline")));
+        assert!(fake(&st).seen.lock().unwrap().is_empty(), "no provider call");
+        let (status, _) = call(&st, "POST", "/api/pipelines/runs/p_aaaaaaaaaaaaaaa1/delete", Some(json!({}))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(st.pipelines.get("p_aaaaaaaaaaaaaaa1").is_none());
+        // A run of a pipeline that still exists is never marked removed.
+        let img = start_image(&st);
+        let id = create(&st, "product-to-3d", Some(img)).await["id"].as_str().unwrap().to_string();
+        assert_eq!(st.pipelines.get(&id).map(|r| run_json(&st, &r)["removed"].as_bool()), Some(Some(false)));
     }
 
     #[test]

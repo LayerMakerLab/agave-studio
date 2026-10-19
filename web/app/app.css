@@ -701,7 +701,7 @@ a:hover { color: var(--silver-1); }
 .pipe-warn { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255, 207, 107, 0.35); background: rgba(255, 207, 107, 0.06); }
 .pipe-warn p { margin: 0; font-size: 13px; color: var(--warn); }
 .pipe-foot { display: flex; justify-content: space-between; gap: 10px; }
-/* The one button that spends money: ember, cost first. Free and local actions use the quiet pill. */
+/* The one button that spends money: ember, cost first. Free actions use the quiet pill. */
 .pill.pay { color: #1a0d07; font-weight: 600; background: linear-gradient(180deg, #ff8a5c, var(--ember) 55%, #e65a2e);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 0 1px rgba(255, 140, 100, 0.6), 0 12px 30px -10px rgba(255, 107, 61, 0.55); }
 .pill.pay:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 0 0 1px rgba(255, 170, 130, 0.8), 0 18px 40px -12px rgba(255, 107, 61, 0.7); }
