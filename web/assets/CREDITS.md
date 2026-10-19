@@ -24,9 +24,9 @@ it. Nothing on the page comes from anywhere else.
 |---|---|---|---|
 | hero-courier.mp4 | Kling 3.0 Pro from a Seedream 4 still (a courier in a neon alley) | Camera: Tracking side | Camera |
 | hero-looks.mp4 | Four Seedream 4 stills, same prompt and seed: no look, 35mm film, Film noir, VHS. Cut together with wipes and a slow push in ffmpeg | Looks | Looks |
-| hero-dancer.mp4 | Kling 3.0 Pro from a Seedream 4 still (a dancer in a red coat in a concrete hall) | Camera: Dolly in was picked, but the camera did not move, so the page names no move for it | Video |
 | hero-diner.mp4 | Kling 3.0 Pro from a Seedream 4 still (a pastel diner) | Camera: Push through | Animate |
 | hero-mara.mp4 | Kling 3.0 Pro from a Seedream 4 Edit still of the Element @mara, which was saved from a Seedream 4 portrait | Element @mara; Camera: Handheld | Elements |
+| img/ref-mara.webp | A face crop of that Seedream 4 portrait (the Element's picture) | Element @mara | Elements, the inset |
 
 ## Reel
 
@@ -36,8 +36,9 @@ it. Nothing on the page comes from anywhere else.
 | video/reel-ink.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Static lock-off) |
 | video/reel-skater.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Low-angle orbit) |
 | video/reel-peonies.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Rack focus) |
+| video/hero-dancer.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Dolly in was picked, but the camera did not move, so the page names no move) |
 | img/still-lighthouse.webp, still-matcha.webp, still-watchmaker.webp, still-crossing.webp, still-horse.webp, still-astronomer.webp, still-poster.webp, still-ceramics.webp | Seedream 4 (still-poster.webp shows text on purpose) | Agave, 2026-10-19 |
-| video/card-image.mp4, card-lipsync.mp4, card-upscale.mp4, card-character.mp4, hero-dunes.mp4 | Kling 3.0 from a Meshy still | ef15fed |
+| video/card-image.mp4, card-lipsync.mp4, card-upscale.mp4, card-character.mp4 | Kling 3.0 from a Meshy still | ef15fed |
 | img/char-b.webp, char-c.webp, reel-t2v.webp | Meshy | ef15fed (same files at dd2465f) |
 
 ## Tools
@@ -51,11 +52,8 @@ it. Nothing on the page comes from anywhere else.
 
 | File | Made with | Source | Where |
 |---|---|---|---|
-| img/reel-upscale.webp | Meshy | ef15fed (same file at dd2465f) | Product pipeline, Hero still step |
-| video/card-upscale.mp4 | Kling 3.0 from a Meshy still | ef15fed | Product pipeline, Video step (macro crop) |
-| img/char-b.webp | Meshy | ef15fed | Character pipeline, Opening still step |
-| video/card-character.mp4 | Kling 3.0 from a Meshy still | ef15fed | Character pipeline, Clip 1 step |
-| img/lastframe-card-character.webp | last frame of card-character.mp4 | ef15fed clip | Character pipeline, Clip 2 step (the frame Clip 2 starts on) |
+| img/pipe-bowl.webp | Seedream 4 (the ramen bowl product photo) | Agave, 2026-10-19 | Product pipeline, the input photo |
+| img/pipe-mara.webp | Seedream 4 (the @mara portrait) | Agave, 2026-10-19 | Character pipeline, the input photo |
 | img/final-stage.webp | Meshy | ef15fed (same file at dd2465f) | Background of "Why it is free" |
 | img/hero-atrium.jpg | first frame of hero-atrium.mp4 | ef15fed | Not shown; the website import uses it as the share picture (og:image) |
 
@@ -69,7 +67,8 @@ it. Nothing on the page comes from anywhere else.
 
 ## Notes
 
-- The pipeline pictures are examples from the reel, not the output of a pipeline run, and the page says so.
+- The pipeline photos are example inputs, not the output of a pipeline run, and the page says so. The steps show
+  each step's model and list price, as the studio shows them before the first step.
 - Pictures are cropped on the page (CSS `object-fit`); the files themselves are only resized.
 - The display face is Anybody (SIL Open Font License), loaded from Google Fonts. Geist and Geist Mono ship in
   `web/assets/fonts`.
