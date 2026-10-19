@@ -98,23 +98,42 @@
   if (document.readyState === "complete") begin(); else addEventListener("load", begin, { once: true });
 
   /* ---------- Reel and pipeline clips: load near the screen, play only on it ---------- */
-  const clips = $$(".masonry video, .track video");
+  const clips = $$(".masonry video, .track video, .vis-clip video");
   if (!reduce && "IntersectionObserver" in window) {
     const near = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { arm(e.target); near.unobserve(e.target); } }), { rootMargin: "300px 0px" });
     const seen = new IntersectionObserver((es) => es.forEach((e) => (e.isIntersecting ? play(e.target) : e.target.pause())), { threshold: 0.2 });
     clips.forEach((v) => { near.observe(v); seen.observe(v); });
   }
 
-  /* ---------- Reel filter ---------- */
-  const filters = $$(".filters button"), items = $$("#masonry .m"), masonry = $("#masonry");
+  /* ---------- Reel: filter, and the fold that "See all" opens ---------- */
+  const filters = $$("#gallery .filters button"), items = $$("#masonry .m"), masonry = $("#masonry");
+  const wrap = $("#reelWrap"), seeAll = $("#seeAll");
+  const setOpen = (open) => { wrap.classList.toggle("open", open); seeAll.setAttribute("aria-expanded", String(open)); seeAll.textContent = open ? "Show less" : "See all"; };
+  seeAll.addEventListener("click", () => {
+    const open = !wrap.classList.contains("open");
+    setOpen(open);
+    if (!open) $("#gallery").scrollIntoView({ block: "start" });
+  });
   filters.forEach((b) => b.addEventListener("click", () => {
     const k = b.dataset.show;
     filters.forEach((x) => { const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
     masonry.classList.toggle("filtered", k !== "all");
+    if (k !== "all") setOpen(true);
     items.forEach((m) => {
       const hide = k !== "all" && !m.classList.contains(k);
       m.hidden = hide;
       if (hide) { const v = $("video", m); if (v) v.pause(); }
+    });
+  }));
+
+  /* ---------- Pipelines: one lane at a time ---------- */
+  const laneTabs = $$("#pipelines [data-lane]");
+  laneTabs.forEach((t) => t.addEventListener("click", () => {
+    laneTabs.forEach((x) => {
+      const on = x === t, lane = $("#lane-" + x.dataset.lane);
+      x.classList.toggle("on", on); x.setAttribute("aria-selected", String(on));
+      lane.hidden = !on;
+      if (!on) $$("video", lane).forEach((v) => v.pause());
     });
   }));
 

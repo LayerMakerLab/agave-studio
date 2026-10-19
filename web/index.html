@@ -76,43 +76,39 @@
       <div class="hero-side">
         <p>The free, open-source studio for AI image, video, voice and 3D. Bring your own keys.</p>
         <div class="actions">
-          <a class="cta" href="/app/">Open the studio</a>
           <a class="ghost" href="https://github.com/LayerMakerLab/agave-studio"><svg class="ico" aria-hidden="true"><use href="#i-gh"/></svg>View on GitHub</a>
+          <a class="ghost" href="#gallery">See the reel</a>
         </div>
       </div>
     </div>
 
     <div class="reel" id="reel">
       <article class="shot on">
-        <a class="shot-link" href="/app/#video" aria-label="Video: open the studio">
-          <video muted playsinline preload="none" poster="/assets/img/poster-hero-pitstop.webp" data-src="/assets/video/hero-pitstop.mp4"></video>
-        </a>
-        <span class="chip">Kling 3.0 · from a still</span>
-        <div class="shot-cap"><span class="shot-n">01</span><h2 class="shot-t">Video</h2><p>Kling, Veo, Seedance, Wan and Hailuo in one queue.</p></div>
-        <i class="shot-bar" aria-hidden="true"></i>
-      </article>
-      <article class="shot">
-        <a class="shot-link" href="/app/#camera" aria-label="Camera: open the studio">
+        <a class="shot-link" href="/app/#video" aria-label="The atrium: make a clip like this in Video">
           <video muted playsinline preload="none" poster="/assets/img/poster-hero-atrium.webp" data-src="/assets/video/hero-atrium.mp4"></video>
         </a>
-        <span class="chip">Kling 3.0 · from a still</span>
-        <div class="shot-cap"><span class="shot-n">02</span><h2 class="shot-t">Camera</h2><p>20 moves, from dolly in to bullet time.</p></div>
+        <div class="shot-cap"><h2 class="shot-t">The atrium</h2><p>A slow push toward the light.</p><span class="shot-k">Kling 3.0 · image to video</span></div>
         <i class="shot-bar" aria-hidden="true"></i>
       </article>
       <article class="shot">
-        <a class="shot-link" href="/app/#video" aria-label="Image to video: open the studio">
-          <video muted playsinline preload="none" poster="/assets/img/poster-hero-dunes.webp" data-src="/assets/video/hero-dunes.mp4"></video>
+        <a class="shot-link" href="/app/#video" aria-label="Pit stop: make a clip like this in Video">
+          <video muted playsinline preload="none" poster="/assets/img/poster-hero-pitstop.webp" data-src="/assets/video/hero-pitstop.mp4"></video>
         </a>
-        <span class="chip">Kling 3.0 · from a still</span>
-        <div class="shot-cap"><span class="shot-n">03</span><h2 class="shot-t">Image to video</h2><p>Start from a still. Pick the model and the move.</p></div>
+        <div class="shot-cap"><h2 class="shot-t">Pit stop</h2><p>Sparks, smoke and a full crew.</p><span class="shot-k">Kling 3.0 · image to video</span></div>
         <i class="shot-bar" aria-hidden="true"></i>
       </article>
       <article class="shot">
-        <a class="shot-link" href="/app/" aria-label="Edit: open the studio">
+        <a class="shot-link" href="/app/#video" aria-label="Soundstage: make a clip like this in Video">
           <video muted playsinline preload="none" poster="/assets/img/poster-hero-soundstage.webp" data-src="/assets/video/hero-soundstage.mp4"></video>
         </a>
-        <span class="chip">Kling 3.0 · from a still</span>
-        <div class="shot-cap"><span class="shot-n">04</span><h2 class="shot-t">Edit</h2><p>Trim, join and caption. Export for YouTube or Shorts.</p></div>
+        <div class="shot-cap"><h2 class="shot-t">Soundstage</h2><p>An empty set with the lights up.</p><span class="shot-k">Kling 3.0 · image to video</span></div>
+        <i class="shot-bar" aria-hidden="true"></i>
+      </article>
+      <article class="shot">
+        <a class="shot-link" href="/app/#video" aria-label="Dust storm: make a clip like this in Video">
+          <video muted playsinline preload="none" poster="/assets/img/poster-hero-dunes.webp" data-src="/assets/video/hero-dunes.mp4"></video>
+        </a>
+        <div class="shot-cap"><h2 class="shot-t">Dust storm</h2><p>A rider ahead of a wall of sand.</p><span class="shot-k">Kling 3.0 · image to video</span></div>
         <i class="shot-bar" aria-hidden="true"></i>
       </article>
     </div>
@@ -121,99 +117,74 @@
   <!-- TOOLS -->
   <section class="sec" id="tools">
     <header class="sec-head">
-      <h2 class="display">The toolkit</h2>
+      <h2 class="display">Tools</h2>
       <p>One queue, every model, on your own keys.</p>
     </header>
-    <div class="tiles">
-      <a class="tile" href="/app/#image" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-image"/></svg></span><span class="datum">T2I · I2I</span></span>
-        <b class="tile-name">Image</b>
-        <span class="tile-line">Nano Banana, Seedream 4, FLUX.2 and GPT Image 2.5.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+    <div class="modes">
+      <a class="mode" href="/app/#image" data-wipe>
+        <span class="vis vis-frames" aria-hidden="true"><i class="f169">16:9</i><i class="f11">1:1</i><i class="f916">9:16</i></span>
+        <b class="mode-name">Image</b>
+        <span class="mode-line">Text or picture to image with Nano Banana, Seedream 4, FLUX.2 or GPT Image 2.5.</span>
       </a>
-      <a class="tile" href="/app/#video" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-video"/></svg></span><span class="datum">T2V · I2V</span></span>
-        <b class="tile-name">Video</b>
-        <span class="tile-line">Kling 3.0, Veo 3.1, Seedance 2.5, Wan 2.2 and Hailuo 02.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+      <a class="mode" href="/app/#video" data-wipe>
+        <span class="vis vis-clip"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-camera.webp" data-src="/assets/video/card-camera.mp4" aria-label="A coupe on a desert road at golden hour"></video><em>Kling 3.0</em></span>
+        <b class="mode-name">Video</b>
+        <span class="mode-line">Text or picture to video with Kling 3.0, Veo 3.1, Seedance 2.5, Wan 2.2 or Hailuo 02.</span>
       </a>
-      <a class="tile" href="/app/#audio" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-speech"/></svg></span><span class="datum">TTS</span></span>
-        <b class="tile-name">Speech</b>
-        <span class="tile-line">Type the line, get the voice, with ElevenLabs.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+      <a class="mode" href="/app/#audio" data-wipe>
+        <span class="vis vis-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <b class="mode-name">Speech</b>
+        <span class="mode-line">Type the line and get the voice, with ElevenLabs.</span>
       </a>
-      <a class="tile" href="/app/#3d" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-3d"/></svg></span><span class="datum">GLB · USDZ · STL · 3MF</span></span>
-        <b class="tile-name">3D</b>
-        <span class="tile-line">1 to 4 pictures of an object become a model, with Meshy 7.1.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/#camera" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-camera"/></svg></span><span class="datum num">20</span></span>
-        <b class="tile-name">Camera moves</b>
-        <span class="tile-line">Dolly, orbit, crane, whip pan, FPV dive, bullet time.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/#camera" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-looks"/></svg></span><span class="datum num">10</span></span>
-        <b class="tile-name">Looks</b>
-        <span class="tile-line">35mm film, anamorphic, noir, golden hour, VHS and more.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-book"/></svg></span><span class="datum num">12</span></span>
-        <b class="tile-name">Prompt library</b>
-        <span class="tile-line">Ready recipes: character sheet, nine angles, film still.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/#characters" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-person"/></svg></span><span class="datum">T2I · I2I</span></span>
-        <b class="tile-name">Characters</b>
-        <span class="tile-line">Image mode for characters you will reuse. Start from a prompt or a reference.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-at"/></svg></span><b class="tag">New</b></span>
-        <b class="tile-name">Elements</b>
-        <span class="tile-line">Save a character or product once. Call it with <code>@tag</code>.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-flow"/></svg></span><b class="tag">New</b></span>
-        <b class="tile-name">Pipelines</b>
-        <span class="tile-line">Steps that run in a row. Every paid step waits for you.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="/app/" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-edit"/></svg></span><b class="tag">Free</b></span>
-        <b class="tile-name">Edit timeline</b>
-        <span class="tile-line">Captions, remove pauses, reframe to 9:16, -14 LUFS.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile" href="https://github.com/LayerMakerLab/agave-studio#run-it" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-code"/></svg></span><b class="tag">Open source</b></span>
-        <b class="tile-name">Run it yourself</b>
-        <span class="tile-line">macOS and Linux. Clone it, run it, change it.</span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
-      </a>
-      <a class="tile wide" href="https://github.com/LayerMakerLab/agave-studio/blob/main/gateway/models.toml" data-wipe>
-        <span class="tile-top"><span class="tile-ico"><svg class="ico" aria-hidden="true"><use href="#i-grid"/></svg></span><span class="datum">models.toml</span></span>
-        <b class="tile-name">Models</b>
-        <span class="models">
-          <span>Kling 3.0</span><span>Kling O3</span><span>Kling 2.5 Turbo</span><span>Kling 2.1 Master</span><span>Veo 3.1</span><span>Seedance 2.5</span><span>Wan 2.2</span><span>Hailuo 02</span><span>Nano Banana</span><span>Seedream 4</span><span>FLUX.2 [pro]</span><span>FLUX.1 schnell</span><span>GPT Image 2.5</span><span>Eleven Multilingual v2</span><span>Meshy 7.1</span>
-        </span>
-        <svg class="tile-go ico" aria-hidden="true"><use href="#i-arrow"/></svg>
+      <a class="mode" href="/app/#3d" data-wipe>
+        <span class="vis vis-cube" aria-hidden="true"><span class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></span><em>GLB · USDZ · STL · 3MF</em></span>
+        <b class="mode-name">3D</b>
+        <span class="mode-line">1 to 4 pictures of an object become a model, with Meshy 7.1.</span>
       </a>
     </div>
+    <div class="tools">
+      <a class="tool" href="/app/#camera" data-wipe>
+        <span class="tool-text"><b class="tool-name">Camera moves</b><span class="tool-line">Dolly, orbit, crane, whip pan, FPV dive, bullet time.</span></span>
+        <span class="num">20</span>
+      </a>
+      <a class="tool" href="/app/#camera" data-wipe>
+        <span class="tool-text"><b class="tool-name">Looks</b><span class="tool-line">35mm film, anamorphic, noir, golden hour, VHS.</span></span>
+        <span class="num">10</span>
+      </a>
+      <a class="tool" href="/app/" data-wipe>
+        <span class="tool-text"><b class="tool-name">Prompt library</b><span class="tool-line">Ready recipes: character sheet, nine angles, film still.</span></span>
+        <span class="num">12</span>
+      </a>
+      <a class="tool" href="/app/#characters" data-wipe>
+        <span class="tool-text"><b class="tool-name">Characters</b><span class="tool-line">An image mode for characters you will reuse.</span></span>
+        
+      </a>
+      <a class="tool" href="/app/" data-wipe>
+        <span class="tool-text"><b class="tool-name">Elements</b><span class="tool-line">Save a character or product once. Call it with <code>@tag</code>.</span></span>
+        <b class="tag">New</b>
+      </a>
+      <a class="tool" href="/app/" data-wipe>
+        <span class="tool-text"><b class="tool-name">Pipelines</b><span class="tool-line">Steps in a row. Every paid step waits for you.</span></span>
+        <b class="tag">New</b>
+      </a>
+      <a class="tool" href="/app/" data-wipe>
+        <span class="tool-text"><b class="tool-name">Edit timeline</b><span class="tool-line">Captions, remove pauses, reframe to 9:16, -14 LUFS.</span></span>
+        <b class="tag">Free</b>
+      </a>
+      <a class="tool" href="https://github.com/LayerMakerLab/agave-studio#run-it" data-wipe>
+        <span class="tool-text"><b class="tool-name">Run it yourself</b><span class="tool-line">macOS and Linux. Clone it, run it, change it.</span></span>
+        <b class="tag">Open source</b>
+      </a>
+    </div>
+    <a class="model-row" href="https://github.com/LayerMakerLab/agave-studio/blob/main/gateway/models.toml" aria-label="Models in models.toml"><span>Kling 3.0</span><span>Kling O3</span><span>Kling 2.5 Turbo</span><span>Kling 2.1 Master</span><span>Veo 3.1</span><span>Seedance 2.5</span><span>Wan 2.2</span><span>Hailuo 02</span><span>Nano Banana</span><span>Seedream 4</span><span>FLUX.2 [pro]</span><span>FLUX.1 schnell</span><span>GPT Image 2.5</span><span>Eleven Multilingual v2</span><span>Meshy 7.1</span></a>
   </section>
 
   <!-- GALLERY: real clips and stills, played when on screen -->
   <section class="sec" id="gallery">
-    <header class="sec-head row">
+    <header class="sec-head">
       <div>
-        <h2 class="display">The reel</h2>
-        <p>Kling 3.0 clips and the stills they start from.</p>
+        <h2 class="display">Reel</h2>
+        <p>Stills made with Meshy. Clips made from them with Kling 3.0 on fal.</p>
       </div>
       <div class="filters" role="group" aria-label="Show">
         <button type="button" class="on" data-show="all" aria-pressed="true">All</button>
@@ -221,88 +192,86 @@
         <button type="button" data-show="still" aria-pressed="false">Stills</button>
       </div>
     </header>
-    <div class="masonry" id="masonry">
+    <div class="reel-wrap" id="reelWrap">
+      <div class="masonry" id="masonry">
       <div class="col">
-        <figure class="m clip" data-wipe style="aspect-ratio:720/964"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-camera.webp" data-src="/assets/video/card-camera.mp4" aria-label="A coupe on a desert road at golden hour"></video><figcaption><span>Coupe, desert road</span><em>Kling 3.0</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1100/802"><img src="/assets/img/lb-noir.webp" alt="A detective at a desk striped by blind shadows" width="1100" height="802" loading="lazy" decoding="async"><figcaption><span>Detective, blinds</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:768/1344"><img src="/assets/img/lb-astronaut.webp" alt="An astronaut in a red canyon at sunset" width="768" height="1344" loading="lazy" decoding="async"><figcaption><span>Astronaut, red canyon</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1100/628"><img src="/assets/img/lb-pitstop.webp" alt="A 1960s race car pit stop with sparks" width="1100" height="628" loading="lazy" decoding="async"><figcaption><span>Pit stop, 1960s</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1000/558"><img src="/assets/img/reel-t2v.webp" alt="A lighthouse keeper with a lantern by a stormy window" width="1000" height="558" loading="lazy" decoding="async"><figcaption><span>Lighthouse keeper</span><em>Still</em></figcaption></figure>
+        <figure class="m clip" data-wipe style="aspect-ratio:9/16"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-image.webp" data-src="/assets/video/card-image.mp4" aria-label="A portrait in silver couture with a liquid chrome headpiece"></video><figcaption><span>Chrome headpiece</span><em>Kling 3.0</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:16/9"><img src="/assets/img/lb-fisherman.webp" alt="An old fisherman mending nets at dawn" loading="lazy" decoding="async"><figcaption><span>Fisherman, dawn</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m clip" data-wipe style="aspect-ratio:1/1"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-character.webp" data-src="/assets/video/card-character.mp4" aria-label="A man in a dark coat on a rooftop above a night city"></video><figcaption><span>Rooftop, night city</span><em>Kling 3.0</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:4/5"><img src="/assets/img/lb-honey.webp" alt="Honey dripping over honeycomb" loading="lazy" decoding="async"><figcaption><span>Honeycomb macro</span><em>Meshy still</em></figcaption></figure>
       </div>
       <div class="col">
-        <figure class="m clip" data-wipe style="aspect-ratio:720/964"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-image.webp" data-src="/assets/video/card-image.mp4" aria-label="A portrait in silver couture with a liquid chrome headpiece"></video><figcaption><span>Chrome headpiece</span><em>Kling 3.0</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:864/1184"><img src="/assets/img/lb-ballet.webp" alt="A ballet dancer mid leap in a theater spotlight" width="864" height="1184" loading="lazy" decoding="async"><figcaption><span>Ballet, spotlight</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1100/802"><img src="/assets/img/lb-perfume.webp" alt="A perfume bottle inside a splash of liquid gold" width="1100" height="802" loading="lazy" decoding="async"><figcaption><span>Perfume, gold splash</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1/1"><img src="/assets/img/char-c.webp" alt="A man in a dark coat in a night market" width="900" height="900" loading="lazy" decoding="async"><figcaption><span>Night market</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1376/768"><img src="/assets/img/camera-plate.webp" alt="A lone figure inside a vast concrete atrium lit from above" width="1376" height="768" loading="lazy" decoding="async"><figcaption><span>Concrete atrium</span><em>Still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:4/5"><img src="/assets/img/char-b.webp" alt="A man in a dark coat by a window at night" loading="lazy" decoding="async"><figcaption><span>Window, night</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:1/1"><img src="/assets/img/lb-perfume.webp" alt="A perfume bottle inside a splash of liquid gold" loading="lazy" decoding="async"><figcaption><span>Perfume, gold splash</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:16/9"><img src="/assets/img/lb-noir.webp" alt="A detective at a desk striped by blind shadows" loading="lazy" decoding="async"><figcaption><span>Detective, blinds</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m clip" data-wipe style="aspect-ratio:9/16"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-lipsync.webp" data-src="/assets/video/card-lipsync.mp4" aria-label="A jazz singer at a ribbon microphone under a warm spotlight"></video><figcaption><span>Singer, ribbon mic</span><em>Kling 3.0</em></figcaption></figure>
       </div>
       <div class="col">
-        <figure class="m clip" data-wipe style="aspect-ratio:720/988"><video muted loop playsinline preload="none" poster="/assets/img/poster-lb-samurai.webp" data-src="/assets/video/lb-samurai.mp4" aria-label="A samurai under a temple gate in the rain"></video><figcaption><span>Samurai, temple gate</span><em>Kling 3.0</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1100/802"><img src="/assets/img/lb-moto.webp" alt="A chrome motorcycle in a smoky workshop" width="1100" height="802" loading="lazy" decoding="async"><figcaption><span>Café racer, sparks</span><em>Still</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:864/1184"><img src="/assets/img/lb-silk.webp" alt="A model in flowing silk on a rooftop" width="864" height="1184" loading="lazy" decoding="async"><figcaption><span>Silk, rooftop</span><em>Still</em></figcaption></figure>
-        <figure class="m clip" data-wipe style="aspect-ratio:720/962"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-lipsync.webp" data-src="/assets/video/card-lipsync.mp4" aria-label="A jazz singer at a ribbon microphone under a warm spotlight"></video><figcaption><span>Singer, ribbon mic</span><em>Kling 3.0</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:1100/628"><img src="/assets/img/lb-fisherman.webp" alt="An old fisherman mending nets at dawn" width="1100" height="628" loading="lazy" decoding="async"><figcaption><span>Fisherman, dawn</span><em>Still</em></figcaption></figure>
+        <figure class="m clip" data-wipe style="aspect-ratio:9/16"><video muted loop playsinline preload="none" poster="/assets/img/poster-lb-samurai.webp" data-src="/assets/video/lb-samurai.mp4" aria-label="A samurai under a temple gate in the rain"></video><figcaption><span>Samurai, temple gate</span><em>Kling 3.0</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:4/5"><img src="/assets/img/lb-silk.webp" alt="A model in flowing silk on a rooftop" loading="lazy" decoding="async"><figcaption><span>Silk, rooftop</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:16/9"><img src="/assets/img/reel-t2v.webp" alt="A lighthouse keeper with a lantern by a stormy window" loading="lazy" decoding="async"><figcaption><span>Lighthouse keeper</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:1/1"><img src="/assets/img/char-c.webp" alt="A man in a dark coat in a night market" loading="lazy" decoding="async"><figcaption><span>Night market</span><em>Meshy still</em></figcaption></figure>
       </div>
       <div class="col">
-        <figure class="m still" data-wipe style="aspect-ratio:696/1024"><img src="/assets/img/lb-honey.webp" alt="Honey dripping over honeycomb" width="696" height="1024" loading="lazy" decoding="async"><figcaption><span>Honeycomb macro</span><em>Still</em></figcaption></figure>
-        <figure class="m clip" data-wipe style="aspect-ratio:720/964"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-upscale.webp" data-src="/assets/video/card-upscale.mp4" aria-label="Macro of a mechanical watch movement"></video><figcaption><span>Watch movement</span><em>Kling 3.0</em></figcaption></figure>
-        <figure class="m still" data-wipe style="aspect-ratio:768/1024"><img src="/assets/img/char-b.webp" alt="A man in a dark coat by a window at night" width="768" height="1024" loading="lazy" decoding="async"><figcaption><span>Window, night</span><em>Still</em></figcaption></figure>
-        <figure class="m clip" data-wipe style="aspect-ratio:720/964"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-character.webp" data-src="/assets/video/card-character.mp4" aria-label="A man in a dark coat on a rooftop above a night city"></video><figcaption><span>Rooftop, night city</span><em>Kling 3.0</em></figcaption></figure>
+        <figure class="m clip" data-wipe style="aspect-ratio:1/1"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-upscale.webp" data-src="/assets/video/card-upscale.mp4" aria-label="Macro of a mechanical watch movement"></video><figcaption><span>Watch movement</span><em>Kling 3.0</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:9/16"><img src="/assets/img/lb-astronaut.webp" alt="An astronaut in a red canyon at sunset" loading="lazy" decoding="async"><figcaption><span>Astronaut, red canyon</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:16/9"><img src="/assets/img/lb-moto.webp" alt="A chrome motorcycle in a smoky workshop" loading="lazy" decoding="async"><figcaption><span>Café racer, sparks</span><em>Meshy still</em></figcaption></figure>
+        <figure class="m still" data-wipe style="aspect-ratio:4/5"><img src="/assets/img/lb-ballet.webp" alt="A ballet dancer mid leap in a theater spotlight" loading="lazy" decoding="async"><figcaption><span>Ballet, spotlight</span><em>Meshy still</em></figcaption></figure>
       </div>
+      </div>
+      <div class="reel-more"><button type="button" class="ghost" id="seeAll" aria-expanded="false" aria-controls="masonry">See all</button></div>
     </div>
   </section>
 
   <!-- PIPELINES -->
   <section class="sec" id="pipelines">
     <header class="sec-head">
-      <h2 class="display">Pipelines <b class="tag lg">New</b></h2>
-      <p class="say">Full price first. Every paid step waits for your click.</p>
+      <div>
+        <h2 class="display">Pipelines <b class="tag lg">New</b></h2>
+        <p class="say">Full price first. Every paid step waits for your click.</p>
+      </div>
+      <div class="filters" role="tablist" aria-label="Pipeline">
+        <button type="button" class="on" role="tab" id="tab-product" aria-selected="true" aria-controls="lane-product" data-lane="product">Product</button>
+        <button type="button" role="tab" id="tab-character" aria-selected="false" aria-controls="lane-character" data-lane="character">Character</button>
+      </div>
     </header>
 
-    <div class="lane" data-wipe>
-      <div class="lane-head">
-        <h3>Product</h3>
-        <p>One product photo becomes a hero still, a slow orbit clip and a 3D model.</p>
-        <span class="lane-meta">4 steps · 3 paid</span>
-      </div>
+    <div class="lane" id="lane-product" role="tabpanel" aria-labelledby="tab-product" data-wipe>
+      <div class="lane-head"><p><b>Product.</b> One product photo becomes a hero still, a slow orbit clip and a 3D model. 4 steps, 3 paid.</p><span class="receipt">Before step 1 <b>≈ $0.39 + 30 Meshy credits</b></span></div>
       <ol class="track">
-        <li class="step is-start"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg><b>Your photo</b><span class="mdl">The product on its own</span></li>
-        <li class="step is-paid has-media"><img src="/assets/img/reel-upscale.webp" alt="" loading="lazy" decoding="async"><span class="n">01</span><b>Hero still</b><span class="mdl">Nano Banana Edit</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-free"><span class="n">02</span><b>Save as Element</b><span class="mdl"><code>@product</code></span><span class="gate is-free">Free, runs on its own</span></li>
-        <li class="step is-paid has-media"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><span class="n">03</span><b>Video</b><span class="mdl">Kling 2.5 Turbo Pro · 5 s</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-paid"><svg class="ico big" aria-hidden="true"><use href="#i-3d"/></svg><span class="n">04</span><b>3D model</b><span class="mdl">Meshy 7.1 · from <code>@product</code></span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
+        <li class="link is-start"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg><span>Your photo of the product</span></li>
+        <li class="cell"><img src="/assets/img/reel-upscale.webp" alt="" loading="lazy" decoding="async"><span class="cell-cap"><b>Hero still</b><span class="mdl">Nano Banana Edit</span><span class="gate">Waits for your click</span></span></li>
+        <li class="link"><span>Save as Element</span><code>@product</code><span class="fee">Free</span></li>
+        <li class="cell"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-upscale.webp" data-src="/assets/video/card-upscale.mp4"></video><span class="cell-cap"><b>Video</b><span class="mdl">Kling 2.5 Turbo Pro · 5 s</span><span class="gate">Waits for your click</span></span></li>
+        <li class="cell is-3d"><span class="vis-cube" aria-hidden="true"><span class="cube"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="cell-cap"><b>3D model</b><span class="mdl">Meshy 7.1 · from <code>@product</code></span><span class="gate">Waits for your click</span></span></li>
       </ol>
     </div>
 
-    <div class="lane" data-wipe>
-      <div class="lane-head">
-        <h3>Character</h3>
-        <p>A character sheet becomes an Element, then two clips joined on the last frame, on the Edit timeline.</p>
-        <span class="lane-meta">7 steps · 4 paid</span>
-      </div>
+    <div class="lane" id="lane-character" role="tabpanel" aria-labelledby="tab-character" hidden>
+      <div class="lane-head"><p><b>Character.</b> A character sheet becomes an Element, then two clips joined on the last frame land on the Edit timeline. 7 steps, 4 paid.</p><span class="receipt">Before step 1 <b>≈ $0.92</b></span></div>
       <ol class="track">
-        <li class="step is-start"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg><b>Your photo</b><span class="mdl">Face and outfit visible</span></li>
-        <li class="step is-paid has-media"><img src="/assets/img/char-a.webp" alt="" loading="lazy" decoding="async"><span class="n">01</span><b>Character sheet</b><span class="mdl">Nano Banana Edit</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-free"><span class="n">02</span><b>Save as Element</b><span class="mdl"><code>@hero</code></span><span class="gate is-free">Free, runs on its own</span></li>
-        <li class="step is-paid has-media"><img src="/assets/img/char-b.webp" alt="" loading="lazy" decoding="async"><span class="n">03</span><b>Opening still</b><span class="mdl">Nano Banana Edit</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-paid has-media"><video muted loop playsinline preload="none" poster="/assets/img/poster-card-character.webp" data-src="/assets/video/card-character.mp4"></video><span class="n">04</span><b>Clip 1</b><span class="mdl">Kling O3 · 5 s</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-free has-media"><img src="/assets/img/lastframe-card-character.webp" alt="" loading="lazy" decoding="async"><span class="n">05</span><b>Last frame</b><span class="mdl">Of Clip 1</span><span class="gate is-free">Free, runs on its own</span></li>
-        <li class="step is-paid"><svg class="ico big" aria-hidden="true"><use href="#i-video"/></svg><span class="n">06</span><b>Clip 2</b><span class="mdl">Kling O3 · 5 s, from the last frame</span><span class="gate"><svg class="ico" aria-hidden="true"><use href="#i-click"/></svg>Waits for your click</span></li>
-        <li class="step is-free"><span class="n">07</span><b>Add to edit</b><span class="mdl">Clips 1 and 2 on the timeline</span><span class="gate is-free">Free, runs on its own</span></li>
+        <li class="link is-start"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg><span>Your photo, face and outfit visible</span></li>
+        <li class="cell"><img class="face" src="/assets/img/char-a.webp" alt="" loading="lazy" decoding="async"><span class="cell-cap"><b>Character sheet</b><span class="mdl">Nano Banana Edit</span><span class="gate">Waits for your click</span></span></li>
+        <li class="link"><span>Save as Element</span><code>@hero</code><span class="fee">Free</span></li>
+        <li class="cell"><img class="face" src="/assets/img/char-b.webp" alt="" loading="lazy" decoding="async"><span class="cell-cap"><b>Opening still</b><span class="mdl">Nano Banana Edit</span><span class="gate">Waits for your click</span></span></li>
+        <li class="cell"><video class="face" muted loop playsinline preload="none" poster="/assets/img/poster-card-character.webp" data-src="/assets/video/card-character.mp4"></video><span class="cell-cap"><b>Clip 1</b><span class="mdl">Kling O3 · 5 s</span><span class="gate">Waits for your click</span></span></li>
+        <li class="link"><span>Last frame of Clip 1</span><span class="fee">Free</span></li>
+        <li class="cell"><img class="face" src="/assets/img/lastframe-card-character.webp" alt="" loading="lazy" decoding="async"><span class="cell-cap"><b>Clip 2</b><span class="mdl">Kling O3 · 5 s, from the last frame</span><span class="gate">Waits for your click</span></span></li>
+        <li class="link is-end"><span>Add to edit</span><span class="fee">Free</span></li>
       </ol>
     </div>
-    <p class="fine">The full price shows before the first step: list prices for fal.ai models, credits for Meshy. Pictures here are examples from the reel, not the output of a pipeline run.</p>
+    <p class="fine">Totals are the providers' list prices in models.toml (checked October 2026), the same total the studio shows before the first step; you pay the provider. Pictures here are examples from the reel, not the output of a pipeline run.</p>
   </section>
 
   <!-- WHY IT IS FREE -->
   <section class="free" id="free">
     <div class="free-bg" aria-hidden="true"><img src="/assets/img/final-stage.webp" alt="" loading="lazy" decoding="async"></div>
     <div class="free-in">
-      <h2 class="display free-title">No plans.<br>No credits.<br>No account.</h2>
+      <h2 class="display free-title">No plans.<br>No sign-in.<br>No markup.</h2>
       <ul class="facts">
-        <li data-wipe><span class="fact-k">01 · Your keys</span><b>Pay the provider directly.</b><p>Add a key from fal.ai, Replicate, Google Gemini, OpenAI, Black Forest Labs, ElevenLabs or Meshy. Keys stay on your computer.</p></li>
-        <li data-wipe><span class="fact-k">02 · Apache-2.0</span><b>Open source.</b><p>Read the code, change it, run your own copy.</p></li>
-        <li data-wipe><span class="fact-k">03 · Your computer</span><b>Runs where you are.</b><p>macOS and Linux. The engine listens only on 127.0.0.1, with no analytics.</p></li>
+        <li><b>Your keys.</b> Add a key from fal.ai, Replicate, Google Gemini, OpenAI, Black Forest Labs, ElevenLabs or Meshy and pay them directly. Keys stay on your computer.</li>
+        <li><b>Apache-2.0.</b> Read the code, change it, run your own copy.</li>
+        <li><b>Your computer.</b> macOS and Linux. The engine listens only on 127.0.0.1, with no analytics.</li>
       </ul>
       <div class="actions">
         <a class="cta lg" href="/app/">Open the studio</a>
@@ -313,18 +282,10 @@
 </main>
 
 <footer class="foot">
-  <div class="foot-top">
-    <a class="brand" href="/" aria-label="Agave Studio home"><img class="brand-mark" src="/assets/brand/mark.svg" alt="" width="22" height="22"><span class="brand-word">Agave Studio</span></a>
-    <div class="foot-cols">
-      <nav aria-label="Studio"><h3>Studio</h3><a href="/app/#image">Image</a><a href="/app/#video">Video</a><a href="/app/#camera">Camera</a><a href="/app/#audio">Audio</a><a href="/app/#3d">3D</a><a href="/app/">Workspace</a></nav>
-      <nav aria-label="Open source"><h3>Open source</h3><a href="https://github.com/LayerMakerLab/agave-studio">Source code</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/LICENSE">Apache-2.0</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/docs/API.md">API</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/SECURITY.md">Security</a></nav>
-      <nav aria-label="This page"><h3>This page</h3><a href="#tools">Toolkit</a><a href="#gallery">Reel</a><a href="#pipelines">Pipelines</a><a href="#free">Why it is free</a></nav>
-    </div>
-  </div>
-  <div class="foot-end">
-    <p class="foot-note">Stills on this page were made with Meshy and animated with Kling 3.0 on fal. <a href="https://github.com/LayerMakerLab/agave-studio/blob/main/web/assets/CREDITS.md">Credits</a></p>
-    <p>© 2026 LayerMaker LLC</p>
-  </div>
+  <a class="brand" href="/" aria-label="Agave Studio home"><img class="brand-mark" src="/assets/brand/mark.svg" alt="" width="22" height="22"><span class="brand-word">Agave Studio</span></a>
+  <nav class="foot-links" aria-label="Footer"><a href="/app/">Workspace</a><a href="https://github.com/LayerMakerLab/agave-studio">Source code</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/LICENSE">Apache-2.0</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/docs/API.md">API</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/SECURITY.md">Security</a><a href="https://github.com/LayerMakerLab/agave-studio/blob/main/web/assets/CREDITS.md">Media credits</a></nav>
+  <p class="foot-note">Stills on this page were made with Meshy and animated with Kling 3.0 on fal.</p>
+  <p>© 2026 LayerMaker LLC</p>
 </footer>
 
 <script src="/js/home.js" defer></script>
