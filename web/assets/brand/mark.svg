@@ -1,17 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="ag-silver" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/><stop offset=".55" stop-color="#D9D6D0"/><stop offset="1" stop-color="#8A8680"/>
-    </linearGradient>
-    <linearGradient id="ag-side" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#B4B0A9"/><stop offset="1" stop-color="#4E4B47"/>
-    </linearGradient>
-    <path id="ag-leaf" d="M-5 0 C-5.6 -20 -3 -38 0 -54 C3 -38 5.6 -20 5 0 Z"/>
-  </defs>
-  <use href="#ag-leaf" fill="url(#ag-side)" transform="translate(23 61) rotate(-58) scale(.5)"/>
-  <use href="#ag-leaf" fill="url(#ag-side)" transform="translate(41 61) rotate(58) scale(.5)"/>
-  <use href="#ag-leaf" fill="url(#ag-side)" transform="translate(32 61) scale(.6)"/>
-  <use href="#ag-leaf" fill="url(#ag-silver)" stroke="#08080A" stroke-width="1.1" transform="translate(20 61) rotate(14)"/>
-  <use href="#ag-leaf" fill="url(#ag-silver)" stroke="#08080A" stroke-width="1.1" transform="translate(44 61) rotate(-14)"/>
-  <circle cx="32" cy="8.6" r="3.6" fill="#FF6B3D"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><path d="M18 15 C42 21 66 34 84 50 C66 66 42 79 18 85 C26.5 62 26.5 38 18 15 Z" fill="#F4F2EE"/></svg>
