@@ -283,10 +283,28 @@ impl Studio {
     /// order the tags appear (each element once). An @ right after a letter or digit (an email) and
     /// unknown tags are left as they are.
     pub fn expand(&self, prompt: &str) -> (String, Vec<String>) {
+        let (out, groups) = self.expand_with(prompt, false);
+        let mut images: Vec<String> = Vec::new();
+        for img in groups.into_iter().flatten() {
+            if !images.contains(&img) {
+                images.push(img);
+            }
+        }
+        (out, images)
+    }
+
+    /// For models that take Elements beside a start frame (Kling 3.0 `elements`): each @tag of a saved
+    /// element with pictures becomes @Element1, @Element2... in the order the tags first appear, and its
+    /// pictures come back as one group per element. An element without pictures is named, as in expand.
+    pub fn expand_elements(&self, prompt: &str) -> (String, Vec<Vec<String>>) {
+        self.expand_with(prompt, true)
+    }
+
+    fn expand_with(&self, prompt: &str, numbered: bool) -> (String, Vec<Vec<String>>) {
         let f = self.lock();
         let chars: Vec<char> = prompt.chars().collect();
         let mut out = String::with_capacity(prompt.len());
-        let mut images: Vec<String> = Vec::new();
+        let mut groups: Vec<Vec<String>> = Vec::new();
         let mut used: Vec<&str> = Vec::new();
         let mut i = 0;
         while i < chars.len() {
@@ -302,14 +320,25 @@ impl Studio {
                 let tag = tag.trim_end_matches(['-', '_']).to_string();
                 let end = i + 1 + tag.chars().count();
                 if let Some(e) = f.elements.iter().find(|e| e.tag == tag) {
-                    out.push_str(&e.name);
-                    if !used.contains(&e.tag.as_str()) {
-                        used.push(e.tag.as_str());
-                        for img in &e.images {
-                            if !images.contains(img) {
-                                images.push(img.clone());
-                            }
+                    let mut images: Vec<String> = Vec::new();
+                    for img in &e.images {
+                        if !images.contains(img) {
+                            images.push(img.clone());
                         }
+                    }
+                    let n = match used.iter().position(|t| *t == e.tag.as_str()) {
+                        Some(n) => n,
+                        None => {
+                            used.push(e.tag.as_str());
+                            groups.push(images);
+                            used.len() - 1
+                        }
+                    };
+                    if numbered && !groups[n].is_empty() {
+                        let k = groups[..=n].iter().filter(|g| !g.is_empty()).count();
+                        out.push_str(&format!("@Element{k}"));
+                    } else {
+                        out.push_str(&e.name);
                     }
                     i = end;
                     continue;
@@ -318,7 +347,10 @@ impl Studio {
             out.push(c);
             i += 1;
         }
-        (out, images)
+        if numbered {
+            groups.retain(|g| !g.is_empty());
+        }
+        (out, groups)
     }
 }
 
@@ -389,6 +421,11 @@ pub fn recipe(id: &str, detail: &str) -> Option<String> {
              text, colours and materials exactly the same. No other objects, no added text, logos or marks. {}",
             d
         ),
+        // Looks on image to video: the start picture sets the look, so the look goes on the picture first. The
+        // look's words come from the style preset, which promptcraft adds after this.
+        "look" => "The same picture in a new look. Keep the exact same scene, subjects, faces, poses, composition and \
+                   camera framing as the reference image; change only the colour, light, grain and texture to this look"
+            .to_string(),
         _ => return None,
     })
 }
@@ -422,6 +459,23 @@ mod tests {
             "Mia, a woman in her late 20s holds the cream mug. Close-up of Mia, a woman in her late 20s, mail me at x@mia.com about @nobody."
         );
         assert_eq!(imgs, vec!["/outputs/a.png", "/outputs/b.png", "/outputs/m.png"]);
+    }
+
+    #[test]
+    fn tags_become_numbered_elements_for_models_that_take_them() {
+        let s = studio("studio_expand_elements");
+        s.put_element(el("mia", "Mia", &["/outputs/a.png", "/outputs/b.png", "/outputs/a.png"])).unwrap();
+        s.put_element(el("note", "a handwritten note", &[])).unwrap();
+        s.put_element(el("mug", "the cream mug", &["/outputs/m.png"])).unwrap();
+        let (p, groups) = s.expand_elements("@note: @Mia holds @mug. Close-up of @mia, mail x@mia.com.");
+        assert_eq!(p, "a handwritten note: @Element1 holds @Element2. Close-up of @Element1, mail x@mia.com.");
+        assert_eq!(groups, vec![vec!["/outputs/a.png", "/outputs/b.png"], vec!["/outputs/m.png"]]);
+    }
+
+    #[test]
+    fn the_look_recipe_keeps_the_picture_and_needs_no_words() {
+        let p = recipe("look", "").expect("a look needs no words: the style preset carries them");
+        assert!(p.contains("Keep the exact same scene") && p.contains("change only the colour"), "{p}");
     }
 
     #[test]

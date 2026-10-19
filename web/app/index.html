@@ -99,6 +99,7 @@
         <label class="chip" hidden><span class="k">Aspect</span><select id="aspect"></select></label>
         <label class="chip" hidden><span class="k">Length</span><select id="duration"></select></label>
         <label class="chip" hidden><span class="k">Res</span><select id="resolution"></select></label>
+        <label class="chip" hidden><span class="k">Audio</span><select id="audio"></select></label>
         <label class="chip" id="cameraWrap" hidden><span class="k">Camera</span><select id="camera"></select></label>
         <label class="chip" id="styleWrap" hidden><span class="k">Style</span><select id="style"></select></label>
         <label class="chip" id="voiceWrap" hidden><span class="k">Voice</span><select id="voice"></select></label>
@@ -136,6 +137,11 @@
         <button id="generate" class="pill lg" type="submit"><span class="dot" aria-hidden="true"></span>Generate<span id="cost" class="cost" hidden></span></button>
       </div>
       <p id="status" class="composer-status" role="status" aria-live="polite"></p>
+      <div id="lookAsk" class="look-ask" hidden>
+        <p id="lookAskText"></p>
+        <button type="button" class="pill" id="lookApply"></button>
+        <button type="button" class="look-skip" id="lookSkip">Animate without it</button>
+      </div>
     </form>
   </div>
 </div>

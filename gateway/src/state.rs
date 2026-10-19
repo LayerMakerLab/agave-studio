@@ -144,9 +144,11 @@ impl AppState {
             modes: vec!["t2v".into()],
             key: "FAL_KEY".into(),
             verified: false,
-            params: crate::models::Params { aspect: vec![], duration: vec![5], resolution: vec![] },
+            params: crate::models::Params { aspect: vec![], duration: vec![5], resolution: vec![], audio: vec![] },
             price: None,
             max_refs: 0,
+            max_elements: 0,
+            end_frame: false,
             provider_credits: None,
         });
         // A model whose provider has no adapter, for the 501 path.

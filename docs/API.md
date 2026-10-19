@@ -33,13 +33,19 @@ Never return a key value from any endpoint. Never log a key.
   1-4 local /outputs images; max 200 elements. 400 invalid_tag/invalid_name/invalid_kind/invalid_image | 409 too_many_elements
 - POST /api/elements/delete {"tag"} -> {"ok":true} | 404 not_found
 - GET/POST /api/project {"style_prefix":"...","still_first":true} -> {"project":{...}} (data/studio.json; prefix max 800 chars)
-- POST /api/generate also takes "image_urls":[...] and "recipe":"grid4"|"grid9"|"edit"|"sheet"|"product".
+- POST /api/generate also takes "image_urls":[...] and "recipe":"grid4"|"grid9"|"edit"|"sheet"|"product"|"look"
+  ("look": the picture in the chosen style's look, no words needed; the studio offers it before image to video with a
+  look, since the start picture sets a video's look), and "audio":true|false for models whose params list `audio`
+  (Kling 3.0, Kling O3, Veo 3.1; the first value is the default and the price follows `price.by_audio`).
   `@tag` in the prompt becomes the Element's words and its images join the references (not after a letter or digit,
   so emails stay as typed). References = image_url, then image_urls, then Element images. Models with `max_refs` > 1
   (models.toml) get all of them as `image_urls`; others get the first as `image_url`. Errors: 400 {"error":"too_many_refs",
   "max","got"} | 400 refs_need_image_mode (text-only mode with references) | 400 unknown_recipe | 400 prompt_required
   (edit recipe with no change) | 409 still_first (t2v while the project's still-first rule is on; make a still, then
-  i2v). The project style prefix is put in front of image and video prompts. The job keeps its request as
+  i2v). Models with `max_elements` (Kling 3.0 image to video) take a start picture and @tagged Elements side by side:
+  each Element with pictures becomes @Element1, @Element2... in the words and goes to fal as `elements` (400
+  {"error":"too_many_element_tags","max","got"} past the limit). Models with `end_frame` (Kling 3.0 image to video)
+  get Dolly in as an end picture: the start picture cropped to its middle 65%, because Kling ignores the words alone. The project style prefix is put in front of image and video prompts. The job keeps its request as
   Job.request (when 16 KB or less) for "Run again".
 - POST /api/assemble (Agave Edit render) {"clips":[clip,...],"captions":[null|"/outputs/cap.png",...],
   "audio":null|"/outputs/song.mp3","keep_clip_audio":true,"frame":null|"16:9"|"9:16"|"1:1"|"4:5","fill":false}

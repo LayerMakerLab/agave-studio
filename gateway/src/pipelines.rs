@@ -256,7 +256,7 @@ pub fn step_price(st: &AppState, step: &Step) -> Price {
     if let Some(p) = &m.price {
         // What the generate path will send: the step's value when the model lists it, else the first listed.
         let res = resolution.map(str::to_string).or_else(|| m.params.resolution.first().cloned());
-        let rate = res.as_ref().and_then(|r| p.by_resolution.get(r)).copied().unwrap_or(p.usd);
+        let rate = p.rate(res.as_deref(), m.params.audio.first().copied());
         let units = if p.per == "second" { f64::from(duration.or_else(|| m.params.duration.first().copied()).unwrap_or(0)) } else { 1.0 };
         if units > 0.0 {
             let micro = (rate * units * 1e6).round();
@@ -696,6 +696,10 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
+        audio: None,
+        elements: Vec::new(),
+        push_in: false,
+        end_image_url: None,
     };
     crate::jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), req);
     run.steps[i].status = "running".into();
@@ -986,6 +990,42 @@ mod tests {
 
     fn out(run: &Value, step: usize) -> String {
         run["steps"][step]["outputs"][0]["url"].as_str().unwrap_or_default().to_string()
+    }
+
+    /// Waits until the fake provider has seen `n` requests and returns the last one.
+    async fn nth_seen(st: &AppState, n: usize) -> crate::providers::SubmitReq {
+        for _ in 0..300 {
+            if let Some(r) = fake(st).seen.lock().unwrap().get(n - 1).cloned() {
+                return r;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the provider never got request {n}");
+    }
+
+    #[tokio::test]
+    async fn kling3_gets_audio_off_elements_beside_the_start_frame_and_the_dolly_end_picture() {
+        let st = fake_state(crate::fsutil::test_dir("gen_kling3"), 0);
+        let start = start_image(&st);
+        let (s, v) = call(&st, "POST", "/api/elements", Some(json!({"tag": "mia", "name": "Mia", "kind": "character", "images": [start.clone()]}))).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let body = |camera: &str| json!({"model": "fal/kling-3-pro-i2v", "mode": "i2v", "prompt": "@mia walks the pier",
+            "camera": camera, "audio": false, "duration": 3, "image_url": start});
+        let (s, v) = call(&st, "POST", "/api/generate", Some(body("dolly_in"))).await;
+        assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+        let r = nth_seen(&st, 1).await;
+        assert_eq!((r.audio, r.duration, r.push_in), (Some(false), Some(3), true));
+        assert_eq!((r.image_url.as_deref(), r.elements.clone()), (Some(start.as_str()), vec![vec![start.clone()]]));
+        assert!(r.prompt.starts_with("@Element1 walks the pier"), "{}", r.prompt);
+        // Other moves keep the words only; Kling 2.5 Turbo takes no end picture.
+        let (s, _) = call(&st, "POST", "/api/generate", Some(body("orbit_left"))).await;
+        assert_eq!(s, StatusCode::ACCEPTED);
+        assert!(!nth_seen(&st, 2).await.push_in);
+        let turbo = json!({"model": "fal/kling-2.5-turbo-i2v", "mode": "i2v", "prompt": "walks the pier", "camera": "dolly_in", "image_url": start});
+        let (s, _) = call(&st, "POST", "/api/generate", Some(turbo)).await;
+        assert_eq!(s, StatusCode::ACCEPTED);
+        let r = nth_seen(&st, 3).await;
+        assert!(!r.push_in && r.audio.is_none() && r.elements.is_empty());
     }
 
     #[tokio::test]

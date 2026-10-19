@@ -217,6 +217,35 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
     Ok(if source_len.is_some() { (from, len) } else { (0.0, len) })
 }
 
+/// How far Dolly in moves on a model that takes an end picture: the end picture is the middle 65% of the start
+/// picture, scaled back to its size (about a 1.5x push).
+const PUSH_IN_CROP: f64 = 0.65;
+
+/// The end picture for Dolly in: the start picture cropped in around its middle, as a JPEG data URI.
+pub(crate) async fn push_in_frame(ctx: &Ctx, start: &str) -> PResult<String> {
+    let (bytes, mime) = media::load_image(ctx, start).await?;
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/webp" => "webp",
+        _ => "jpg",
+    };
+    let dir = std::env::temp_dir();
+    let tag = media::random_hex(8);
+    let (src, dst) = (dir.join(format!("agave-push-{tag}.{ext}")), dir.join(format!("agave-push-{tag}-end.jpg")));
+    tokio::fs::write(&src, &bytes).await.map_err(|e| ProviderError::Failed(format!("could not stage the start picture: {e}")))?;
+    let c = PUSH_IN_CROP;
+    let vf = format!("crop=trunc(iw*{c}/2)*2:trunc(ih*{c}/2)*2,scale=trunc(iw/{c}/2)*2:trunc(ih/{c}/2)*2:flags=lanczos");
+    let made = run(Command::new("ffmpeg").args(["-y", "-v", "error", "-i"]).arg(&src).args(["-vf", &vf, "-frames:v", "1", "-q:v", "2"]).arg(&dst)).await;
+    let end = match made {
+        Ok(_) => tokio::fs::read(&dst).await.map_err(|e| ProviderError::Failed(format!("could not read the end picture: {e}"))),
+        Err(e) => Err(e),
+    };
+    let _ = tokio::fs::remove_file(&src).await;
+    let _ = tokio::fs::remove_file(&dst).await;
+    let end = end?;
+    Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, end)))
+}
+
 pub(crate) async fn run(cmd: &mut Command) -> PResult<Vec<u8>> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let child = cmd.spawn().map_err(|e| ProviderError::Failed(format!("ffmpeg not available: {e}")))?;
@@ -502,6 +531,44 @@ mod tests {
 
     /// Needs ffmpeg on PATH; skipped quietly when missing. A red caption shows only in its window.
     #[tokio::test]
+    async fn dolly_in_end_picture_is_the_start_cropped_in() {
+        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        let dir = crate::fsutil::test_dir("assemble_push_in");
+        // A 400x200 picture: blue, with a red 100x50 block in the middle. Cropped in, the red block fills more.
+        let ok = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=400x200", "-f", "lavfi", "-i", "color=c=red:s=100x50",
+                "-filter_complex", "[0:v][1:v]overlay=150:75", "-frames:v", "1"])
+            .arg(dir.join("start.png"))
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone() };
+        let uri = push_in_frame(&ctx, "/outputs/start.png").await.unwrap();
+        let b64 = uri.strip_prefix("data:image/jpeg;base64,").expect("a JPEG data URI");
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap();
+        std::fs::write(dir.join("end.jpg"), &bytes).unwrap();
+        let (w, h, _, _) = probe(&dir.join("end.jpg")).await.unwrap();
+        assert_eq!((w, h), (400, 200), "the end picture keeps the start picture's size");
+        // Columns 70 and 330 were blue at the start; after the push they sit inside the red block.
+        let px = |x: u32| {
+            let out = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-i"])
+                .arg(dir.join("end.jpg"))
+                .args(["-vf", &format!("crop=1:1:{x}:100"), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+                .output()
+                .unwrap();
+            (out.stdout[0], out.stdout[2])
+        };
+        assert!(px(200).0 > 200, "the middle stays red");
+        assert!(px(70).1 > 200 && px(70).0 < 60, "the edge is still blue: a push, not a fill");
+        assert!(px(140).0 > 200, "the red block grew past its old edge at x=150");
+        let missing = push_in_frame(&ctx, "/outputs/nope.png").await;
+        assert!(missing.is_err(), "no start picture, no job");
+    }
+
+    #[tokio::test]
     async fn timed_captions_show_only_in_their_window() {
         if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
             return;
@@ -540,6 +607,10 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            audio: None,
+            elements: Vec::new(),
+            push_in: false,
+            end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -586,6 +657,10 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            audio: None,
+            elements: Vec::new(),
+            push_in: false,
+            end_image_url: None,
         }
     }
 
@@ -741,6 +816,10 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            audio: None,
+            elements: Vec::new(),
+            push_in: false,
+            end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -790,6 +869,10 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            audio: None,
+            elements: Vec::new(),
+            push_in: false,
+            end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("assemble failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));

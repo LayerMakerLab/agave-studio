@@ -232,11 +232,14 @@ pub(crate) struct GenerateReq {
     pub(crate) duration: Option<u32>,
     pub(crate) resolution: Option<String>,
     pub(crate) seed: Option<i64>,
+    /// Native audio on or off, for models that list it (models.toml params.audio); omitted: the model's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) audio: Option<bool>,
     pub(crate) image_url: Option<String>,
     /// More reference images (models with max_refs). Self-host also adds the images of @tagged Elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) image_urls: Option<Vec<String>>,
-    /// A prompt recipe (studio::recipe): grid4, grid9, edit, sheet, product. The prompt is its detail.
+    /// A prompt recipe (studio::recipe): grid4, grid9, edit, sheet, product, look. The prompt is its detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) recipe: Option<String>,
     /// Extension: ElevenLabs needs a voice id, and the contract has no field for it.
@@ -334,8 +337,22 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
     if prompt.is_empty() && req.mode != "i23d" {
         return Err(fail(StatusCode::BAD_REQUEST, "prompt_required"));
     }
-    // @tags become the Element's words, and its images become references.
-    let (prompt, element_refs) = st.studio.expand(prompt);
+    // @tags become the Element's words, and its images become references. A model that takes Elements beside
+    // its start frame (Kling 3.0) gets them as Elements instead, called @Element1, @Element2... in the words.
+    let own_image = req.image_url.is_some() || req.image_urls.as_ref().is_some_and(|v| !v.is_empty());
+    let (prompt, element_refs, elements) = if req.mode == "i2v" && model.max_elements > 0 && own_image {
+        let (p, groups) = st.studio.expand_elements(prompt);
+        if groups.len() > model.max_elements as usize {
+            return Err(Refused {
+                status: StatusCode::BAD_REQUEST,
+                body: json!({"error": "too_many_element_tags", "max": model.max_elements, "got": groups.len()}),
+            });
+        }
+        (p, Vec::new(), groups)
+    } else {
+        let (p, refs) = st.studio.expand(prompt);
+        (p, refs, Vec::new())
+    };
     let prompt = prompt.as_str();
     if let Some(c) = &req.camera {
         if !st.presets.camera_ids.contains(c) {
@@ -357,6 +374,10 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };
     let resolution = match choose(req.resolution.as_ref(), &model.params.resolution, "resolution") {
+        Ok(v) => v,
+        Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
+    };
+    let audio = match choose(req.audio.as_ref(), &model.params.audio, "audio") {
         Ok(v) => v,
         Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };
@@ -477,6 +498,11 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         image_urls,
         voice_id,
         label: req.label.clone(),
+        audio,
+        elements,
+        // Kling 3.0 ignores "dolly in" in the words, so the end picture carries the move.
+        push_in: model.end_frame && req.mode == "i2v" && req.camera.as_deref() == Some("dolly_in"),
+        end_image_url: None,
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs"));
@@ -1012,6 +1038,10 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
+        audio: None,
+        elements: Vec::new(),
+        push_in: false,
+        end_image_url: None,
     };
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), sub);
     (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response()
@@ -1380,6 +1410,29 @@ mod tests {
         let five: Vec<String> = (0..5).map(|i| format!("https://example.test/{i}.png")).collect();
         let (s, v) = post(&app, "/api/generate", json!({"model": "fal/nano-banana-edit", "mode": "i2i", "prompt": "p", "image_urls": five})).await;
         assert_eq!((s, v["error"].as_str(), v["max"].as_u64()), (StatusCode::BAD_REQUEST, Some("too_many_refs"), Some(4)));
+        // Kling 3.0 takes a start frame and the tagged Elements side by side (fal `elements`): no longer one
+        // picture too many. Without a start frame the Element's picture is the start frame, as before.
+        let kling = |body: Value| post(&app, "/api/generate", body);
+        let start = json!({"model": "fal/kling-3-pro-i2v", "mode": "i2v", "prompt": "@mia walks the pier", "image_url": "https://example.test/start.png"});
+        let (s, v) = kling(start).await;
+        assert_eq!((s, v["error"].as_str()), (StatusCode::PRECONDITION_FAILED, Some("missing_key")));
+        let (s, v) = kling(json!({"model": "fal/kling-3-pro-i2v", "mode": "i2v", "prompt": "@mia walks the pier"})).await;
+        assert_eq!((s, v["error"].as_str()), (StatusCode::PRECONDITION_FAILED, Some("missing_key")));
+        for t in ["b", "c", "d", "e"] {
+            let (s, _) = post(&app, "/api/elements", json!({"tag": t, "name": t, "kind": "character", "images": [img]})).await;
+            assert_eq!(s, StatusCode::OK);
+        }
+        let five = json!({"model": "fal/kling-3-pro-i2v", "mode": "i2v", "prompt": "@mia @b @c @d @e", "image_url": "https://example.test/start.png"});
+        let (s, v) = kling(five).await;
+        assert_eq!((s, v["error"].as_str(), v["max"].as_u64()), (StatusCode::BAD_REQUEST, Some("too_many_element_tags"), Some(4)));
+        // Kling 2.5 Turbo takes no Elements: the start frame and the tag's picture are two pictures for a one-picture model.
+        let turbo = json!({"model": "fal/kling-2.5-turbo-i2v", "mode": "i2v", "prompt": "@mia walks", "image_url": "https://example.test/start.png"});
+        let (s, v) = kling(turbo).await;
+        assert_eq!((s, v["error"].as_str()), (StatusCode::BAD_REQUEST, Some("too_many_refs")));
+        for t in ["b", "c", "d", "e"] {
+            let (s, _) = post(&app, "/api/elements/delete", json!({"tag": t})).await;
+            assert_eq!(s, StatusCode::OK);
+        }
         let (s, _) = post(&app, "/api/elements/delete", json!({"tag": "mia"})).await;
         assert_eq!(s, StatusCode::OK);
         let resp = app.clone().oneshot(get_req("/api/elements")).await.unwrap();

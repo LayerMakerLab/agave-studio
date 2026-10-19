@@ -45,6 +45,14 @@ pub struct SubmitReq {
     pub voice_id: Option<String>,
     /// What the request is for, in a few words ("Step 3 · Video"). Only test mode shows it, on its placeholders.
     pub label: Option<String>,
+    /// Native audio on or off, for models that list it (models.toml params.audio). None: the model's default.
+    pub audio: Option<bool>,
+    /// Kling 3.0 Elements: the pictures of each @tagged Element (main view first), called @Element1, @Element2...
+    pub elements: Vec<Vec<String>>,
+    /// Dolly in on a model that takes an end picture: the start picture, cropped in, is sent as the end picture.
+    pub push_in: bool,
+    /// The end picture (fal `end_image_url`), made from the start picture when push_in is set.
+    pub end_image_url: Option<String>,
 }
 
 pub enum Submitted {
@@ -212,6 +220,10 @@ fn fal_input(r: &SubmitReq) -> Value {
         if let Some(res) = &r.resolution {
             b["resolution"] = json!(res);
         }
+        // Kling 3.0, Kling O3 and Veo 3.1 bill native audio separately (fal pages, 2026-10-19).
+        if let Some(a) = r.audio {
+            b["generate_audio"] = json!(a);
+        }
         if let Some(img) = &r.image_url {
             // Kling 3.0 image to video names the field start_image_url (fal API schema, 2026-10-11).
             let field = if r.endpoint.starts_with("fal-ai/kling-video/v3/") { "start_image_url" } else { "image_url" };
@@ -220,6 +232,22 @@ fn fal_input(r: &SubmitReq) -> Value {
         // Multi-reference edit models (Nano Banana edit, Seedream edit) take image_urls.
         if !r.image_urls.is_empty() {
             b["image_urls"] = json!(r.image_urls);
+        }
+        if let Some(end) = &r.end_image_url {
+            b["end_image_url"] = json!(end);
+        }
+        // Kling 3.0 Elements: the main view, then 1-3 more pictures (the main view again when there is only one).
+        if !r.elements.is_empty() {
+            let els: Vec<Value> = r
+                .elements
+                .iter()
+                .filter_map(|imgs| {
+                    let front = imgs.first()?;
+                    let more: Vec<&String> = if imgs.len() > 1 { imgs[1..].iter().take(3).collect() } else { vec![front] };
+                    Some(json!({"frontal_image_url": front, "reference_image_urls": more}))
+                })
+                .collect();
+            b["elements"] = json!(els);
         }
         b
     };
@@ -257,13 +285,18 @@ fn fal_outputs(v: &Value) -> Vec<(String, &'static str)> {
 impl Provider for Fal {
     async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
         let mut r = req.clone();
+        if r.push_in {
+            if let Some(start) = &r.image_url {
+                r.end_image_url = Some(crate::assemble::push_in_frame(ctx, start).await?);
+            }
+        }
         // fal cannot read our local /outputs paths, so inline them.
         if let Some(img) = r.image_url.clone() {
             if img.starts_with("/outputs/") {
                 r.image_url = Some(media::as_data_uri(ctx, &img).await?);
             }
         }
-        for img in r.image_urls.iter_mut() {
+        for img in r.image_urls.iter_mut().chain(r.elements.iter_mut().flatten()) {
             if img.starts_with("/outputs/") {
                 *img = media::as_data_uri(ctx, img).await?;
             }
@@ -901,6 +934,10 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
+            audio: None,
+            elements: Vec::new(),
+            push_in: false,
+            end_image_url: None,
         }
     }
 
@@ -918,6 +955,34 @@ mod tests {
         assert!(body.get("aspect_ratio").is_none());
         let body = fal_input(&req("fal-ai/nano-banana", "9:16"));
         assert_eq!(body["aspect_ratio"], "9:16");
+    }
+
+    #[test]
+    fn fal_kling3_sends_elements_beside_the_start_frame() {
+        let mut r = req("fal-ai/kling-video/v3/pro/image-to-video", "16:9");
+        r.image_url = Some("https://x.test/start.png".into());
+        assert!(fal_input(&r).get("elements").is_none());
+        r.elements = vec![
+            vec!["https://x.test/mia.png".into()],
+            (1..=5).map(|i| format!("https://x.test/mug{i}.png")).collect(),
+        ];
+        r.end_image_url = Some("data:image/jpeg;base64,AAAA".into());
+        let b = fal_input(&r);
+        assert_eq!(b["start_image_url"], "https://x.test/start.png");
+        assert_eq!(b["end_image_url"], "data:image/jpeg;base64,AAAA");
+        assert_eq!(b["elements"][0], json!({"frontal_image_url": "https://x.test/mia.png", "reference_image_urls": ["https://x.test/mia.png"]}));
+        assert_eq!(b["elements"][1]["frontal_image_url"], "https://x.test/mug1.png");
+        assert_eq!(b["elements"][1]["reference_image_urls"], json!(["https://x.test/mug2.png", "https://x.test/mug3.png", "https://x.test/mug4.png"]));
+    }
+
+    #[test]
+    fn fal_sends_generate_audio_only_when_the_job_sets_it() {
+        let mut r = req("fal-ai/kling-video/v3/pro/text-to-video", "16:9");
+        assert!(fal_input(&r).get("generate_audio").is_none(), "unset: the model's own default");
+        r.audio = Some(false);
+        assert_eq!(fal_input(&r)["generate_audio"], false);
+        r.audio = Some(true);
+        assert_eq!(fal_input(&r)["generate_audio"], true);
     }
 
     #[test]
@@ -1003,6 +1068,8 @@ mod tests {
             params: Default::default(),
             price: None,
             max_refs: 0,
+            max_elements: 0,
+            end_frame: false,
             provider_credits: None,
         };
         assert!(adapter_for(&m).is_none());

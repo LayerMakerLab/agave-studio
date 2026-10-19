@@ -241,6 +241,12 @@ a:hover { color: var(--silver-1); }
 .composer-status:empty { display: none; }
 .composer-status.warn { color: var(--warn); }
 .composer-status.err { color: var(--err); }
+/* Looks on image to video: the offer to put the look on the start picture first */
+.look-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; font-size: 13px; color: var(--ink-2); }
+.look-ask[hidden] { display: none; }
+.look-ask p { margin: 0; flex: 1 1 260px; }
+.look-skip { cursor: pointer; background: none; border: 0; padding: 4px 2px; color: var(--ink-3); font: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.look-skip:hover { color: var(--ink); }
 
 /* Ghost button (tokens) inside the empty state */
 .ghost { cursor: pointer; background: transparent; }

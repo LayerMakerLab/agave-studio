@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kling 3.0, Kling O3 and Veo 3.1: Audio on or off (off is cheaper on fal), with the price to match.
+- Kling 3.0 takes 3 to 15 seconds (was 5, 10 or 15).
+- Kling 3.0 image to video takes a start picture and @Elements together: the Elements go to fal as `elements`.
+- Dolly in on Kling 3.0 image to video moves the camera: the end picture is the start picture cropped in.
+- A look on image to video goes on the start picture first (an image edit with its price shown), then you animate it.
+
 - Pipelines in the Library: Product (photo, hero still, video, 3D model) and Character (sheet, Element, two clips that
   join on the last frame, edit). The full list price shows first, every paid step waits for your click, a failed step
   stops the run with Run again, and runs survive a reload or restart.

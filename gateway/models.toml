@@ -25,8 +25,8 @@ modality = "video"
 modes = ["t2v"]
 key = "FAL_KEY"
 verified = true   # fal page + API schema checked 2026-10-11 (duration "3".."15", aspect 16:9/9:16/1:1, generate_audio default true)
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10, 15], resolution = [] }
-price = { per = "second", usd = 0.168 }   # fal page 2026-10-11: $0.112/s audio off, $0.168/s audio on (default on)
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
+price = { per = "second", usd = 0.168, by_audio = { on = 0.168, off = 0.112 } }   # fal page 2026-10-19: $0.112/s audio off, $0.168/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
 
 [[model]]
 id = "fal/kling-3-pro-i2v"
@@ -38,8 +38,10 @@ modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
 verified = true   # fal API schema 2026-10-11: start_image_url (not image_url); the image sets the frame, no aspect_ratio
-params = { aspect = [], duration = [5, 10, 15], resolution = [] }
-price = { per = "second", usd = 0.168 }   # fal page 2026-10-11, audio on
+params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
+price = { per = "second", usd = 0.168, by_audio = { on = 0.168, off = 0.112 } }   # fal page 2026-10-19: $0.112/s audio off, $0.168/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
+max_elements = 4   # fal OpenAPI 2026-10-19: elements [{frontal_image_url, reference_image_urls 1-3}], @Element1...; the schema sets no count, Agave caps it at 4
+end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; Dolly in sends the start picture cropped in (Kling ignored the words twice, 2026-10-19)
 
 [[model]]
 id = "fal/seedance-2.5-t2v"
@@ -77,8 +79,8 @@ modality = "video"
 modes = ["t2v"]
 key = "FAL_KEY"
 verified = true   # fal page checked 2026-10-11; same schema as v3 pro
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 10, 15], resolution = [] }
-price = { per = "second", usd = 0.126 }   # fal page 2026-10-11: $0.084/s audio off, $0.126/s audio on (default on)
+params = { aspect = ["16:9", "9:16", "1:1"], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
+price = { per = "second", usd = 0.126, by_audio = { on = 0.126, off = 0.084 } }   # fal page 2026-10-19: $0.084/s audio off, $0.126/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
 
 [[model]]
 id = "fal/kling-3-standard-i2v"
@@ -90,8 +92,10 @@ modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
 verified = true   # fal search 2026-10-11; schema assumed same as v3 pro i2v (start_image_url), confirmed by the live test below
-params = { aspect = [], duration = [5, 10, 15], resolution = [] }
-price = { per = "second", usd = 0.126 }   # fal page 2026-10-11, audio on
+params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
+price = { per = "second", usd = 0.126, by_audio = { on = 0.126, off = 0.084 } }   # fal page 2026-10-19: $0.084/s audio off, $0.126/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
+max_elements = 4   # fal OpenAPI 2026-10-19: elements [{frontal_image_url, reference_image_urls 1-3}], @Element1...; the schema sets no count, Agave caps it at 4
+end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; Dolly in sends the start picture cropped in (Kling ignored the words twice, 2026-10-19)
 
 [[model]]
 id = "fal/kling-2.5-turbo-i2v"
@@ -129,8 +133,8 @@ modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
 verified = true   # fal OpenAPI 2026-10-13: image_url, duration "3".."15" as a string, no aspect_ratio, generate_audio off by default
-params = { aspect = [], duration = [5, 10], resolution = [] }
-price = { per = "second", usd = 0.084 }   # fal page 2026-10-11: $0.084/s with audio off (the studio never turns audio on)
+params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [false, true] }
+price = { per = "second", usd = 0.112, by_audio = { off = 0.084, on = 0.112 } }   # fal page 2026-10-19: $0.084/s audio off (fal default), $0.112/s audio on; duration "3".."15" (OpenAPI 2026-10-19)
 
 [[model]]
 id = "fal/kling-v2.1-master-t2v"
@@ -233,8 +237,8 @@ modality = "video"
 modes = ["t2v"]
 key = "FAL_KEY"
 verified = true   # fal API schema 2026-10-11: duration "4s"/"6s"/"8s", aspect 16:9/9:16, resolution 720p/1080p/4k, generate_audio default true
-params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
-price = { per = "second", usd = 0.40 }   # fal page 2026-10-11: $0.20/s audio off, $0.40/s audio on (720p/1080p); charged at the higher rate
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"], audio = [true, false] }
+price = { per = "second", usd = 0.40, by_audio = { on = 0.40, off = 0.20 } }   # fal page 2026-10-19 (text and image to video): $0.20/s audio off, $0.40/s audio on at 720p/1080p (fal default on)
 
 [[model]]
 id = "fal/veo-3.1-i2v"
@@ -246,8 +250,8 @@ modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
 verified = true   # fal API schema 2026-10-11: image_url; duration "4s"/"6s"/"8s", aspect 16:9/9:16, resolution 720p/1080p/4k, generate_audio default true
-params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
-price = { per = "second", usd = 0.40 }   # fal page 2026-10-11: $0.20/s audio off, $0.40/s audio on (720p/1080p); charged at the higher rate. UNVERIFIED for image to video: assumed the same as text to video
+params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"], audio = [true, false] }
+price = { per = "second", usd = 0.40, by_audio = { on = 0.40, off = 0.20 } }   # fal page 2026-10-19 (text and image to video): $0.20/s audio off, $0.40/s audio on at 720p/1080p (fal default on)
 
 [[model]]
 id = "fal/flux-schnell"

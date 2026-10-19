@@ -43,6 +43,7 @@
     { key: 'aspect', values: (m) => m.params && m.params.aspect, label: (v) => String(v), parse: (v) => String(v) },
     { key: 'duration', values: (m) => m.params && m.params.duration, label: (v) => `${v} s`, parse: (v) => Number(v) },
     { key: 'resolution', values: (m) => m.params && m.params.resolution, label: (v) => String(v), parse: (v) => String(v) },
+    { key: 'audio', values: (m) => m.params && m.params.audio, label: (v) => (v ? 'On' : 'Off'), parse: (v) => v === 'true' },
   ];
 
   const STATUS_LABEL = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed' };
@@ -54,7 +55,7 @@
     presets: { camera: [], styles: [] },
     keys: [],
     jobs: [],
-    chips: { aspect: null, duration: null, resolution: null },
+    chips: { aspect: null, duration: null, resolution: null, audio: null },
     staticLoaded: false,
     want: null, // model id asked for by the link (#mode/model), applied once models load
     offline: false,
@@ -81,6 +82,7 @@
     undoAfter: '', // timeline right after it
     song: null, // { url, name } replacement soundtrack
     retried: new Set(), // failed job ids already run again this session
+    lookOk: new Set(), // "picture|look" pairs that animate as they are (the look is on the picture, or you said so)
     editRev: null, // revision of the engine's saved timeline the local copy is based on
     editBase: new Set(), // clip urls of that saved timeline
   };
@@ -94,6 +96,10 @@
   const $ = (sel) => document.querySelector(sel);
   const els = {
     form: $('#composer'),
+    lookAsk: $('#lookAsk'),
+    lookAskText: $('#lookAskText'),
+    lookApply: $('#lookApply'),
+    lookSkip: $('#lookSkip'),
     prompt: $('#prompt'),
     model: $('#model'),
     status: $('#status'),
@@ -273,14 +279,24 @@
   const refActive = () => !currentMode().noRefField && allRefs().length > 0;
   const effectiveMode = () => (refActive() ? currentMode().ref : currentMode().noRef);
   const selectedModel = () => state.models.find((m) => m.id === els.model.value) || null;
+  // How many pictures a model gets as references. A model that takes Elements beside its start frame
+  // (Kling 3.0) gets the @tagged Elements' pictures as Elements, so only the composer's own count (engine rule).
+  function refCountFor(m) {
+    if (!refActive()) return 0;
+    const own = ownRefs().length;
+    if (own > 0 && (m.max_elements || 0) > 0 && effectiveMode() === 'i2v') return own;
+    return allRefs().length;
+  }
   const eligibleModels = () => {
     const md = currentMode();
     const mode = effectiveMode();
-    const n = refActive() ? allRefs().length : 0;
-    return state.models.filter((m) =>
-      (md.modality === null || m.modality === md.modality) &&
-      Array.isArray(m.modes) && m.modes.includes(mode) &&
-      (n <= 1 || (m.max_refs || 0) >= n));
+    return state.models.filter((m) => {
+      const n = refCountFor(m);
+      const tags = (m.max_elements || 0) > 0 && n < allRefs().length ? taggedElements().filter((e) => e.images.length).length : 0;
+      return (md.modality === null || m.modality === md.modality) &&
+        Array.isArray(m.modes) && m.modes.includes(mode) &&
+        (n <= 1 || (m.max_refs || 0) >= n) && tags <= (m.max_elements || 0);
+    });
   };
   // Re-filters the model list when references appear, go away, or pass one.
   function refKeyNow() {
@@ -349,7 +365,9 @@
         state.chips[c.key] = null;
         continue;
       }
-      values.forEach((v) => sel.append(opt(String(v), c.label(v))));
+      // The first listed value is the model's default; lengths are shown in order.
+      const shown = c.key === 'duration' ? [...values].sort((a, b) => a - b) : values;
+      shown.forEach((v) => sel.append(opt(String(v), c.label(v))));
       const cur = state.chips[c.key];
       const pick = values.find((v) => String(v) === String(cur)) ?? values[0];
       sel.value = String(pick);
@@ -363,7 +381,8 @@
     const m = selectedModel();
     const p = m && m.price;
     if (!p) return null;
-    const rate = (p.by_resolution && p.by_resolution[state.chips.resolution]) || p.usd;
+    const audio = state.chips.audio === null ? null : (state.chips.audio ? 'on' : 'off');
+    const rate = (audio && p.by_audio && p.by_audio[audio]) || (p.by_resolution && p.by_resolution[state.chips.resolution]) || p.usd;
     const units = p.per === 'second' ? state.chips.duration : 1;
     if (!units) return null;
     const micro = Math.round(rate * units * 1e6);
@@ -772,6 +791,7 @@
       aspect: state.chips.aspect,
       duration: state.chips.duration,
       resolution: state.chips.resolution,
+      audio: state.chips.audio,
       seed,
       image_url: multi ? null : (own[0] || null),
     };
@@ -784,6 +804,12 @@
       body.voice_id = els.voice.value;
     }
     if (recipe) body.recipe = recipe;
+    // A look on image to video goes on the start picture first (the picture sets the video's look).
+    if (body.mode === 'i2v' && body.style && body.image_url && !state.lookOk.has(`${body.image_url}|${body.style}`)) {
+      askLook(body.image_url, body.style);
+      return;
+    }
+    els.lookAsk.hidden = true;
 
     const count = Number(els.countSel.value) || 1;
     state.busy = true;
@@ -805,6 +831,101 @@
   }
 
   // Sends one generate request and reports the outcome in the status line. True when queued.
+  // ---------- looks on image to video ----------
+  // The start picture fixes a video's look, so look words alone barely show. Agave offers to put the look on the
+  // picture first with an image edit (its list price on the button, sent only on the click), then you animate it.
+  function lookEditModel() {
+    const ok = state.models.filter((m) => m.modality === 'image' && (m.modes || []).includes('i2i') && m.price);
+    return ok.find((m) => m.id === 'fal/seedream-4-edit' && m.ready) || ok.find((m) => m.ready) || ok.find((m) => m.id === 'fal/seedream-4-edit') || null;
+  }
+  const lookName = (id) => ((state.presets.styles || []).find((s) => s.id === id) || { name: id }).name;
+
+  function askLook(pic, style) {
+    const m = lookEditModel();
+    if (!m) {
+      state.lookOk.add(`${pic}|${style}`);
+      setStatus('No image edit model is set up to put the look on the picture, so the look is sent as words only.', 'warn');
+      return;
+    }
+    const cents = Math.max(1, Math.ceil(Math.round(m.price.usd * 1e6) / 1e4));
+    els.lookAskText.textContent = `The start picture sets the video's look. Put ${lookName(style)} on the picture first with ${m.name}, then animate it.`;
+    els.lookApply.textContent = `Apply ${lookName(style)} · ${cents}¢`;
+    els.lookApply.title = `About ${cents}¢ on your own key (${m.vendor}'s list price)`;
+    els.lookApply.onclick = () => applyLook(pic, style, m);
+    els.lookSkip.onclick = () => {
+      els.lookAsk.hidden = true;
+      state.lookOk.add(`${pic}|${style}`);
+      els.form.requestSubmit();
+    };
+    els.lookAsk.hidden = false;
+    setStatus('');
+  }
+
+  // The aspect from the edit model's list closest to the picture's own shape (null if it lists none).
+  function pictureAspect(url, list) {
+    return new Promise((resolve) => {
+      if (!list || !list.length) return resolve(null);
+      const img = new Image();
+      img.onload = () => {
+        const want = Math.log(img.naturalWidth / img.naturalHeight);
+        const diff = (a) => {
+          const [w, h] = String(a).split(':').map(Number);
+          return w > 0 && h > 0 ? Math.abs(Math.log(w / h) - want) : Infinity;
+        };
+        resolve(img.naturalWidth && img.naturalHeight ? String(list.reduce((x, y) => (diff(y) < diff(x) ? y : x))) : null);
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function applyLook(pic, style, m) {
+    els.lookAsk.hidden = true;
+    state.busy = true;
+    els.generate.disabled = true;
+    setStatus(`Putting ${lookName(style)} on the picture with ${m.name}...`);
+    try {
+      const aspect = await pictureAspect(pic, m.params && m.params.aspect);
+      const r = await call('/api/generate', { method: 'POST', body: { model: m.id, mode: 'i2i', recipe: 'look', prompt: '', style, image_url: pic, aspect } });
+      if (!(r.status === 202 && r.data && r.data.job)) {
+        const err = r.data && r.data.error;
+        if (r.status === 412 && err === 'missing_key') {
+          setStatus(`Add ${r.data.key} in Settings to put the look on the picture.`, 'warn');
+          openSettings(r.data.key);
+        } else {
+          setStatus(ERRORS[err] || `The look edit was refused (${err || r.status}).`, 'err');
+        }
+        return;
+      }
+      upsertJob(r.data.job);
+      refreshJobs();
+      let job = r.data.job;
+      for (let i = 0; i < 150 && isActive(job); i++) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        const j = await call(`/api/jobs/${encodeURIComponent(job.id)}`);
+        if (j.ok && j.data && j.data.job) job = j.data.job;
+      }
+      const out = job.status === 'done' && job.outputs && job.outputs[0] && job.outputs[0].url;
+      if (!out) {
+        setStatus('The look edit did not finish, so the picture is unchanged. Its card says why.', 'err');
+        return;
+      }
+      if (els.ref.value.trim() === pic) els.ref.value = '';
+      state.refs = [out, ...state.refs.filter((u) => u !== pic)];
+      renderTray();
+      syncRefMode();
+      state.lookOk.add(`${out}|${style}`);
+      setStatus(`${lookName(style)} is on the picture. Press Generate to animate it.`);
+      refreshJobs();
+    } catch (_) {
+      setOffline(true);
+      setStatus('Could not reach the engine.', 'err');
+    } finally {
+      state.busy = false;
+      els.generate.disabled = false;
+    }
+  }
+
   async function sendGenerate(body, label = '') {
     try {
       const r = await call('/api/generate', { method: 'POST', body });
@@ -821,6 +942,8 @@
         setStatus('Picture before video: make a still first, then press Animate on it. (You can turn this off in Settings.)', 'warn');
       } else if (err === 'too_many_refs') {
         setStatus(`This model takes up to ${r.data.max} reference images; this request has ${r.data.got}.`, 'warn');
+      } else if (err === 'too_many_element_tags') {
+        setStatus(`This model takes up to ${r.data.max} @elements next to its start picture; this prompt has ${r.data.got}.`, 'warn');
       } else if (err === 'refs_need_image_mode') {
         setStatus('An @element brings its pictures along, so pick a model that takes reference images.', 'warn');
       } else {
@@ -3433,6 +3556,7 @@
     });
     els.prompt.addEventListener('input', syncRefMode);
     els.countSel.addEventListener('change', renderCost);
+    els.style.addEventListener('change', () => { els.lookAsk.hidden = true; });
     els.recipe.addEventListener('change', () => {
       if (els.recipe.value && els.recipe.value !== 'sheet' && !refActive()) setStatus('This recipe works from a reference image: add one.', 'warn');
     });
