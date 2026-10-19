@@ -287,8 +287,6 @@ a:hover { color: var(--silver-1); }
   font: 400 14px/1 var(--font-mono);
 }
 .key-form input::placeholder { color: var(--ink-3); }
-/* The ComfyUI client picker sits on the row like a key field, with Save beside it. */
-.key-form select.plain-select { flex: 1 1 180px; width: auto; height: 40px; font: 400 14px/1 var(--font-mono); }
 .key-form input:focus-visible { outline: none; border-color: rgba(244, 242, 238, 0.55); box-shadow: 0 0 0 1px rgba(244, 242, 238, 0.55); }
 .key-form button {
   height: 40px; padding: 0 18px; border-radius: 999px;
@@ -621,7 +619,6 @@ a:hover { color: var(--silver-1); }
 .pipe-card p { margin: 0; font-size: 12.5px; line-height: 1.45; }
 .pipe-card-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: auto; padding-top: 4px; }
 .pipe-price { font: 500 12px/1.3 var(--font-mono); color: var(--ink); }
-.pipe-card.local .pipe-price { color: var(--ok); }
 .pipe-flow { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .pipe-flow li { position: relative; padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line-2); font: 500 10px/1.2 var(--font-mono); letter-spacing: 0.04em; color: var(--ink-2); }
 .pipe-flow li.paid { border-color: rgba(255, 107, 61, 0.45); color: var(--silver-1); }
@@ -697,7 +694,6 @@ a:hover { color: var(--silver-1); }
 .pipe-step.no-thumb > .pipe-step-main { grid-column: 2 / -1; }
 .pipe-total { display: grid; gap: 6px; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(255, 107, 61, 0.35); background: rgba(255, 107, 61, 0.06); }
 .pipe-total strong { font: 400 28px/1.1 var(--font-serif); color: var(--silver-1); font-weight: 400; }
-.pipe-total.local { border-color: rgba(159, 209, 139, 0.35); background: rgba(159, 209, 139, 0.06); }
 .pipe-total.small-total { grid-template-columns: auto 1fr; align-items: baseline; padding: 10px 14px; border-color: var(--line); background: transparent; }
 .pipe-total.small-total strong { font: 500 13px/1.2 var(--font-mono); text-align: right; }
 .pipe-total p { margin: 0; }

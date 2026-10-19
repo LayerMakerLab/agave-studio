@@ -163,7 +163,7 @@ async fn health(State(st): State<AppState>) -> Json<Value> {
 /// Every model; each is ready when its provider key is set.
 async fn models(State(st): State<AppState>) -> Json<Value> {
     // In test mode every model runs on the local fake provider, so every model is ready.
-    let models: Vec<Value> = st.registry.models.iter().map(|m| m.view(st.fake.is_some() || st.keys.get_or_default(&m.key).is_some())).collect();
+    let models: Vec<Value> = st.registry.models.iter().map(|m| m.view(st.fake.is_some() || st.keys.get(&m.key).is_some())).collect();
     Json(json!({"models": models}))
 }
 
@@ -174,15 +174,7 @@ async fn presets(State(st): State<AppState>) -> Json<Value> {
 async fn list_keys(State(st): State<AppState>) -> Response {
     let keys: Vec<Value> = SLOTS
         .iter()
-        .map(|s| {
-            let mut v = json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs, "default": s.default});
-            // A choice is not a secret, so its value is shown (keys never are).
-            if !s.choices.is_empty() {
-                v["choices"] = json!(s.choices);
-                v["value"] = json!(st.keys.get_or_default(s.env));
-            }
-            v
-        })
+        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs}))
         .collect();
     Json(json!({"keys": keys})).into_response()
 }
@@ -219,19 +211,9 @@ async fn set_key(
     if keys::slot(&b.env).is_none() {
         return fail(StatusCode::BAD_REQUEST, "unknown_slot");
     }
-    let slot = keys::slot(&b.env).filter(|s| !s.choices.is_empty());
-    // A setting with fixed values (COMFY_CLIENT) takes one of them; a key is checked as a key. Error codes never
-    // echo the value.
-    if let Some(slot) = slot {
-        if !slot.choices.contains(&b.value.as_str()) {
-            return fail(StatusCode::BAD_REQUEST, "invalid_choice");
-        }
-    } else if let Err(code) = keys::validate_value(&b.value) {
+    // Error codes never echo the value.
+    if let Err(code) = keys::validate_value(&b.value) {
         return fail(StatusCode::BAD_REQUEST, code);
-    }
-    // The ComfyUI address is where the gateway sends workflows and pictures, so only a plain http(s) address passes.
-    if b.env == "COMFY_BASE_URL" && providers::comfy_base(&b.value).is_err() {
-        return fail(StatusCode::BAD_REQUEST, "invalid_url");
     }
     match st.keys.set(&b.env, &b.value) {
         Ok(()) => Json(json!({"ok": true})).into_response(),
@@ -262,9 +244,6 @@ pub(crate) struct GenerateReq {
     /// Set by pipeline steps ("Step 3 · Video"); never read from a request.
     #[serde(skip)]
     pub(crate) label: Option<String>,
-    /// Set by pipeline steps: the run's Element photo as an extra guide picture (LTX-Video); never read from a request.
-    #[serde(skip)]
-    pub(crate) guide_url: Option<String>,
 }
 
 /// The requested option if the model allows it, else the first allowed value.
@@ -417,10 +396,6 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         (None, Vec::new())
     };
 
-    if req.guide_url.as_deref().is_some_and(|u| !valid_image_src(u)) {
-        return Err(fail(StatusCode::BAD_REQUEST, "invalid_image_url"));
-    }
-
     // Video starts from an approved still unless the project turns the rule off.
     let project = st.studio.project();
     if project.still_first && req.mode == "t2v" {
@@ -448,7 +423,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
             });
         };
         // Key check comes after validation. The key value is used only for the outgoing call.
-        let Some(key) = st.keys.get_or_default(&model.key) else {
+        let Some(key) = st.keys.get(&model.key) else {
             return Err(Refused { status: StatusCode::PRECONDITION_FAILED, body: json!({"error": "missing_key", "key": model.key}) });
         };
         (adapter, key)
@@ -502,7 +477,6 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         image_urls,
         voice_id,
         label: req.label.clone(),
-        guide_url: req.guide_url.clone(),
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too_many_jobs"));
@@ -1038,7 +1012,6 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
-        guide_url: None,
     };
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), sub);
     (StatusCode::ACCEPTED, Json(json!({"job": job}))).into_response()
@@ -1193,27 +1166,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_comfyui_address_must_be_a_plain_http_address() {
-        let st = AppState::for_tests("api_comfy_base");
-        for bad in ["file:///etc/passwd", "http://user:pw@127.0.0.1:8189", "ftp://127.0.0.1:21", "http://127.0.0.1:8189/?a=b"] {
-            let mut req = post_json("/api/keys", &json!({"env": "COMFY_BASE_URL", "value": bad}).to_string());
-            req.extensions_mut().insert(from([127, 0, 0, 1]));
-            let resp = router(st.clone()).oneshot(req).await.expect("response");
-            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{bad}");
-            assert_eq!(body_json(resp).await["error"], "invalid_url");
-        }
-        assert!(!st.keys.is_set("COMFY_BASE_URL"));
-        assert_eq!(st.keys.get_or_default("COMFY_BASE_URL").as_deref(), Some("http://127.0.0.1:8189"), "the proxy's default address");
-        let mut req = post_json("/api/keys", r#"{"env":"COMFY_BASE_URL","value":"http://100.64.0.7:8189"}"#);
-        req.extensions_mut().insert(from([127, 0, 0, 1]));
-        assert_eq!(router(st.clone()).oneshot(req).await.expect("response").status(), StatusCode::OK);
-        let v = body_json(router(st).oneshot(get_req("/api/keys")).await.expect("response")).await;
-        let slot = v["keys"].as_array().unwrap().iter().find(|k| k["env"] == "COMFY_BASE_URL").cloned().unwrap();
-        assert_eq!((slot["set"].as_bool(), slot["default"].as_str()), (Some(true), Some("http://127.0.0.1:8189")));
-        assert!(!v.to_string().contains("100.64.0.7"), "a saved value is never sent back");
-    }
-
-    #[tokio::test]
     async fn models_report_ready_false_without_keys() {
         let app = router(AppState::for_tests("api_models"));
         let resp = app
@@ -1223,8 +1175,7 @@ mod tests {
         let v = body_json(resp).await;
         let models = v["models"].as_array().expect("array");
         assert!(models.len() >= 20);
-        // Models on your own ComfyUI need no key (their address has a default); every other model needs its key.
-        assert!(models.iter().all(|m| m["ready"] == (m["provider"] == "comfy")));
+        assert!(models.iter().all(|m| m["ready"] == false));
         assert!(models.iter().all(|m| m.get("endpoint").is_none()), "endpoint is internal");
     }
 

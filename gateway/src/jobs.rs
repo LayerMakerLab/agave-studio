@@ -435,7 +435,7 @@ pub fn spawn_submit(state: AppState, job_id: String, adapter: Arc<dyn Provider>,
 }
 
 async fn poll_one(state: &AppState, due: Due) {
-    let Some(key) = state.keys.get_or_default(&due.key_env) else {
+    let Some(key) = state.keys.get(&due.key_env) else {
         state.jobs.set_failed(&due.id, "missing_key");
         return;
     };

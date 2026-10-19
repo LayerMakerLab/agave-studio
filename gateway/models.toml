@@ -11,8 +11,7 @@
 #           of what a job costs on your own key. `usd` is the default and must be the highest rate;
 #           by_resolution overrides it.
 #
-# Adapters exist for: fal, replicate, gemini (veo + image), openai (image), bfl, elevenlabs, meshy, comfy (your own
-# ComfyUI through comfy-api-proxy; `endpoint` names a built-in workflow in providers.rs, `key` is its address).
+# Adapters exist for: fal, replicate, gemini (veo + image), openai (image), bfl, elevenlabs, meshy.
 
 # ---------------------------------------------------------------- fal.ai
 
@@ -451,61 +450,3 @@ key = "MESHY_API_KEY"
 verified = true
 max_refs = 4
 provider_credits = 30   # Meshy pricing page 2026-10-12: meshy-7.1, mesh with 4K textures = 30 credits (no USD price published)
-
-# ---------------------------------------------------------------- Your own ComfyUI (Comfy API v2, comfy-api-proxy)
-# Open-weights models on your own GPU. No price: a local run costs nothing. COMFY_BASE_URL defaults to the proxy's
-# http://127.0.0.1:8189. Checked on docs.comfy.org 2026-10-18: api-reference/v2/overview and openapi-v2.yaml (POST
-# /api/v2/assets, POST /api/v2/jobs {workflow}, GET urls.self, outputs[].url), development/comfyui-server/api-proxy,
-# the built-in node pages for every node used, and the workflow templates the tutorials link.
-# Live, 2026-10-18: this gateway's own adapter ran comfy/ltxv-i2v end to end against ComfyUI and comfy-api-proxy
-# 0.1.6 (an RTX 3080 PC over an ssh tunnel): the picture upload and its core/ASSET reference in LoadImage, the job,
-# SaveVideo with format and codec "auto", and the output download all worked (the proxy reports the mp4 as type
-# "image", so outputs are sorted by content type).
-
-[[model]]
-id = "comfy/ltxv-t2v"
-name = "LTX-Video 0.9.5 (your ComfyUI)"
-vendor = "Lightricks"
-provider = "comfy"
-endpoint = "ltxv-0.9.5-t2v"   # docs.comfy.org tutorials/video/ltxv 2026-10-18: ltxv_text_to_video template; ltx-video-2b-v0.9.5 + t5xxl_fp16
-modality = "video"
-modes = ["t2v"]
-key = "COMFY_BASE_URL"
-verified = false   # same checkpoint, request and download path as the live i2v run, but this graph (EmptyLTXVLatentVideo) has not run live
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 49 or 97 frames (8n+1 at 24 fps)
-
-[[model]]
-id = "comfy/ltxv-i2v"
-name = "LTX-Video 0.9.5 (your ComfyUI)"
-vendor = "Lightricks"
-provider = "comfy"
-endpoint = "ltxv-0.9.5-i2v"   # docs.comfy.org tutorials/video/ltxv 2026-10-18: ltxv_image_to_video template, but LTXVImgToVideo strength 1.0 (the node default) instead of the template's 0.15, which re-noises 85% of the first frame so the clip drifts from the picture; 1.0 keeps it
-modality = "video"
-modes = ["i2v"]
-key = "COMFY_BASE_URL"
-verified = true   # ran live end to end through this adapter 2026-10-18 (see above): upload, core/ASSET in LoadImage node 78, job, mp4 download
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 2 s (49 frames) is the size that ran live
-
-[[model]]
-id = "comfy/ltxv-098-distilled-i2v"
-name = "LTX-Video 2B 0.9.8 distilled (your ComfyUI)"
-vendor = "Lightricks"
-provider = "comfy"
-endpoint = "ltxv-0.9.8-distilled-i2v"   # 2026-10-18: the graph follows Lightricks' official distilled image to video example, github.com/Lightricks/ComfyUI-LTXVideo example_workflows/low_level/ltxvideo-i2v-distilled.json at 35ec43a, which was written for (and loads) ltxv-2b-0.9.6-distilled-04-25: euler_ancestral, CFGGuider cfg 1, sigmas 1.0 0.9937 0.9875 0.9812 0.975 0.9094 0.725 0.4219 0, LTXVPreprocess 38, 768x512, 24 fps. Here it loads the 0.9.8 distilled checkpoint at a single scale; the official 0.9.8 config (LTX-Video configs/ltxv-2b-0.9.8-distilled.yaml) is a multi-scale run with a spatial upscaler and stochastic_sampling false, whose two passes use these same timesteps with guidance 1. Stock nodes only (ManualSigmas instead of the example's StringToFloatList/FloatToSigmas, SaveVideo instead of VHS). LTXVImgToVideo strength 1.0 keeps the first frame
-modality = "video"
-modes = ["i2v"]
-key = "COMFY_BASE_URL"
-verified = true   # ran live 2026-10-18 on the PC (comfy-api-proxy 0.1.6, ltxv-2b-0.9.8-distilled.safetensors, t5xxl_fp16): the unguided graph in the short film pipeline, 5/5 steps, through both COMFY_CLIENT=builtin and sdk; the guided graph (the Element photo as shot 2's last-frame keyframe, LTXVAddGuide frame_idx -1, strength 1.0, cropped by LTXVCropGuides) ran as shot 2 on 3 seeds through the SDK client (sweep script), then in a full short film pipeline run, 5/5 steps
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [2, 4], resolution = [] }   # 2 s = 49 frames (8n+1 at 24 fps)
-
-[[model]]
-id = "comfy/flux-schnell"
-name = "FLUX.1 schnell (your ComfyUI)"
-vendor = "Black Forest Labs"
-provider = "comfy"
-endpoint = "flux1-schnell-fp8"   # docs.comfy.org tutorials/flux/flux-1-text-to-image 2026-10-18: flux_schnell template, 4 steps, cfg 1
-modality = "image"
-modes = ["t2i"]
-key = "COMFY_BASE_URL"
-verified = false   # needs flux1-schnell-fp8.safetensors in ComfyUI/models/checkpoints (not on the tested PC); not run live
-params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }

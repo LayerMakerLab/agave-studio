@@ -709,14 +709,8 @@
     }
   }
 
-  // Settings with a default (the ComfyUI address and client) are not keys, so they never count as one.
-  const isKey = (k) => !k.default;
-
   function updateEmpty() {
-    const keys = state.keys.filter(isKey);
-    // A saved ComfyUI address (a slot with a default and no choices) means a provider that needs no key is set up.
-    const keyless = state.keys.some((k) => k.default && !(Array.isArray(k.choices) && k.choices.length) && k.set);
-    els.emptyKey.hidden = !(state.staticLoaded && keys.length && !keys.some((k) => k.set) && !keyless);
+    els.emptyKey.hidden = !(state.staticLoaded && state.keys.length && !state.keys.some((k) => k.set));
   }
 
   // ---------- submit ----------
@@ -2498,13 +2492,13 @@
   }
   function stepPrice(s) {
     const p = s.price || {};
-    if (!s.paid) return p.local ? 'Free · local' : 'Free';
+    if (!s.paid) return 'Free';
     if (p.cents) return `≈ ${cents(p.cents)}`;
     if (p.credits) return `${p.credits} ${p.credits_vendor || ''} cr`.trim();
     return 'No published price';
   }
 
-  // A button that spends money: ember, with the cost first. Free and local actions stay quiet.
+  // A button that spends money: ember, with the cost first. Free actions stay quiet.
   function actionButton(step, verb, onClick, id) {
     const paid = step && step.paid;
     const b = paid
@@ -2586,15 +2580,14 @@
       return;
     }
     for (const p of pipe.list) {
-      const local = p.total && !p.total.paid_steps;
       const go = el('button', { type: 'button', class: 'small-btn' }, ['Set up']);
       go.addEventListener('click', () => openSetupView(p.id));
-      els.pipeGrid.append(el('article', { class: 'pipe-card' + (local ? ' local' : '') }, [
+      els.pipeGrid.append(el('article', { class: 'pipe-card' }, [
         flowStrip(p.steps),
         el('h4', {}, [p.title]),
         el('p', { class: 'muted' }, [p.blurb]),
         el('div', { class: 'pipe-card-foot' }, [
-          el('span', { class: 'pipe-price', title: local ? 'Runs on your own ComfyUI: nothing is billed' : null }, [local ? 'Free · local' : totalText(p.total)]),
+          el('span', { class: 'pipe-price' }, [totalText(p.total)]),
           go,
         ]),
       ]));
@@ -2763,7 +2756,6 @@
       ]));
     }
     const t = p.total || {};
-    const local = !t.paid_steps;
     const missing = (p.keys || []).filter((k) => !k.set).map((k) => k.env);
     const first = p.steps[0];
     const go = actionButton(first.paid ? first : null, first.paid ? `start with ${first.title}` : 'start', (b) => startRun(p, b), 'pipeStart');
@@ -2775,12 +2767,10 @@
       stepList(p.steps, null),
       p.note ? el('p', { class: 'pipe-note' }, [p.note]) : null,
       missing.length ? el('div', { class: 'pipe-warn' }, [el('p', {}, [`Needs ${missing.join(', ')} in Settings before its paid steps can run.`]), settingsBtn]) : null,
-      el('div', { class: 'pipe-dock' }, [el('div', { class: 'pipe-total' + (local ? ' local' : '') }, [
+      el('div', { class: 'pipe-dock' }, [el('div', { class: 'pipe-total' }, [
         el('span', { class: 'k' }, ['Full list price']),
-        el('strong', {}, [local ? 'Free' : totalText(t)]),
-        el('p', { class: 'muted small' }, [local
-          ? `Every step runs on your own ComfyUI or in the studio, so nothing is billed.`
-          : `On your own keys, at the providers' list prices (rounded up per step). ${t.paid_steps} step${t.paid_steps === 1 ? '' : 's'} cost money, and each one waits for your click. Free steps run on their own.`]),
+        el('strong', {}, [totalText(t)]),
+        el('p', { class: 'muted small' }, [`On your own keys, at the providers' list prices (rounded up per step). ${t.paid_steps} step${t.paid_steps === 1 ? '' : 's'} cost money, and each one waits for your click. Free steps run on their own.`]),
       ]),
       el('div', { class: 'panel-actions' }, [go, el('span', { class: 'key-note', id: 'pipeNote', role: 'status' }, [v.note || ''])])]),
     ]);
@@ -2992,14 +2982,6 @@
     return el('a', { class: 'key-docs', href: k.docs, target: '_blank', rel: 'noopener noreferrer', title: `${who} docs`, 'aria-label': `${who} docs` }, ['Docs']);
   }
 
-  // The state line of a choice setting: what is in effect ("Built-in (default)", "Comfy SDK").
-  function choiceLabel(k) {
-    if (!Array.isArray(k.choices) || !k.choices.length) return '';
-    const v = k.value || k.default;
-    const name = { builtin: 'Built-in', sdk: 'Comfy SDK' }[v] || v;
-    return v === k.default ? `${name} (default)` : name;
-  }
-
   function renderKeys(focusEnv) {
     els.keyList.textContent = '';
     if (!state.keys.length) {
@@ -3007,29 +2989,20 @@
       return;
     }
     for (const k of state.keys) {
-      // A slot with choices (which client talks to your ComfyUI) is a picker showing its value. A slot with a
-      // default is an address (your own ComfyUI), not a secret: shown as text, with its default.
-      const choice = Array.isArray(k.choices) && k.choices.length > 0;
-      const addr = !choice && !!k.default;
-      const input = choice
-        ? el('select', { name: 'value', class: 'plain-select', 'aria-label': `${k.env} value` },
-          k.choices.map((c) => el('option', { value: c, selected: c === (k.value || k.default) }, [c])))
-        : el('input', {
-          type: addr ? 'url' : 'password', name: 'value', autocomplete: addr ? 'off' : 'new-password', spellcheck: 'false',
-          'aria-label': `${k.env} value`, placeholder: addr ? k.default : 'Paste key',
-        });
+      const input = el('input', {
+        type: 'password', name: 'value', autocomplete: 'new-password', spellcheck: 'false',
+        'aria-label': `${k.env} value`, placeholder: 'Paste key',
+      });
       const note = el('p', { class: 'key-note', role: 'status' });
       const btn = el('button', { type: 'submit' }, ['Save']);
-      const light = el('span', { class: 'light' + (k.set || choice ? ' set' : ''), 'aria-hidden': 'true' });
-      const stateEl = el('span', { class: 'key-state' }, [choiceLabel(k) || (k.set ? 'Set' : (addr ? 'Default' : 'Not set'))]);
+      const light = el('span', { class: 'light' + (k.set ? ' set' : ''), 'aria-hidden': 'true' });
+      const stateEl = el('span', { class: 'key-state' }, [k.set ? 'Set' : 'Not set']);
       const head = el('div', { class: 'key-head' }, [
         light,
         el('span', { class: 'key-env' }, [k.env]),
         stateEl,
         docsLink(k),
       ]);
-      if (addr) note.textContent = `Address of your own ComfyUI (comfy-api-proxy), not a key. Empty uses ${k.default}.`;
-      if (choice) note.textContent = 'Which client talks to your ComfyUI. builtin: the studio\'s own (the default). sdk: the official Comfy SDK (comfy-sdk), run through uv; needs uv installed.';
       const form = el('form', { class: 'key-form', autocomplete: 'off' }, [input, btn, note]);
       form.addEventListener('submit', (ev) => saveKey(ev, k, { input, note, btn, light, stateEl }));
       els.keyList.append(el('div', { class: 'key', 'data-env': k.env }, [head, form]));
@@ -3046,14 +3019,13 @@
     row.classList.add('flash');
     setTimeout(() => row.classList.remove('flash'), 1800);
     row.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
-    row.querySelector('input, select').focus({ preventScroll: true });
+    row.querySelector('input').focus({ preventScroll: true });
   }
 
   async function saveKey(ev, k, ui) {
     ev.preventDefault();
     const value = ui.input.value;
-    const choice = Array.isArray(k.choices) && k.choices.length > 0;
-    if (!choice) ui.input.value = '';
+    ui.input.value = '';
     if (!value.trim()) {
       ui.note.textContent = 'Enter a key first.';
       ui.input.focus();
@@ -3065,16 +3037,14 @@
       const r = await call('/api/keys', { method: 'POST', body: { env: k.env, value } });
       if (r.ok) {
         k.set = true;
-        if (choice) k.value = value;
         ui.light.classList.add('set');
-        ui.stateEl.textContent = choiceLabel(k) || 'Set';
+        ui.stateEl.textContent = 'Set';
         ui.note.textContent = 'Saved';
         await reloadModels();
         updateEmpty();
       } else {
         ui.input.value = value; // keep what they typed so they can fix it
-        const code = r.data && r.data.error;
-        ui.note.textContent = code === 'invalid_choice' ? `Pick one of: ${(k.choices || []).join(', ')}.` : code === 'invalid_url' ? `Use a plain http:// or https:// address, like ${k.default || 'http://127.0.0.1:8189'}.` : (code || `Could not save (${r.status}).`);
+        ui.note.textContent = (r.data && r.data.error) || `Could not save (${r.status}).`;
       }
     } catch (_) {
       ui.input.value = value;

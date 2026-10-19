@@ -12,12 +12,8 @@ Never return a key value from any endpoint. Never log a key.
            "params":{"aspect":["16:9","9:16","1:1"],"duration":[5,10],"resolution":["720p","1080p"]},
            "key":"FAL_KEY","ready":true|false}
 - GET  /api/presets -> {"camera":[{"id":"dolly_in","name":"Dolly in","group":"push"}], "styles":[{"id":"film_35","name":"35mm film"}]}
-- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://...","default":null}]}
-  (`default` is set only for the two ComfyUI settings, used when nothing is saved; key values are never returned.
-  COMFY_CLIENT, a setting with fixed values and not a secret, also carries `"choices":["builtin","sdk"]` and its
-  current `"value"`.)
-- POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot;
-  COMFY_CLIENT takes only "builtin" or "sdk", else 400 invalid_choice)
+- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://..."}]}
+- POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot)
 - GET  /api/voices -> {"voices":[{"id":"21m00Tcm4TlvDq8ikWAM","name":"Rachel","category":"premade"}]}
   The voices on the user's ElevenLabs account (needs ELEVENLABS_API_KEY; 412 key_missing without it). Text to speech
   (`elevenlabs/multilingual-v2`) needs a `voice_id` from this list in POST /api/generate.
@@ -117,9 +113,9 @@ Element, 3D, Add to edit. Each step is fed by the one before; runs live in data/
 survives a reload or a restart. Generation steps go through the same checks as POST /api/generate.
 - GET /api/pipelines -> {"pipelines":[{id,title,blurb,note,needs_image,image_hint,subject_hint,tag,element_kind,
   steps:[{title,kind:"generate"|"element"|"last_frame"|"edit",paid,model,model_name,vendor,price:{cents,credits,
-  credits_vendor,local}}],total:{cents,credits:[{vendor,credits}],unpriced,local_steps,paid_steps},keys:[{env,set}]}]}
+  credits_vendor}}],total:{cents,credits:[{vendor,credits}],unpriced,paid_steps},keys:[{env,set}]}]}
   Prices are the models.toml list prices with the composer's rounding (rate x seconds, or per picture, rounded up to
-  the cent per step); Meshy steps count credits; steps on your own ComfyUI are `local` and free.
+  the cent per step); Meshy steps count credits.
 - GET /api/pipelines/runs -> {"runs":[Run]} newest first (moves running runs on first).
   Run = {id:"p_<16 hex>",pipeline,title,created_at,subject,image,tag,status:"waiting"|"running"|"failed"|"done",current,
          steps:[...step fields above, status:"pending"|"waiting"|"running"|"done"|"failed",job,outputs,error,key],total}
@@ -138,45 +134,10 @@ survives a reload or a restart. Generation steps go through the same checks as P
   Element stay. At most 50 runs are kept: finished runs go first, oldest first, then the others; a run with a job in
   flight is never dropped.
 - A step can carry a `note` (for example "Added 1 of 2 clips: the timeline holds 200.").
-Paid steps (any provider that bills you) never start on their own. Free steps (Save as Element, the last frame,
-Add to edit, and generations on your own ComfyUI) run as soon as the step before them is done; a background check
+Paid steps (every generation bills your own provider account) never start on their own. Free steps (Save as Element,
+the last frame, Add to edit) run as soon as the step before them is done; a background check
 every 2 s moves runs on with no page open. The last frame is taken by ffmpeg as a local job (model "agave/last-frame",
 shown in the gallery like other jobs), so a restart in the middle fails that step instead of losing it.
-
-## Your own ComfyUI (Comfy API v2)
-Provider `comfy`: open-weights workflows (LTX-Video 0.9.5 text or image to video, LTX-Video 2B 0.9.8 distilled image to
-video, FLUX.1 schnell) on your own ComfyUI
-behind comfy-api-proxy. `COMFY_BASE_URL` (default http://127.0.0.1:8189, no key) is an address, not a secret: http or
-https with a host and port only, no path, user name, password, query or fragment (400 invalid_url on POST /api/keys). Pictures go up with POST
-{base}/api/v2/assets and into the workflow as core/ASSET references; the job goes to POST {base}/api/v2/jobs and is
-polled at its own `urls.self`; outputs are downloaded from their `url`. Every link must stay on the base origin.
-An output counts as video or image by its content type, then its file name, then its `type` (the proxy reports a
-SaveVideo mp4 as type "image"). Job answers are read under the 64 MB JSON cap, files under the download cap.
-An output with an odd name (a "..", a leading slash, characters other than letters, digits and ._-/) or content type is
-left out. comfy/ltxv-i2v ran live end to end through this adapter on 2026-10-18 (comfy-api-proxy 0.1.6,
-ltx-video-2b-v0.9.5). comfy/ltxv-098-distilled-i2v uses stock ComfyUI nodes only and ran live on 2026-10-18 through
-both clients. A pipeline step can add a guide picture to it (the run's Element photo, uploaded as a second asset):
-LoadImage -> LTXVPreprocess -> LTXVAddGuide after LTXVImgToVideo, and LTXVCropGuides cuts the guide frames off before
-VAEDecode. Its frame_idx and strength are LTXV_GUIDE_FRAME_IDX and LTXV_GUIDE_STRENGTH in providers.rs (-1 and 1.0):
-the Element photo is a later shot's last-frame keyframe, so the shot ends back on the Element's look and close to its
-pose. It is not a general look keeper. Tested live on 2026-10-18 with 3 seeds; a brief mid-shot wobble is possible.
-
-Two clients do this, picked by the `COMFY_CLIENT` setting (read on every call):
-- `builtin` (default): the gateway's own Rust client, making the HTTP calls above.
-- `sdk`: the official Comfy SDK. The gateway runs `uv run --quiet --script tools/comfy-sdk/agave_comfy.py` (PEP 723,
-  pinned to comfy-sdk 0.5.0) with an argument array in its own process group, a cleared environment (PATH, HOME,
-  COMFY_BASE_URL; no key), stdin closed, a timeout (submit 300 s, status 60 s, fetch 600 s; then the whole group gets
-  SIGTERM and, 1.5 s later, SIGKILL, so the Python child uv starts cannot keep running) and a 1 MB cap on what it
-  prints. Commands:
-  `submit --workflow=<file> [--image-node=<id> --image=<file>]...` (a pair per picture) -> {"job_id"}, `status -- <job_id>` ->
-  {"status","outputs":[{name,content_type,node_id,type}],"error"}, `fetch --name=<name> --out=<file>
-  --max-bytes=<n> -- <job_id>` (options as --flag=value and `--` before the job id, so no value is read as an option).
-  The sidecar's httpx client follows no redirects, treats a 3xx as an error and refuses any request off
-  COMFY_BASE_URL's origin (`selftest` checks this against a mock transport, offline). The SDK uploads the picture (assets.from_file, Workflow.set_input), submits (Comfy.submit), reads
-  the job (jobs.get) and downloads the output (Output.to_stream). The gateway picks every file path (under
-  data/comfy-sdk, removed after each call) and checks the answers like the proxy's: a UUID job id (8-4-4-4-12 hex), a known
-  status, safe output names and content types. Both clients share the same submit, poll, output classification
-  and caps. Without uv the job fails with a message naming COMFY_CLIENT.
 
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture

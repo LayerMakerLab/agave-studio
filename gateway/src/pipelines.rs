@@ -1,8 +1,8 @@
 //! Library pipelines: the studio's existing steps (a picture, Animate, Continue from the last frame, Save as
 //! Element, 3D, Add to edit) run in a row, each step fed by the one before. Runs and their step state are kept
 //! in data/pipelines.json, so a run survives a reload or a restart. A step that costs money never starts on its
-//! own: it waits for the user's click (POST .../step). Free steps (Save as Element, the last frame, Add to edit,
-//! and generations on your own ComfyUI, which cost nothing) run as soon as the step before them is done. A failed step stops the run; clicking it again runs that step
+//! own: it waits for the user's click (POST .../step). Free steps (Save as Element, the last frame, Add to edit)
+//! run as soon as the step before them is done. A failed step stops the run; clicking it again runs that step
 //! again, keeping everything before it.
 
 use std::path::PathBuf;
@@ -49,9 +49,6 @@ pub enum Kind {
         duration: Option<u32>,
         resolution: Option<&'static str>,
         from: From,
-        /// Also passes the run's Element photo as the shot's last-frame keyframe (providers.rs LTXV_GUIDE_*), so the
-        /// shot ends back on the Element's look. It does not hold the look through the middle of the shot.
-        guide: bool,
     },
     /// Free: the last frame of an earlier step's clip, as a picture (the gallery's Continue).
     LastFrame { from: usize },
@@ -82,23 +79,13 @@ pub struct Pipeline {
 }
 
 const fn generate(title: &'static str, model: &'static str, mode: &'static str, prompt: &'static str, from: From) -> Step {
-    Step { title, kind: Kind::Generate { model, mode, prompt, recipe: None, aspect: None, duration: None, resolution: None, from, guide: false } }
-}
-
-/// The same step, with the run's Element photo as a guide picture.
-const fn guided(step: Step) -> Step {
-    match step.kind {
-        Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, .. } => {
-            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide: true } }
-        }
-        other => Step { title: step.title, kind: other },
-    }
+    Step { title, kind: Kind::Generate { model, mode, prompt, recipe: None, aspect: None, duration: None, resolution: None, from } }
 }
 
 const fn with(step: Step, aspect: Option<&'static str>, duration: Option<u32>, resolution: Option<&'static str>, recipe: Option<&'static str>) -> Step {
     match step.kind {
-        Kind::Generate { model, mode, prompt, from, guide, .. } => {
-            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide } }
+        Kind::Generate { model, mode, prompt, from, .. } => {
+            Step { title: step.title, kind: Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from } }
         }
         other => Step { title: step.title, kind: other },
     }
@@ -202,50 +189,6 @@ pub const PIPELINES: &[Pipeline] = &[
             Step { title: "Add to edit", kind: Kind::Edit { from: &[3, 5] } },
         ],
     },
-    Pipeline {
-        id: "ltx-short-on-comfy",
-        title: "Short film on your ComfyUI: photo, Element, two LTX-Video shots, edit",
-        blurb: "Runs free on your own ComfyUI with the open-weights LTX-Video model. Your photo is saved as an Element, LTX-Video brings it to life with small natural motion, the shot's last frame starts the second shot, and both land on the Edit timeline.",
-        note: "Needs ComfyUI with comfy-api-proxy running at the address in Settings (COMFY_BASE_URL, default http://127.0.0.1:8189) and LTX-Video 2B 0.9.8 distilled (checkpoints/ltxv-2b-0.9.8-distilled.safetensors) with the t5xxl_fp16 text encoder installed there. Nothing is billed: it runs on your GPU.",
-        needs_image: true,
-        image_hint: "A photo of a person, place or object, ideally 3:2 landscape. The shots keep its scene and light.",
-        subject_hint: "a white lighthouse on a rocky coast",
-        tag: "lead",
-        element_kind: "character",
-        steps: &[
-            Step { title: "Save as Element", kind: Kind::Element { from: None } },
-            with(
-                generate(
-                    "Shot 1",
-                    "comfy/ltxv-098-distilled-i2v",
-                    "i2v",
-                    "@{tag}, subtle natural motion, a slight turn and soft breathing, a slow push-in. The same scene, framing and lighting as the picture, nothing new enters the frame. Real-life footage, steady exposure.",
-                    From::Start,
-                ),
-                Some("16:9"),
-                Some(2),
-                None,
-                None,
-            ),
-            Step { title: "Last frame", kind: Kind::LastFrame { from: 1 } },
-            // Shot 2 starts from shot 1's last frame, and the Element photo is its last-frame keyframe: the shot ends
-            // back on the Element's look and close to its pose. Its prompt therefore settles back on the subject.
-            guided(with(
-                generate(
-                    "Shot 2",
-                    "comfy/ltxv-098-distilled-i2v",
-                    "i2v",
-                    "{subject} continues naturally and settles, a slow push-in. The same scene and light as before, nothing new enters the frame. Real-life footage, steady exposure.",
-                    From::Step(2),
-                ),
-                Some("16:9"),
-                Some(2),
-                None,
-                None,
-            )),
-            Step { title: "Add to edit", kind: Kind::Edit { from: &[1, 3] } },
-        ],
-    },
 ];
 
 pub fn find(id: &str) -> Option<&'static Pipeline> {
@@ -259,14 +202,13 @@ pub fn shape(p: &Pipeline) -> String {
         .steps
         .iter()
         .map(|s| match &s.kind {
-            Kind::Generate { model, mode, from, guide, .. } => {
+            Kind::Generate { model, mode, from, .. } => {
                 let src = match from {
                     From::Nothing => "-".to_string(),
                     From::Start => "start".to_string(),
                     From::Step(j) => j.to_string(),
                 };
-                // A guided step is a different step (older runs of it are not resumed); unguided ones keep their print.
-                format!("gen:{model}:{mode}:{src}{}", if *guide { ":guide" } else { "" })
+                format!("gen:{model}:{mode}:{src}")
             }
             Kind::LastFrame { from } => format!("frame:{from}"),
             Kind::Element { from } => format!("element:{from:?}"),
@@ -282,14 +224,10 @@ fn same_shape(p: &Pipeline, run: &Run) -> bool {
     p.steps.len() == run.steps.len() && (run.shape.is_empty() || run.shape == shape(p))
 }
 
-/// A step on your own ComfyUI costs nothing. Every other provider bills the user's own account.
-fn is_local(st: &AppState, step: &Step) -> bool {
-    matches!(&step.kind, Kind::Generate { model, .. } if st.registry.get(model).is_some_and(|m| m.provider == "comfy"))
-}
-
-/// A step that spends money, so it never starts without the user's click.
-fn is_paid(st: &AppState, step: &Step) -> bool {
-    matches!(step.kind, Kind::Generate { .. }) && !is_local(st, step)
+/// A step that spends money (every generation bills the user's own provider account), so it never starts without
+/// the user's click.
+fn is_paid(step: &Step) -> bool {
+    matches!(step.kind, Kind::Generate { .. })
 }
 
 fn kind_name(step: &Step) -> &'static str {
@@ -310,16 +248,11 @@ fn kind_name(step: &Step) -> &'static str {
 pub struct Price {
     pub cents: Option<u64>,
     pub credits: Option<(u32, String)>,
-    /// Runs on your own ComfyUI: no charge.
-    pub local: bool,
 }
 
 pub fn step_price(st: &AppState, step: &Step) -> Price {
     let Kind::Generate { model, duration, resolution, .. } = &step.kind else { return Price::default() };
     let Some(m) = st.registry.get(model) else { return Price::default() };
-    if m.provider == "comfy" {
-        return Price { local: true, ..Price::default() };
-    }
     if let Some(p) = &m.price {
         // What the generate path will send: the step's value when the model lists it, else the first listed.
         let res = resolution.map(str::to_string).or_else(|| m.params.resolution.first().cloned());
@@ -334,17 +267,15 @@ pub fn step_price(st: &AppState, step: &Step) -> Price {
 }
 
 fn price_json(p: &Price) -> Value {
-    json!({"cents": p.cents, "credits": p.credits.as_ref().map(|c| c.0), "credits_vendor": p.credits.as_ref().map(|c| c.1.clone()), "local": p.local})
+    json!({"cents": p.cents, "credits": p.credits.as_ref().map(|c| c.0), "credits_vendor": p.credits.as_ref().map(|c| c.1.clone())})
 }
 
-/// The full list price of a pipeline: cents, credits per vendor, paid steps with no published price, and the
-/// steps that run free on your own ComfyUI.
+/// The full list price of a pipeline: cents, credits per vendor and paid steps with no published price.
 fn total_json(st: &AppState, p: &Pipeline) -> Value {
     let mut cents = 0u64;
     let mut credits: Vec<(String, u32)> = Vec::new();
     let mut unpriced = 0;
-    let local = p.steps.iter().filter(|s| is_local(st, s)).count();
-    for s in p.steps.iter().filter(|s| is_paid(st, s)) {
+    for s in p.steps.iter().filter(|s| is_paid(s)) {
         let price = step_price(st, s);
         match (price.cents, price.credits) {
             (Some(c), _) => cents += c,
@@ -356,7 +287,7 @@ fn total_json(st: &AppState, p: &Pipeline) -> Value {
         }
     }
     let credits: Vec<Value> = credits.into_iter().map(|(vendor, n)| json!({"vendor": vendor, "credits": n})).collect();
-    json!({"cents": cents, "credits": credits, "unpriced": unpriced, "local_steps": local, "paid_steps": p.steps.iter().filter(|s| is_paid(st, s)).count()})
+    json!({"cents": cents, "credits": credits, "unpriced": unpriced, "paid_steps": p.steps.iter().filter(|s| is_paid(s)).count()})
 }
 
 /// What a free step does, in words that name the steps it works on ("Takes the last frame of Shot 1").
@@ -382,7 +313,7 @@ fn steps_json(st: &AppState, p: &Pipeline) -> Vec<Value> {
                 }
                 _ => (None, None, None),
             };
-            json!({"title": s.title, "kind": kind_name(s), "paid": is_paid(st, s), "model": model, "model_name": model_name,
+            json!({"title": s.title, "kind": kind_name(s), "paid": is_paid(s), "model": model, "model_name": model_name,
                    "vendor": vendor, "price": price_json(&step_price(st, s)), "detail": step_detail(p, s)})
         })
         .collect()
@@ -400,7 +331,7 @@ fn keys_json(st: &AppState, p: &Pipeline) -> Vec<Value> {
             }
         }
     }
-    keys.into_iter().map(|k| json!({"env": k, "set": st.fake.is_some() || st.keys.get_or_default(k).is_some()})).collect()
+    keys.into_iter().map(|k| json!({"env": k, "set": st.fake.is_some() || st.keys.get(k).is_some()})).collect()
 }
 
 fn pipeline_json(st: &AppState, p: &Pipeline) -> Value {
@@ -594,7 +525,7 @@ async fn advance(st: &AppState, run: &mut Run) {
             return;
         }
         match run.steps[i].status.as_str() {
-            "pending" if is_paid(st, &p.steps[i]) => {
+            "pending" if is_paid(&p.steps[i]) => {
                 run.steps[i].status = "waiting".into();
                 run.status = "waiting".into();
                 return;
@@ -764,7 +695,6 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         image_urls: Vec::new(),
         voice_id: None,
         label: None,
-        guide_url: None,
     };
     crate::jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), req);
     run.steps[i].status = "running".into();
@@ -776,7 +706,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
 async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
     run.steps[i] = StepRun { status: "pending".into(), ..Default::default() };
     run.status = "running".into();
-    let Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from, guide } = &p.steps[i].kind else {
+    let Kind::Generate { model, mode, prompt, recipe, aspect, duration, resolution, from } = &p.steps[i].kind else {
         if let Kind::LastFrame { from } = p.steps[i].kind {
             return start_last_frame(st, run, i, from);
         }
@@ -801,7 +731,6 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
         recipe: recipe.map(String::from),
         label: Some(format!("Step {} · {}", i + 1, p.steps[i].title)),
         // The picture this run saved as its Element (the start photo or an earlier step's).
-        guide_url: if *guide { run.element.as_ref().map(|m| m.image.clone()) } else { None },
         ..Default::default()
     };
     match submit_generate(st, req) {
@@ -1069,12 +998,6 @@ mod tests {
         assert_eq!(product["steps"][1]["paid"], false, "Save as Element is free");
         // Two sheets/stills at 4 cents and two Kling O3 clips at 5 s x $0.084 = 42 cents.
         assert_eq!(p("character-to-edit")["total"]["cents"], 92);
-        // The LTX pipeline runs on your own ComfyUI: nothing to pay, every generation marked local.
-        let ltx = p("ltx-short-on-comfy");
-        assert_eq!((ltx["total"]["cents"].as_u64(), ltx["total"]["paid_steps"].as_u64(), ltx["total"]["local_steps"].as_u64()), (Some(0), Some(0), Some(2)));
-        assert_eq!(ltx["steps"][1]["price"]["local"], true);
-        // Only the model that ran live on the PC: no FLUX step, so it runs with just LTX-Video installed.
-        assert!(ltx["steps"].as_array().unwrap().iter().filter(|s| s["kind"] == "generate").all(|s| s["model"] == "comfy/ltxv-098-distilled-i2v"));
         // Every model a pipeline names exists and accepts the step's options.
         for p in PIPELINES {
             for s in p.steps {
@@ -1207,53 +1130,46 @@ mod tests {
         assert_eq!(out(&run, 0), out(&before, 0), "earlier steps kept");
     }
 
+    /// Clicks every paid step of a run in turn until it is done (free steps run on their own in between).
+    async fn click_through(st: &AppState, id: &str) -> Value {
+        let mut run = settle(st, id).await;
+        for _ in 0..10 {
+            if run["status"] != "waiting" {
+                break;
+            }
+            let at = run["current"].as_u64().unwrap() as usize;
+            assert_eq!(click(st, id, at).await.0, StatusCode::OK);
+            run = settle(st, id).await;
+        }
+        run
+    }
+
     #[tokio::test]
-    async fn local_steps_run_on_their_own_and_chain_through_the_last_frame_into_the_edit() {
+    async fn the_last_frame_chains_the_clips_into_the_edit() {
         if !ffmpeg_ok() {
             return;
         }
-        let st = fake_state(crate::fsutil::test_dir("pipe_ltx"), 0);
+        let st = fake_state(crate::fsutil::test_dir("pipe_last_frame"), 0);
         let img = start_image(&st);
-        let run = create(&st, "ltx-short-on-comfy", Some(img.clone())).await;
-        let id = run["id"].as_str().unwrap().to_string();
-        assert_eq!(run["steps"][0]["status"], "done", "the photo is saved as the Element at once");
-        assert_eq!(run["steps"][1]["status"], "running", "a free local step starts with the run");
-        let run = settle(&st, &id).await;
+        let id = create(&st, "character-to-edit", Some(img)).await["id"].as_str().unwrap().to_string();
+        let run = click_through(&st, &id).await;
         assert_eq!(run["status"], "done", "{run}");
-        let el = st.studio.elements().into_iter().find(|e| e.tag == "lead").unwrap();
-        assert_eq!(el.images, vec![img.clone()]);
         let seen = fake(&st).seen.lock().unwrap();
-        assert_eq!(seen.len(), 2);
-        assert_eq!(seen[0].image_url.as_deref(), Some(img.as_str()), "shot 1 starts from the photo (the Element's picture)");
-        assert!(seen[0].prompt.starts_with("a blue ceramic bowl, subtle natural motion"), "@lead became the Element's words: {}", seen[0].prompt);
-        assert!(!seen[0].prompt.contains("walk") && !seen[1].prompt.contains("face"), "the shots work for any subject");
-        assert_eq!(seen[0].label.as_deref(), Some("Step 2 · Shot 1"));
-        assert_eq!(seen[1].image_url.as_deref(), Some(out(&run, 2).as_str()), "shot 2 starts from shot 1's last frame");
-        assert_eq!(seen[0].guide_url, None, "shot 1 starts from the photo itself and needs no guide");
-        assert_eq!(seen[1].guide_url.as_deref(), Some(img.as_str()), "shot 2 is also guided by the Element photo");
-        assert!(out(&run, 2).ends_with(".png"));
+        assert_eq!(seen.len(), 4, "four paid generations, each after its own click");
+        assert_eq!(seen[3].image_url.as_deref(), Some(out(&run, 4).as_str()), "clip 2 starts from clip 1's last frame");
+        assert!(out(&run, 4).ends_with(".png"));
         // The last frame was taken as a local job, like Continue, outside the engine lock.
-        let frame_job = run["steps"][2]["job"].as_str().unwrap();
+        let frame_job = run["steps"][4]["job"].as_str().unwrap();
         assert_eq!(st.jobs.get(frame_job).unwrap().model, "agave/last-frame");
         let edit: Vec<String> = st.studio.edit().clips.into_iter().map(|c| c.url).collect();
-        assert_eq!(edit, vec![out(&run, 1), out(&run, 3)]);
-        assert!(run["steps"][4]["note"].is_null());
+        assert_eq!(edit, vec![out(&run, 3), out(&run, 5)]);
+        assert!(run["steps"][6]["note"].is_null());
     }
 
     #[test]
-    fn only_later_comfy_shots_are_guided_by_the_element() {
-        let guided: Vec<(&str, usize)> = PIPELINES
-            .iter()
-            .flat_map(|p| p.steps.iter().enumerate().filter(|(_, s)| matches!(s.kind, Kind::Generate { guide: true, .. })).map(move |(i, _)| (p.id, i)))
-            .collect();
-        assert_eq!(guided, vec![("ltx-short-on-comfy", 3)]);
-        // The unguided pipelines keep the fingerprints they had before guides existed (so their saved runs resume);
-        // the guided film has a new one (a run saved before it is not resumed against different steps).
+    fn pipeline_fingerprints_stay_the_same_so_saved_runs_resume() {
         assert_eq!(shape(find("product-to-3d").unwrap()), "be3d6081cbfb98a4");
         assert_eq!(shape(find("character-to-edit").unwrap()), "50f402fc5d8c84f7");
-        let film = shape(find("ltx-short-on-comfy").unwrap());
-        assert_ne!(film, "a219acaba968016c", "the film's fingerprint before shot 2 was guided");
-        assert_eq!(film, "d241dfcef3544c4a");
     }
 
     #[tokio::test]
@@ -1268,10 +1184,10 @@ mod tests {
             .map(|_| EditClip { url: img.clone(), kind: "image".into(), from: 0.0, to: None, len: None, caption: String::new() })
             .collect();
         st.studio.set_edit(doc).unwrap();
-        let id = create(&st, "ltx-short-on-comfy", Some(img)).await["id"].as_str().unwrap().to_string();
-        let run = settle(&st, &id).await;
-        assert_eq!(run["steps"][4]["status"], "done");
-        assert_eq!(run["steps"][4]["note"], "Added 1 of 2 clips: the timeline holds 200.");
+        let id = create(&st, "character-to-edit", Some(img)).await["id"].as_str().unwrap().to_string();
+        let run = click_through(&st, &id).await;
+        assert_eq!(run["steps"][6]["status"], "done");
+        assert_eq!(run["steps"][6]["note"], "Added 1 of 2 clips: the timeline holds 200.");
         assert_eq!(st.studio.edit().clips.len(), crate::assemble::MAX_CLIPS);
     }
 
@@ -1425,11 +1341,11 @@ mod tests {
         assert_eq!(post(json!({"pipeline": "product-to-3d", "subject": "x"})).await.1["error"], "image_required");
         assert_eq!(post(json!({"pipeline": "product-to-3d", "subject": "x", "image": "/outputs/missing.png"})).await.1["error"], "invalid_image");
         let img = start_image(&st);
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": " ", "image": img})).await.1["error"], "invalid_subject");
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x".repeat(61), "image": img})).await.1["error"], "invalid_subject");
-        assert_eq!(post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "Bad Tag", "image": img})).await.1["error"], "invalid_tag");
+        assert_eq!(post(json!({"pipeline": "character-to-edit", "subject": " ", "image": img})).await.1["error"], "invalid_subject");
+        assert_eq!(post(json!({"pipeline": "character-to-edit", "subject": "x".repeat(61), "image": img})).await.1["error"], "invalid_subject");
+        assert_eq!(post(json!({"pipeline": "character-to-edit", "subject": "x", "tag": "Bad Tag", "image": img})).await.1["error"], "invalid_tag");
         st.studio.put_element(Element { tag: "mine".into(), name: "My cat".into(), kind: "character".into(), images: vec![img.clone()], created_at: 1 }).unwrap();
-        let (status, v) = post(json!({"pipeline": "ltx-short-on-comfy", "subject": "x", "tag": "@mine", "image": img})).await;
+        let (status, v) = post(json!({"pipeline": "character-to-edit", "subject": "x", "tag": "@mine", "image": img})).await;
         assert_eq!((status, v["error"].as_str()), (StatusCode::CONFLICT, Some("tag_in_use")));
         assert_eq!(call(&st, "POST", "/api/pipelines/runs/p_zz/step", Some(json!({"step": 0}))).await.0, StatusCode::NOT_FOUND);
     }

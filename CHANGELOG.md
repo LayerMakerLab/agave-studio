@@ -2,18 +2,9 @@
 
 ## Unreleased
 
-- Pipelines in the Library: Product (photo, hero still, video, 3D model), Character (sheet, Element, two clips that
-  join on the last frame, edit) and a short film on your own ComfyUI (your photo as an Element, two LTX-Video shots
-  joined on the last frame, edit). The full list price shows first, every paid step waits for your click, a failed step stops the run
-  with Run again, and runs survive a reload or restart.
-- Your own ComfyUI as a provider, through comfy-api-proxy and the Comfy API v2 (`COMFY_BASE_URL`, no key, nothing
-  billed): LTX-Video 0.9.5 and FLUX.1 schnell.
-- `COMFY_CLIENT=sdk` runs ComfyUI jobs through the official Comfy SDK (comfy-sdk 0.5.0, `tools/comfy-sdk/agave_comfy.py`,
-  started with uv); `builtin`, the studio's own client, stays the default. Both share the same checks and caps.
-- LTX-Video 2B 0.9.8 distilled on your own ComfyUI (stock nodes, first frame kept); the ComfyUI short film pipeline
-  uses it. Ran live through both clients. Its second shot gets the Element photo as its last-frame keyframe
-  (LTXVAddGuide, frame_idx -1, strength 1.0): the shot ends back on the Element's look and close to its pose. It is not
-  a general look keeper; a brief mid-shot wobble is possible (tested live with 3 seeds).
+- Pipelines in the Library: Product (photo, hero still, video, 3D model) and Character (sheet, Element, two clips that
+  join on the last frame, edit). The full list price shows first, every paid step waits for your click, a failed step
+  stops the run with Run again, and runs survive a reload or restart.
 - Test mode (`AGAVE_FAKE_PROVIDERS=1`): every model is a local fake that makes TEST OUTPUT placeholders, for trying
   the studio without keys.
 - The Edit timeline has a revision: a page holding an older copy can no longer save over newer clips.

@@ -515,7 +515,7 @@ mod tests {
         // A caption image: clear except a red square in the middle.
         gen(&["-f", "lavfi", "-i", "color=c=black@0.0:s=320x240,format=rgba", "-f", "lavfi", "-i", "color=c=red:s=40x40,format=rgba",
             "-filter_complex", "[0:v][1:v]overlay=140:100:format=rgb", "-frames:v", "1", dir.join("red.png").to_str().unwrap()]);
-        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone(), comfy_sdk: None };
+        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone() };
         let plan = Plan {
             clips: vec![Clip::whole("a.mp4")],
             captions: vec![None],
@@ -540,7 +540,6 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
-            guide_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -587,12 +586,11 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
-            guide_url: None,
         }
     }
 
     async fn render(dir: &Path, plan: Plan) -> PathBuf {
-        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.to_path_buf(), comfy_sdk: None };
+        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.to_path_buf() };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &no_req()).await else { panic!("render failed") };
         dir.join(outs[0].url.trim_start_matches("/outputs/"))
     }
@@ -715,7 +713,7 @@ mod tests {
         gen(&["-f", "lavfi", "-i", "testsrc=s=640x360:d=4", "-f", "lavfi", "-i", "sine=d=4", "-shortest", dir.join("a.mp4").to_str().unwrap()]);
         gen(&["-f", "lavfi", "-i", "testsrc=s=400x400", "-frames:v", "1", dir.join("s.png").to_str().unwrap()]);
         gen(&["-f", "lavfi", "-i", "color=c=black@0.0:s=1080x1920,format=rgba", "-frames:v", "1", dir.join("cap.png").to_str().unwrap()]);
-        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone(), comfy_sdk: None };
+        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone() };
         let plan = Plan {
             clips: vec![
                 Clip { name: "a.mp4".into(), still: false, from: 1.0, to: Some(2.5) },
@@ -743,7 +741,6 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
-            guide_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
@@ -768,7 +765,7 @@ mod tests {
         gen(&["-f", "lavfi", "-i", "testsrc=s=360x640:d=1", dir.join("b.mp4").to_str().unwrap()]);
         gen(&["-f", "lavfi", "-i", "color=c=black@0.0:s=640x360,format=rgba", "-frames:v", "1", dir.join("cap.png").to_str().unwrap()]);
         gen(&["-f", "lavfi", "-i", "sine=f=220:d=3", dir.join("song.mp3").to_str().unwrap()]);
-        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone(), comfy_sdk: None };
+        let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone() };
         let plan = Plan {
             clips: vec![Clip::whole("a.mp4"), Clip::whole("b.mp4")],
             captions: vec![Some("cap.png".into()), None],
@@ -793,7 +790,6 @@ mod tests {
             image_urls: Vec::new(),
             voice_id: None,
             label: None,
-            guide_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("assemble failed") };
         let out = dir.join(outs[0].url.trim_start_matches("/outputs/"));
