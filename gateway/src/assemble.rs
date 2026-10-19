@@ -240,7 +240,8 @@ pub(crate) async fn push_in_frame(ctx: &Ctx, start: &str) -> PResult<String> {
     let end = async {
         let (w, h, _, _) = probe_any(&src).await.map_err(|_| failed())?;
         let c = PUSH_IN_CROP;
-        let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos");
+        // Full-chroma JPEG keeps odd sizes exact on every ffmpeg (4:2:0 rounds them to even on some).
+        let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos,format=yuvj444p");
         run(Command::new("ffmpeg")
             .args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", demuxer, "-i"])
             .arg(&src)
