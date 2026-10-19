@@ -221,10 +221,13 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
 /// picture, scaled back to its size (about a 1.5x push).
 const PUSH_IN_CROP: f64 = 0.65;
 
-/// The end picture for Dolly in: the start picture cropped in around its middle, at the start picture's exact size,
-/// as a JPEG data URI. Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced
-/// and files as the only protocol. Errors say what failed without ffmpeg's text, which can name local paths.
-pub(crate) async fn push_in_frame(ctx: &Ctx, start: &str) -> PResult<String> {
+/// The start and end pictures for Dolly in, as JPEG data URIs made from one upright decode of the start picture
+/// (ffmpeg applies a photo's EXIF rotation where it supports it, and both pictures come from that same frame, so
+/// they always match): the start as decoded, and the end cropped to its middle at exactly the same size.
+/// Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced and files as the
+/// only protocol; the size is read from the PNG ffmpeg wrote, never guessed by a prober. Errors say what failed
+/// without ffmpeg's text, which can name local paths.
+pub(crate) async fn push_in_frames(ctx: &Ctx, start: &str) -> PResult<(String, String)> {
     let failed = || ProviderError::Failed("Dolly in could not make its end picture from the start picture".into());
     let (bytes, _) = media::load_image(ctx, start).await?;
     let (ext, demuxer) = match crate::studio::sniff(&bytes) {
@@ -235,26 +238,46 @@ pub(crate) async fn push_in_frame(ctx: &Ctx, start: &str) -> PResult<String> {
     };
     let dir = std::env::temp_dir();
     let tag = media::random_hex(8);
-    let (src, dst) = (dir.join(format!("agave-push-{tag}.{ext}")), dir.join(format!("agave-push-{tag}-end.jpg")));
-    tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
-    let end = async {
-        let (w, h, _, _) = probe_any(&src).await.map_err(|_| failed())?;
+    let file = |name: &str| dir.join(format!("agave-push-{tag}-{name}"));
+    let (src, upright, first, last) = (file(&format!("src.{ext}")), file("upright.png"), file("start.jpg"), file("end.jpg"));
+    let ff = |input: &std::path::Path, format: &str, vf: String, out: &std::path::Path| {
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", format, "-i"])
+            .arg(input)
+            .args(["-vf", &vf, "-frames:v", "1", "-q:v", "2", "-protocol_whitelist", "file"])
+            .arg(out);
+        cmd
+    };
+    let made = async {
+        tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
+        run(&mut ff(&src, demuxer, "format=rgb24".into(), &upright)).await.map_err(|_| failed())?;
+        let png = tokio::fs::read(&upright).await.map_err(|_| failed())?;
+        let (w, h) = png_size(&png).ok_or_else(failed)?;
         let c = PUSH_IN_CROP;
         // Full-chroma JPEG keeps odd sizes exact on every ffmpeg (4:2:0 rounds them to even on some).
+        run(&mut ff(&upright, "png_pipe", "format=yuvj444p".into(), &first)).await.map_err(|_| failed())?;
         let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos,format=yuvj444p");
-        run(Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", demuxer, "-i"])
-            .arg(&src)
-            .args(["-vf", &vf, "-frames:v", "1", "-q:v", "2", "-protocol_whitelist", "file"])
-            .arg(&dst))
-        .await
-        .map_err(|_| failed())?;
-        tokio::fs::read(&dst).await.map_err(|_| failed())
+        run(&mut ff(&upright, "png_pipe", vf, &last)).await.map_err(|_| failed())?;
+        let a = tokio::fs::read(&first).await.map_err(|_| failed())?;
+        let b = tokio::fs::read(&last).await.map_err(|_| failed())?;
+        Ok::<_, ProviderError>((a, b))
     }
     .await;
-    let _ = tokio::fs::remove_file(&src).await;
-    let _ = tokio::fs::remove_file(&dst).await;
-    Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, end?)))
+    for f in [&src, &upright, &first, &last] {
+        let _ = tokio::fs::remove_file(f).await;
+    }
+    let (a, b) = made?;
+    let uri = |b: Vec<u8>| format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b));
+    Ok((uri(a), uri(b)))
+}
+
+/// Width and height from a PNG's IHDR chunk (the file ffmpeg itself wrote).
+fn png_size(b: &[u8]) -> Option<(u32, u32)> {
+    if b.len() < 24 || &b[..8] != b"\x89PNG\r\n\x1a\n" || &b[12..16] != b"IHDR" {
+        return None;
+    }
+    let n = |i: usize| u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+    Some((n(16), n(20))).filter(|&(w, h)| w > 0 && h > 0)
 }
 
 pub(crate) async fn run(cmd: &mut Command) -> PResult<Vec<u8>> {
@@ -541,57 +564,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dolly_in_end_picture_is_the_start_cropped_in() {
+    async fn dolly_in_pictures_come_from_one_upright_frame_and_match_in_size() {
         if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
             return;
         }
         let dir = crate::fsutil::test_dir("assemble_push_in");
-        // A 400x200 picture: blue, with a red 100x50 block in the middle. Cropped in, the red block fills more.
-        let ok = std::process::Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=400x200", "-f", "lavfi", "-i", "color=c=red:s=100x50",
-                "-filter_complex", "[0:v][1:v]overlay=150:75", "-frames:v", "1"])
-            .arg(dir.join("start.png"))
-            .status()
-            .unwrap();
-        assert!(ok.success());
         let ctx = Ctx { http: reqwest::Client::new(), outputs_dir: dir.clone() };
-        let uri = push_in_frame(&ctx, "/outputs/start.png").await.unwrap();
-        let b64 = uri.strip_prefix("data:image/jpeg;base64,").expect("a JPEG data URI");
-        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap();
-        std::fs::write(dir.join("end.jpg"), &bytes).unwrap();
-        let (w, h, _, _) = probe(&dir.join("end.jpg")).await.unwrap();
-        assert_eq!((w, h), (400, 200), "the end picture keeps the start picture's size");
-        // Columns 70 and 330 were blue at the start; after the push they sit inside the red block.
-        let px = |x: u32| {
+        let gen = |args: &[&str], out: &str| {
+            let ok = std::process::Command::new("ffmpeg").args(["-y", "-v", "error"]).args(args).arg(dir.join(out)).status().unwrap();
+            assert!(ok.success());
+        };
+        let decode = |uri: &str, name: &str| {
+            let b64 = uri.strip_prefix("data:image/jpeg;base64,").expect("a JPEG data URI");
+            std::fs::write(dir.join(name), base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap()).unwrap();
+            dir.join(name)
+        };
+        let px = |file: &Path, x: u32, y: u32| {
             let out = std::process::Command::new("ffmpeg")
                 .args(["-v", "error", "-i"])
-                .arg(dir.join("end.jpg"))
-                .args(["-vf", &format!("crop=1:1:{x}:100"), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+                .arg(file)
+                .args(["-vf", &format!("crop=1:1:{x}:{y}"), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
                 .output()
                 .unwrap();
             (out.stdout[0], out.stdout[2])
         };
-        assert!(px(200).0 > 200, "the middle stays red");
-        assert!(px(70).1 > 200 && px(70).0 < 60, "the edge is still blue: a push, not a fill");
-        assert!(px(140).0 > 200, "the red block grew past its old edge at x=150");
-        let missing = push_in_frame(&ctx, "/outputs/nope.png").await;
-        assert!(missing.is_err(), "no start picture, no job");
-        // Odd sizes come back exact (fal refuses an end picture under 300 px).
-        let ok = std::process::Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x320", "-vf", "format=rgb24,crop=301:301", "-frames:v", "1"])
-            .arg(dir.join("odd.png"))
-            .status()
-            .unwrap();
-        assert!(ok.success());
-        let uri = push_in_frame(&ctx, "/outputs/odd.png").await.unwrap();
-        let b64 = uri.strip_prefix("data:image/jpeg;base64,").unwrap();
-        std::fs::write(dir.join("odd-end.jpg"), base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap()).unwrap();
-        let start = probe_any(&dir.join("odd.png")).await.unwrap();
-        let end = probe_any(&dir.join("odd-end.jpg")).await.unwrap();
-        assert_eq!(((start.0, start.1), (end.0, end.1)), ((301, 301), (301, 301)));
+        // A 400x200 picture: blue, with a red 100x50 block in the middle. Cropped in, the red block fills more.
+        gen(&["-f", "lavfi", "-i", "color=c=blue:s=400x200", "-f", "lavfi", "-i", "color=c=red:s=100x50",
+            "-filter_complex", "[0:v][1:v]overlay=150:75", "-frames:v", "1"], "start.png");
+        let (first, last) = push_in_frames(&ctx, "/outputs/start.png").await.unwrap();
+        let (first, last) = (decode(&first, "first.jpg"), decode(&last, "last.jpg"));
+        for f in [&first, &last] {
+            let (w, h, _, _) = probe_any(f).await.unwrap();
+            assert_eq!((w, h), (400, 200), "both pictures keep the start picture's size");
+        }
+        assert!(px(&first, 70, 100).1 > 200 && px(&first, 140, 100).1 > 200, "the start is the start: blue left of the block");
+        assert!(px(&last, 200, 100).0 > 200, "the middle stays red");
+        assert!(px(&last, 70, 100).1 > 200 && px(&last, 70, 100).0 < 60, "the edge is still blue: a push, not a fill");
+        assert!(px(&last, 140, 100).0 > 200, "the red block grew past its old edge at x=150");
+        assert!(push_in_frames(&ctx, "/outputs/nope.png").await.is_err(), "no start picture, no job");
+
+        // Odd sizes come back exact (fal refuses pictures under 300 px).
+        gen(&["-f", "lavfi", "-i", "color=c=gray:s=320x320", "-vf", "format=rgb24,crop=301:301", "-frames:v", "1"], "odd.png");
+        let (_, last) = push_in_frames(&ctx, "/outputs/odd.png").await.unwrap();
+        let (w, h, _, _) = probe_any(&decode(&last, "odd-last.jpg")).await.unwrap();
+        assert_eq!((w, h), (301, 301));
+
+        // A phone photo stored landscape with EXIF "rotate 90" (Orientation 6): however this ffmpeg decodes it, the
+        // start and end pictures come out the same shape, never one stretched into the other.
+        gen(&["-f", "lavfi", "-i", "color=c=green:s=400x300", "-frames:v", "1"], "flat.jpg");
+        let jpg = std::fs::read(dir.join("flat.jpg")).unwrap();
+        let tiff: &[u8] = b"MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00";
+        let mut app1 = b"Exif\x00\x00".to_vec();
+        app1.extend_from_slice(tiff);
+        let len = (app1.len() + 2) as u16;
+        let mut rotated = vec![0xff, 0xd8, 0xff, 0xe1];
+        rotated.extend_from_slice(&len.to_be_bytes());
+        rotated.extend_from_slice(&app1);
+        rotated.extend_from_slice(&jpg[2..]);
+        std::fs::write(dir.join("rotated.jpg"), rotated).unwrap();
+        let (first, last) = push_in_frames(&ctx, "/outputs/rotated.jpg").await.unwrap();
+        let a = probe_any(&decode(&first, "rot-first.jpg")).await.unwrap();
+        let b = probe_any(&decode(&last, "rot-last.jpg")).await.unwrap();
+        assert_eq!((a.0, a.1), (b.0, b.1), "start and end match in shape");
+        assert!([(400, 300), (300, 400)].contains(&(a.0, a.1)), "{a:?}");
+
         // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
-        let err = push_in_frame(&ctx, "/outputs/list.png").await.unwrap_err();
+        let err = push_in_frames(&ctx, "/outputs/list.png").await.unwrap_err();
         assert!(format!("{err:?}").contains("PNG, JPEG or WebP"), "{err:?}");
     }
 

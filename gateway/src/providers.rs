@@ -288,8 +288,10 @@ impl Provider for Fal {
     async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
         let mut r = req.clone();
         if r.push_in {
-            if let Some(start) = &r.image_url {
-                r.end_image_url = Some(crate::assemble::push_in_frame(ctx, start).await?);
+            if let Some(start) = r.image_url.clone() {
+                let (first, last) = crate::assemble::push_in_frames(ctx, &start).await?;
+                r.image_url = Some(first);
+                r.end_image_url = Some(last);
             }
         }
         // fal cannot read our local /outputs paths, so inline them.

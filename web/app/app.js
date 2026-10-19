@@ -897,7 +897,7 @@
       // Swap only if that picture is still the start picture; otherwise the edit stays in the gallery.
       const own = ownRefs();
       if (own[0] !== pic || effectiveMode() !== 'i2v') {
-        setStatus(`${lookName(style)} is on a copy of the earlier picture, in the gallery. Your new picture is unchanged.`);
+        setStatus(`${lookName(style)} is on a copy of the picture, in the gallery. The composer changed meanwhile, so nothing was swapped.`);
         return;
       }
       if (els.ref.value.trim() === pic) els.ref.value = '';
