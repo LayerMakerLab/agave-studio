@@ -45,7 +45,7 @@ it. Nothing on the page comes from anywhere else.
 
 | File | Made with | Source | Where |
 |---|---|---|---|
-| img/tile-169.webp, tile-11.webp, tile-916.webp | Seedream 4 (small copies of the pool, ramen bowl and tailor stills) | Agave, 2026-10-19 | Image tile |
+| img/tile-169.webp, tile-11.webp, tile-916.webp | Seedream 4 (small copies of the pool, hummingbird and tailor stills) | Agave, 2026-10-19 | Image tile |
 | video/card-camera.mp4 | Kling 3.0 from a Meshy still | ef15fed | Video tile |
 
 ## Pipelines and "Why it is free"
