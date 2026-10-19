@@ -578,7 +578,7 @@ mod tests {
         assert!(missing.is_err(), "no start picture, no job");
         // Odd sizes come back exact (fal refuses an end picture under 300 px).
         let ok = std::process::Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=301x301", "-frames:v", "1"])
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x320", "-vf", "format=rgb24,crop=301:301", "-frames:v", "1"])
             .arg(dir.join("odd.png"))
             .status()
             .unwrap();
@@ -586,7 +586,9 @@ mod tests {
         let uri = push_in_frame(&ctx, "/outputs/odd.png").await.unwrap();
         let b64 = uri.strip_prefix("data:image/jpeg;base64,").unwrap();
         std::fs::write(dir.join("odd-end.jpg"), base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap()).unwrap();
-        assert_eq!(probe_any(&dir.join("odd-end.jpg")).await.unwrap().0, 301);
+        let start = probe_any(&dir.join("odd.png")).await.unwrap();
+        let end = probe_any(&dir.join("odd-end.jpg")).await.unwrap();
+        assert_eq!(((start.0, start.1), (end.0, end.1)), ((301, 301), (301, 301)));
         // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
         let err = push_in_frame(&ctx, "/outputs/list.png").await.unwrap_err();
