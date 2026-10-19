@@ -105,26 +105,15 @@
     clips.forEach((v) => { near.observe(v); seen.observe(v); });
   }
 
-  /* ---------- Reel: filter, and the fold that "See all" opens ---------- */
-  const filters = $$("#gallery .filters button"), items = $$("#masonry .m"), masonry = $("#masonry");
+  /* ---------- Reel: the fold that "See all" opens ---------- */
   const wrap = $("#reelWrap"), seeAll = $("#seeAll");
-  const setOpen = (open) => { wrap.classList.toggle("open", open); seeAll.setAttribute("aria-expanded", String(open)); seeAll.textContent = open ? "Show less" : "See all"; };
   seeAll.addEventListener("click", () => {
     const open = !wrap.classList.contains("open");
-    setOpen(open);
+    wrap.classList.toggle("open", open);
+    seeAll.setAttribute("aria-expanded", String(open));
+    seeAll.textContent = open ? "Show less" : "See all";
     if (!open) $("#gallery").scrollIntoView({ block: "start" });
   });
-  filters.forEach((b) => b.addEventListener("click", () => {
-    const k = b.dataset.show;
-    filters.forEach((x) => { const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
-    masonry.classList.toggle("filtered", k !== "all");
-    if (k !== "all") setOpen(true);
-    items.forEach((m) => {
-      const hide = k !== "all" && !m.classList.contains(k);
-      m.hidden = hide;
-      if (hide) { const v = $("video", m); if (v) v.pause(); }
-    });
-  }));
 
   /* ---------- Pipelines: one lane at a time ---------- */
   const laneTabs = $$("#pipelines [data-lane]");
