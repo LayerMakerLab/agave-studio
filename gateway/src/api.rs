@@ -365,7 +365,9 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         }
     }
 
+    // A look keeps the picture's own frame: no aspect, so the edit model sizes it from the picture.
     let aspect = match choose(req.aspect.as_ref(), &model.params.aspect, "aspect") {
+        _ if req.recipe.as_deref() == Some("look") => None,
         Ok(v) => v,
         Err(code) => return Err(fail(StatusCode::BAD_REQUEST, &code)),
     };

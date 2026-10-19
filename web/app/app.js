@@ -82,6 +82,7 @@
     undoAfter: '', // timeline right after it
     song: null, // { url, name } replacement soundtrack
     retried: new Set(), // failed job ids already run again this session
+    audioPicked: false, // Audio on/off picked by you (else each model's default)
     lookOk: new Set(), // "picture|look" pairs that animate as they are (the look is on the picture, or you said so)
     editRev: null, // revision of the engine's saved timeline the local copy is based on
     editBase: new Set(), // clip urls of that saved timeline
@@ -368,7 +369,8 @@
       // The first listed value is the model's default; lengths are shown in order.
       const shown = c.key === 'duration' ? [...values].sort((a, b) => a - b) : values;
       shown.forEach((v) => sel.append(opt(String(v), c.label(v))));
-      const cur = state.chips[c.key];
+      // Audio follows each model's own default until you pick it yourself (prices differ by model).
+      const cur = c.key === 'audio' && !state.audioPicked ? undefined : state.chips[c.key];
       const pick = values.find((v) => String(v) === String(cur)) ?? values[0];
       sel.value = String(pick);
       state.chips[c.key] = c.parse(sel.value);
@@ -491,6 +493,7 @@
   }
 
   function setMode(id) {
+    els.lookAsk.hidden = true;
     if (!MODES[id]) return;
     state.mode = id;
     const md = MODES[id];
@@ -830,7 +833,6 @@
     }
   }
 
-  // Sends one generate request and reports the outcome in the status line. True when queued.
   // ---------- looks on image to video ----------
   // The start picture fixes a video's look, so look words alone barely show. Agave offers to put the look on the
   // picture first with an image edit (its list price on the button, sent only on the click), then you animate it.
@@ -861,32 +863,14 @@
     setStatus('');
   }
 
-  // The aspect from the edit model's list closest to the picture's own shape (null if it lists none).
-  function pictureAspect(url, list) {
-    return new Promise((resolve) => {
-      if (!list || !list.length) return resolve(null);
-      const img = new Image();
-      img.onload = () => {
-        const want = Math.log(img.naturalWidth / img.naturalHeight);
-        const diff = (a) => {
-          const [w, h] = String(a).split(':').map(Number);
-          return w > 0 && h > 0 ? Math.abs(Math.log(w / h) - want) : Infinity;
-        };
-        resolve(img.naturalWidth && img.naturalHeight ? String(list.reduce((x, y) => (diff(y) < diff(x) ? y : x))) : null);
-      };
-      img.onerror = () => resolve(null);
-      img.src = url;
-    });
-  }
-
   async function applyLook(pic, style, m) {
     els.lookAsk.hidden = true;
     state.busy = true;
     els.generate.disabled = true;
     setStatus(`Putting ${lookName(style)} on the picture with ${m.name}...`);
     try {
-      const aspect = await pictureAspect(pic, m.params && m.params.aspect);
-      const r = await call('/api/generate', { method: 'POST', body: { model: m.id, mode: 'i2i', recipe: 'look', prompt: '', style, image_url: pic, aspect } });
+      // No aspect: the engine keeps the picture's own frame for a look.
+      const r = await call('/api/generate', { method: 'POST', body: { model: m.id, mode: 'i2i', recipe: 'look', prompt: '', style, image_url: pic } });
       if (!(r.status === 202 && r.data && r.data.job)) {
         const err = r.data && r.data.error;
         if (r.status === 412 && err === 'missing_key') {
@@ -910,6 +894,12 @@
         setStatus('The look edit did not finish, so the picture is unchanged. Its card says why.', 'err');
         return;
       }
+      // Swap only if that picture is still the start picture; otherwise the edit stays in the gallery.
+      const own = ownRefs();
+      if (own[0] !== pic || effectiveMode() !== 'i2v') {
+        setStatus(`${lookName(style)} is on a copy of the earlier picture, in the gallery. Your new picture is unchanged.`);
+        return;
+      }
       if (els.ref.value.trim() === pic) els.ref.value = '';
       state.refs = [out, ...state.refs.filter((u) => u !== pic)];
       renderTray();
@@ -926,6 +916,7 @@
     }
   }
 
+  // Sends one generate request and reports the outcome in the status line. True when queued.
   async function sendGenerate(body, label = '') {
     try {
       const r = await call('/api/generate', { method: 'POST', body });
@@ -1040,6 +1031,7 @@
   }
 
   function renderTray() {
+    els.lookAsk.hidden = true;
     els.tray.textContent = '';
     els.tray.hidden = !state.refs.length || !!currentMode().noRefField;
     state.refs.forEach((u, i) => {
@@ -3557,6 +3549,7 @@
     els.prompt.addEventListener('input', syncRefMode);
     els.countSel.addEventListener('change', renderCost);
     els.style.addEventListener('change', () => { els.lookAsk.hidden = true; });
+    els.ref.addEventListener('input', () => { els.lookAsk.hidden = true; });
     els.recipe.addEventListener('change', () => {
       if (els.recipe.value && els.recipe.value !== 'sheet' && !refActive()) setStatus('This recipe works from a reference image: add one.', 'warn');
     });
@@ -3599,6 +3592,7 @@
     els.ref.addEventListener('input', syncRefMode);
     els.model.addEventListener('change', () => {
       state.libModel = null;
+      els.lookAsk.hidden = true;
       renderChips();
       renderCost();
       writeHash();
@@ -3612,6 +3606,7 @@
     for (const c of CHIPS) {
       $('#' + c.key).addEventListener('change', (e) => {
         state.chips[c.key] = c.parse(e.target.value);
+        if (c.key === 'audio') state.audioPicked = true;
         renderCost();
       });
     }

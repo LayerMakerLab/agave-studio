@@ -9,8 +9,10 @@ Never return a key value from any endpoint. Never log a key.
 - GET  /api/models -> {"models":[Model]}
   Model = {"id":"fal/kling-v2.1-master-t2v","name":"Kling 2.1 Master","vendor":"Kuaishou","provider":"fal",
            "modality":"video"|"image"|"audio"|"3d","modes":["t2v","i2v","t2i","i2i","tts","i23d"],
-           "params":{"aspect":["16:9","9:16","1:1"],"duration":[5,10],"resolution":["720p","1080p"]},
-           "key":"FAL_KEY","ready":true|false}
+           "params":{"aspect":["16:9","9:16","1:1"],"duration":[5,10],"resolution":["720p","1080p"],"audio":[true,false]},
+           "key":"FAL_KEY","ready":true|false,"max_refs":0,"max_elements":0,
+           "price":{"per":"second","usd":0.168,"by_resolution":{},"by_audio":{"on":0.168,"off":0.112}}|null}
+  The first value of each params list is the model's default.
 - GET  /api/presets -> {"camera":[{"id":"dolly_in","name":"Dolly in","group":"push"}], "styles":[{"id":"film_35","name":"35mm film"}]}
 - GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://..."}]}
 - POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot)
@@ -45,8 +47,9 @@ Never return a key value from any endpoint. Never log a key.
   i2v). Models with `max_elements` (Kling 3.0 image to video) take a start picture and @tagged Elements side by side:
   each Element with pictures becomes @Element1, @Element2... in the words and goes to fal as `elements` (400
   {"error":"too_many_element_tags","max","got"} past the limit). Models with `end_frame` (Kling 3.0 image to video)
-  get Dolly in as an end picture: the start picture cropped to its middle 65%, because Kling ignores the words alone. The project style prefix is put in front of image and video prompts. The job keeps its request as
-  Job.request (when 16 KB or less) for "Run again".
+  get Dolly in as an end picture: the start picture cropped to its middle 65%, because Kling ignores the words alone.
+  A "look" recipe keeps the picture's own frame (no aspect is sent). The project style prefix is put in front of image
+  and video prompts. The job keeps its request as Job.request (when 16 KB or less) for "Run again".
 - POST /api/assemble (Agave Edit render) {"clips":[clip,...],"captions":[null|"/outputs/cap.png",...],
   "audio":null|"/outputs/song.mp3","keep_clip_audio":true,"frame":null|"16:9"|"9:16"|"1:1"|"4:5","fill":false}
   -> 202 {"job":Job} (model "agave/editor"). A clip is a bare "/outputs/x.mp4" (whole clip) or

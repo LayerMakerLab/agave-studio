@@ -221,29 +221,39 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
 /// picture, scaled back to its size (about a 1.5x push).
 const PUSH_IN_CROP: f64 = 0.65;
 
-/// The end picture for Dolly in: the start picture cropped in around its middle, as a JPEG data URI.
+/// The end picture for Dolly in: the start picture cropped in around its middle, at the start picture's exact size,
+/// as a JPEG data URI. Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced
+/// and files as the only protocol. Errors say what failed without ffmpeg's text, which can name local paths.
 pub(crate) async fn push_in_frame(ctx: &Ctx, start: &str) -> PResult<String> {
-    let (bytes, mime) = media::load_image(ctx, start).await?;
-    let ext = match mime.as_str() {
-        "image/png" => "png",
-        "image/webp" => "webp",
-        _ => "jpg",
+    let failed = || ProviderError::Failed("Dolly in could not make its end picture from the start picture".into());
+    let (bytes, _) = media::load_image(ctx, start).await?;
+    let (ext, demuxer) = match crate::studio::sniff(&bytes) {
+        Some(("png", _)) => ("png", "png_pipe"),
+        Some(("jpg", _)) => ("jpg", "jpeg_pipe"),
+        Some(("webp", _)) => ("webp", "webp_pipe"),
+        _ => return Err(ProviderError::Failed("Dolly in needs a PNG, JPEG or WebP start picture".into())),
     };
     let dir = std::env::temp_dir();
     let tag = media::random_hex(8);
     let (src, dst) = (dir.join(format!("agave-push-{tag}.{ext}")), dir.join(format!("agave-push-{tag}-end.jpg")));
-    tokio::fs::write(&src, &bytes).await.map_err(|e| ProviderError::Failed(format!("could not stage the start picture: {e}")))?;
-    let c = PUSH_IN_CROP;
-    let vf = format!("crop=trunc(iw*{c}/2)*2:trunc(ih*{c}/2)*2,scale=trunc(iw/{c}/2)*2:trunc(ih/{c}/2)*2:flags=lanczos");
-    let made = run(Command::new("ffmpeg").args(["-y", "-v", "error", "-i"]).arg(&src).args(["-vf", &vf, "-frames:v", "1", "-q:v", "2"]).arg(&dst)).await;
-    let end = match made {
-        Ok(_) => tokio::fs::read(&dst).await.map_err(|e| ProviderError::Failed(format!("could not read the end picture: {e}"))),
-        Err(e) => Err(e),
-    };
+    tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
+    let end = async {
+        let (w, h, _, _) = probe_any(&src).await.map_err(|_| failed())?;
+        let c = PUSH_IN_CROP;
+        let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos");
+        run(Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", demuxer, "-i"])
+            .arg(&src)
+            .args(["-vf", &vf, "-frames:v", "1", "-q:v", "2", "-protocol_whitelist", "file"])
+            .arg(&dst))
+        .await
+        .map_err(|_| failed())?;
+        tokio::fs::read(&dst).await.map_err(|_| failed())
+    }
+    .await;
     let _ = tokio::fs::remove_file(&src).await;
     let _ = tokio::fs::remove_file(&dst).await;
-    let end = end?;
-    Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, end)))
+    Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, end?)))
 }
 
 pub(crate) async fn run(cmd: &mut Command) -> PResult<Vec<u8>> {
@@ -529,7 +539,6 @@ mod tests {
         assert_eq!(concat_path(Path::new("/srv/o'brien/a.mp4")), "'/srv/o'\\''brien/a.mp4'");
     }
 
-    /// Needs ffmpeg on PATH; skipped quietly when missing. A red caption shows only in its window.
     #[tokio::test]
     async fn dolly_in_end_picture_is_the_start_cropped_in() {
         if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
@@ -566,8 +575,24 @@ mod tests {
         assert!(px(140).0 > 200, "the red block grew past its old edge at x=150");
         let missing = push_in_frame(&ctx, "/outputs/nope.png").await;
         assert!(missing.is_err(), "no start picture, no job");
+        // Odd sizes come back exact (fal refuses an end picture under 300 px).
+        let ok = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=301x301", "-frames:v", "1"])
+            .arg(dir.join("odd.png"))
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        let uri = push_in_frame(&ctx, "/outputs/odd.png").await.unwrap();
+        let b64 = uri.strip_prefix("data:image/jpeg;base64,").unwrap();
+        std::fs::write(dir.join("odd-end.jpg"), base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).unwrap()).unwrap();
+        assert_eq!(probe_any(&dir.join("odd-end.jpg")).await.unwrap().0, 301);
+        // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
+        std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
+        let err = push_in_frame(&ctx, "/outputs/list.png").await.unwrap_err();
+        assert!(format!("{err:?}").contains("PNG, JPEG or WebP"), "{err:?}");
     }
 
+    /// Needs ffmpeg on PATH; skipped quietly when missing. A red caption shows only in its window.
     #[tokio::test]
     async fn timed_captions_show_only_in_their_window() {
         if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {

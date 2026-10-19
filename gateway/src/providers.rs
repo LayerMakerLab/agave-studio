@@ -192,9 +192,11 @@ fn fal_input(r: &SubmitReq) -> Value {
     let aspect = r.aspect.as_deref().unwrap_or("16:9");
     // FLUX and Seedream 4 take a named image_size instead of aspect_ratio (fal API schemas, 2026-10-11).
     let mut body = if r.endpoint.starts_with("fal-ai/flux/") || r.endpoint.starts_with("fal-ai/bytedance/seedream/") {
+        // No aspect on an edit (a look): Seedream Edit sizes the result from the picture ("auto", fal schema 2026-10-19).
         let size = match aspect {
             "9:16" => "portrait_16_9",
             "1:1" => "square_hd",
+            _ if r.aspect.is_none() && r.endpoint.ends_with("/edit") => "auto",
             _ => "landscape_16_9",
         };
         let mut b = json!({"prompt": r.prompt, "image_size": size});
@@ -973,6 +975,17 @@ mod tests {
         assert_eq!(b["elements"][0], json!({"frontal_image_url": "https://x.test/mia.png", "reference_image_urls": ["https://x.test/mia.png"]}));
         assert_eq!(b["elements"][1]["frontal_image_url"], "https://x.test/mug1.png");
         assert_eq!(b["elements"][1]["reference_image_urls"], json!(["https://x.test/mug2.png", "https://x.test/mug3.png", "https://x.test/mug4.png"]));
+    }
+
+    #[test]
+    fn an_edit_without_an_aspect_keeps_the_pictures_frame() {
+        let mut r = req("fal-ai/bytedance/seedream/v4/edit", "16:9");
+        assert_eq!(fal_input(&r)["image_size"], "landscape_16_9");
+        r.aspect = None;
+        assert_eq!(fal_input(&r)["image_size"], "auto");
+        let mut r = req("fal-ai/nano-banana/edit", "16:9");
+        r.aspect = None;
+        assert!(fal_input(&r).get("aspect_ratio").is_none(), "Nano Banana Edit's own default is auto");
     }
 
     #[test]
