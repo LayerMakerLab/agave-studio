@@ -953,6 +953,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
         outputs: Vec::new(),
         error: None,
         created_at: now_unix(),
+        finished_at: None,
         request: Some(request).filter(|v| v.to_string().len() <= MAX_SAVED_REQUEST_BYTES),
     };
     let aspect = input.get("aspect_ratio").and_then(Value::as_str).filter(|a| matches!(*a, "16:9" | "9:16" | "1:1")).map(str::to_string);

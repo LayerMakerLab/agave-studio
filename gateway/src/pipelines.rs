@@ -678,6 +678,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         outputs: Vec::new(),
         error: None,
         created_at: now_unix(),
+        finished_at: None,
         request: None,
     };
     let adapter: Arc<dyn crate::providers::Provider> = Arc::new(LastFrame { clip });

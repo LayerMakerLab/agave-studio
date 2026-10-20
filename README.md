@@ -34,7 +34,8 @@ show their credit cost). Keys are stored only on your computer, and the app has 
   to -14 LUFS.
 - **Playground:** fal's models that make pictures, video, audio or 3D, each with its own controls built from fal's own
   description of the model. It opens with a working example, shows fal's price before you press Run, and keeps every
-  run with Tweak, Get code and Download. Open it from the studio's rail or at `/app/playground.html`.
+  run with Tweak, Get code and Download. Compare sends one prompt to up to four models side by side, with each one's
+  price before and its result and time after. Open it from the studio's rail or at `/app/playground.html`.
 
 ## Run it
 

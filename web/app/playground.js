@@ -191,6 +191,7 @@
     S.keySet = true;
     $('#pgKey').hidden = true;
     loadPrice();
+    if (C.started) C.ids.forEach((id) => { C.pstate.delete(id); cmpPrice(id); });
   });
 
   // ------------------------------------------------------------ model and form
@@ -275,7 +276,7 @@
     S.priceState = 'none';
     initialValues(spec, preset);
     store.set('pg.model', spec.id);
-    history.replaceState(null, '', `#m=${encodeURIComponent(spec.id)}`);
+    if (S.mode !== 'compare') history.replaceState(null, '', `#m=${encodeURIComponent(spec.id)}`);
     renderModelHead();
     renderForm();
     if (S.tab === 'json') showJson();
@@ -605,24 +606,33 @@
   }
 
   function mediaControl(f, id, many) {
-    const kind = f.media || 'file';
+    return mediaPicker({
+      id, many, kind: f.media || 'file', label: f.title, max: many ? Math.min(f.max_len || 16, 16) : 1,
+      get: () => (S.touched.has(f.name) ? S.values[f.name] : null),
+      set: (v) => setValue(f.name, v),
+      error: (msg) => showFieldError(f.name, msg),
+    });
+  }
+
+  /** Files for one value: upload, drop or paste a link. `get`/`set` hold the value (a URL, or a list of them). */
+  function mediaPicker({ id, many, kind, label, max, get, set, error }) {
     const wrap = el('div', { class: 'pg-media', id, tabindex: '-1', 'aria-describedby': `${id}_h ${id}_e` });
+    const touched = () => markTouched(wrap.closest('.pg-field'));
     const list = () => {
-      const v = S.touched.has(f.name) ? S.values[f.name] : null;
+      const v = get();
       if (many) return Array.isArray(v) ? v.slice() : [];
       return v ? [v] : [];
     };
-    const save = (items) => setValue(f.name, many ? items : (items[0] || null));
+    const save = (items) => set(many ? items : (items[0] || null));
     const draw = () => {
       wrap.textContent = '';
       const items = list();
       const tiles = el('div', { class: 'pg-tiles' });
       items.forEach((u, i) => {
         const rm = el('button', { type: 'button', class: 'pg-tile-x', 'aria-label': 'Remove this file' }, [icon('close')]);
-        rm.addEventListener('click', () => { const next = list(); next.splice(i, 1); save(next); markTouched(wrap.closest('.pg-field')); draw(); });
+        rm.addEventListener('click', () => { const next = list(); next.splice(i, 1); save(next); touched(); draw(); });
         tiles.append(el('div', { class: 'pg-tile' }, [preview(u, kind), rm]));
       });
-      const max = many ? Math.min(f.max_len || 16, 16) : 1;
       if (items.length < max) {
         const file = el('input', { type: 'file', accept: ACCEPT[kind] || ACCEPT.file, multiple: many, class: 'sr', tabindex: '-1', 'aria-hidden': 'true' });
         const drop = el('button', { type: 'button', class: 'pg-drop' }, [
@@ -637,11 +647,11 @@
             drop.querySelector('span').textContent = 'Uploading…';
             const r = await uploadFile(fl, kind);
             drop.disabled = false;
-            if (r.error) { showFieldError(f.name, r.error); draw(); return; }
+            if (r.error) { error(r.error); draw(); return; }
             next.push(r.url);
           }
           save(next);
-          markTouched(wrap.closest('.pg-field'));
+          touched();
           draw();
         };
         drop.addEventListener('click', () => file.click());
@@ -650,15 +660,15 @@
         drop.addEventListener('dragleave', () => drop.classList.remove('over'));
         drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) take(e.dataTransfer.files); });
         tiles.append(drop, file);
-        const link = el('input', { type: 'url', class: 'pg-link', placeholder: 'or paste a link: https://…', 'aria-label': `${f.title}: paste a link`, spellcheck: 'false' });
+        const link = el('input', { type: 'url', class: 'pg-link', placeholder: 'or paste a link: https://…', 'aria-label': `${label}: paste a link`, spellcheck: 'false' });
         const addLink = () => {
           const u = link.value.trim();
           if (!u) return;
-          if (!/^https:\/\/[^\s]+$/i.test(u)) { showFieldError(f.name, 'Links must start with https://.'); return; }
+          if (!/^https:\/\/[^\s]+$/i.test(u)) { error('Links must start with https://.'); return; }
           const next = list();
           next.push(u);
           save(next);
-          markTouched(wrap.closest('.pg-field'));
+          touched();
           draw();
         };
         link.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addLink(); } });
@@ -793,12 +803,16 @@
 
   /** Units times fal's list price, where the settings say how many units a run is. */
   function estimate() {
-    const p = S.price;
+    return S.spec ? estimateFor(S.spec, S.price, fieldValue) : null;
+  }
+
+  /** The same for any model: `p` is its price, `fieldValue(name)` what a run would use for that field. */
+  function estimateFor(spec, p, fieldValue) {
     if (!p || !num(p.unit_price)) return null;
     const unit = String(p.unit || '').toLowerCase().trim();
     const u = unit.replace(/s$/, '');
     const count = Number(fieldValue('num_images')) || 1;
-    const sure = !S.spec.fields.some((f) => RATE_OPTIONS.includes(f.name));
+    const sure = !spec.fields.some((f) => RATE_OPTIONS.includes(f.name));
     if (u === 'image') return { total: p.unit_price * count, exact: sure, how: `${count} image${count === 1 ? '' : 's'}` };
     if (u === 'second') {
       const d = parseFloat(String(fieldValue('duration') ?? '').replace(/s$/, ''));
@@ -911,6 +925,7 @@
         $('#pgRunNote').textContent = "fal's price is still loading. Press Run again in a moment.";
         return;
       }
+      $('#pgConfirmTitle').textContent = 'Check the price first';
       const box = $('#pgConfirmText');
       box.textContent = '';
       box.append(...confirmText(priceSummary()));
@@ -925,6 +940,13 @@
     const pending = S.pendingRun;
     S.pendingRun = null;
     $('#pgConfirm').close();
+    if (pending && pending.compare) {
+      // The prices shown were for these models; if the list changed since, nothing is sent.
+      if (S.mode !== 'compare' || C.sending || pending.ids.join('\n') !== C.ids.join('\n')) return;
+      pending.ids.forEach((id) => S.confirmed.add(id));
+      await cmpSend(pending.ids, pending.inputs);
+      return;
+    }
     // The price shown was for this model; if another one has loaded since, nothing is sent.
     if (!pending || !S.spec || S.spec.id !== pending.id) return;
     S.confirmed.add(pending.id);
@@ -987,6 +1009,7 @@
     renderHistory();
     if (S.shown && S.shown.id === job.id) { S.shown = job; renderCanvas(); }
     if (S.spec) renderPrice();
+    if (S.mode === 'compare') renderCompare();
   }
 
   /** Follows one run until it ends: one request at a time, so an old reply can never land after a newer one. */
@@ -1142,6 +1165,7 @@
     if (!r.ok || !r.data) return;
     S.jobs = (r.data.jobs || []).filter((j) => typeof j.model === 'string' && j.model.startsWith('fal:'));
     renderHistory();
+    if (S.mode === 'compare') renderCompare();
     S.jobs.filter(isActive).forEach((j) => follow(j.id));
   }
 
@@ -1290,6 +1314,7 @@
     const d = $('#pgPicker');
     if (d.open) return;
     $('#pgSearch').placeholder = S.test ? 'Search the seven test models: kling, voice, 3d…' : 'Search fal\'s models: kling, upscale, voice, logo…';
+    $('#pgPickerTitle').textContent = S.mode === 'compare' ? 'Add a model to compare' : 'Choose a model';
     d.showModal();
     $('#pgSearch').focus();
     if (!$('#pgList').children.length) searchModels(true);
@@ -1318,7 +1343,11 @@
         el('span', { class: 'pg-card-id' }, [m.id]),
       ]),
     ]);
-    b.addEventListener('click', () => { $('#pgPicker').close(); if (!S.spec || S.spec.id !== m.id) loadModel(m.id); });
+    b.addEventListener('click', () => {
+      $('#pgPicker').close();
+      if (S.mode === 'compare') cmpAdd(m.id);
+      else if (!S.spec || S.spec.id !== m.id) loadModel(m.id);
+    });
     return el('div', { role: 'listitem' }, [b]);
   }
 
@@ -1395,13 +1424,439 @@
   });
   $('#pgConfirm').addEventListener('close', () => { S.pendingRun = null; });
 
+  // ------------------------------------------------------------ compare
+
+  /* Compare: one prompt (and one picture, for models that need one) sent to up to four models side by side, with each
+     model's price before Run and its result, time and price after. Every other setting is the model's own default or
+     fal's example, as when a model opens on its own; Open takes a column to its own page to change them. */
+  const MAX_CMP = 4;
+  const C = {
+    ids: [], specs: new Map(), prices: new Map(), pstate: new Map(), errs: new Map(),
+    jobs: new Map(), // model id -> the job of its last Run all
+    notes: new Map(), // model id -> why its run did not start
+    sent: new Map(), // model id -> the price line at the moment it was sent
+    image: null, sending: false, tick: null, cols: new Map(), started: false, addWrap: null,
+  };
+  S.mode = 'one';
+
+  const wordsField = (spec) => spec.fields.find((f) => f.name === 'prompt') || spec.fields.find((f) => f.name === 'text');
+  const imageField = (spec) => spec.fields.find((f) => f.required && (f.kind === 'media' || f.kind === 'medialist') && (f.media === 'image' || f.media === 'file'));
+  const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const cmpNote = (msg) => { $('#pgCmpNote').textContent = msg || ''; };
+  const cmpJob = (id) => { const jid = C.jobs.get(id); return jid ? S.jobs.find((j) => j.id === jid) || null : null; };
+
+  /** What Run all sends to one model: fal's example for what it needs, the shared words and picture over that. */
+  function cmpInput(spec) {
+    const input = {};
+    for (const f of spec.fields) {
+      const wanted = f.required || f.name === 'prompt' || f.name === 'text';
+      if (wanted && !has(f.default) && has(f.example) && f.kind !== 'json') input[f.name] = f.example;
+    }
+    const text = $('#pgCmpPrompt').value.trim();
+    const w = wordsField(spec);
+    if (w && text) input[w.name] = text;
+    const img = imageField(spec);
+    if (img && C.image) input[img.name] = img.kind === 'medialist' ? [C.image] : C.image;
+    return input;
+  }
+
+  function cmpEstimate(spec, input) {
+    return estimateFor(spec, C.prices.get(spec.id), (name) => {
+      if (name in input) return input[name];
+      const f = spec.fields.find((x) => x.name === name);
+      return f ? fieldDefault(f) : undefined;
+    });
+  }
+
+  /** One model's price for these settings: the line in its column and what it adds to the total. */
+  function cmpPriceOf(spec, input) {
+    const st = C.pstate.get(spec.id);
+    const p = C.prices.get(spec.id);
+    const est = cmpEstimate(spec, input);
+    if (st === 'loading') return { text: 'Asking fal for the price…', total: null, known: false };
+    if (est) return { text: `${est.exact ? '' : 'about '}${money(est.total)} · ${est.how}`, total: est.total, about: !est.exact, known: true };
+    if (p && num(p.average)) return { text: `about ${money(p.average)} · fal's average run`, total: p.average, about: true, known: true };
+    if (p && num(p.unit_price)) return { text: `${money(p.unit_price)} per ${perUnit(p.unit)}`, total: null, known: false };
+    if (st === 'nokey') return { text: 'Add your fal key to see the price.', total: null, known: false };
+    return { text: 'fal gave no price for this model.', total: null, known: false };
+  }
+
+  async function cmpLoad(id) {
+    if (!C.specs.has(id)) {
+      const r = await call(`/api/fal/model?id=${encodeURIComponent(id)}`);
+      if (!C.ids.includes(id)) return;
+      if (!r.ok || !r.data || !r.data.model) {
+        C.errs.set(id, say(r.data && r.data.error));
+        renderCompare();
+        return;
+      }
+      C.specs.set(id, r.data.model);
+    }
+    renderCompare();
+    cmpPrice(id);
+  }
+
+  async function cmpPrice(id) {
+    if (!S.test && !S.keySet) { C.pstate.set(id, 'nokey'); renderCompare(); return; }
+    if (['ok', 'loading'].includes(C.pstate.get(id))) return;
+    C.pstate.set(id, 'loading');
+    renderCompare();
+    const r = await call(`/api/fal/price?id=${encodeURIComponent(id)}`);
+    if (r.ok && r.data && r.data.price) { C.prices.set(id, r.data.price); C.pstate.set(id, 'ok'); } else { C.prices.delete(id); C.pstate.set(id, 'none'); }
+    if ($('#pgCmpNote').textContent.startsWith("fal's prices are still loading") && !C.ids.some((x) => C.pstate.get(x) === 'loading')) cmpNote('');
+    renderCompare();
+  }
+
+  /** This browser keeps the models, the words and the last results, so a reload finds Compare as it was. */
+  function cmpSave() {
+    store.set('pg.cmp', JSON.stringify(C.ids));
+    const runs = {};
+    for (const id of C.ids) if (C.jobs.has(id)) runs[id] = { job: C.jobs.get(id), sent: C.sent.get(id) || null };
+    store.set('pg.cmp.runs', JSON.stringify(runs));
+  }
+
+  function cmpAdd(id) {
+    if (C.ids.includes(id)) { cmpNote('That model is already here.'); return; }
+    if (C.ids.length >= MAX_CMP) { cmpNote('Compare takes up to four models. Remove one first.'); return; }
+    C.ids.push(id);
+    cmpSave();
+    cmpNote('');
+    renderCompare();
+    cmpLoad(id);
+  }
+
+  function cmpRemove(id) {
+    C.ids = C.ids.filter((x) => x !== id);
+    for (const m of [C.jobs, C.notes, C.sent, C.errs]) m.delete(id);
+    const col = C.cols.get(id);
+    if (col) col.node.remove();
+    C.cols.delete(id);
+    cmpSave();
+    renderCompare();
+    const next = $('#pgCmpCols .pg-cmp-x') || $('#pgCmpCols .pg-cmp-add');
+    if (next) next.focus();
+  }
+
+  /** The first time Compare opens: the models from last time, else the one on screen. */
+  function cmpStart() {
+    if (!C.started) {
+      C.started = true;
+      let saved = [];
+      try { saved = JSON.parse(store.get('pg.cmp') || '[]'); } catch (_) { saved = []; }
+      C.ids = (Array.isArray(saved) ? saved : []).filter((x) => typeof x === 'string' && x.length < 200).slice(0, MAX_CMP);
+      if (!C.ids.length && S.spec) C.ids = [S.spec.id];
+      let runs = {};
+      try { runs = JSON.parse(store.get('pg.cmp.runs') || '{}') || {}; } catch (_) { runs = {}; }
+      for (const id of C.ids) {
+        const r = runs[id];
+        if (r && typeof r.job === 'string') { C.jobs.set(id, r.job); if (typeof r.sent === 'string') C.sent.set(id, r.sent); }
+      }
+      const words = store.get('pg.cmp.prompt');
+      if (words) $('#pgCmpPrompt').value = words.slice(0, 20000);
+      const pick = mediaPicker({
+        id: 'pgCmpImage', many: false, kind: 'image', label: 'Picture', max: 1,
+        get: () => C.image,
+        set: (v) => { C.image = v || null; $('#pgCmpImage_e').textContent = ''; renderCompare(); },
+        error: (msg) => { $('#pgCmpImage_e').textContent = msg; },
+      });
+      $('#pgCmpImageRow .pg-field-head').after(pick);
+      C.ids.forEach(cmpLoad);
+    }
+    renderCompare();
+  }
+
+  function cmpColumn(id) {
+    const node = el('div', { class: 'pg-cmp-col glass', role: 'listitem' });
+    const col = { node, key: null };
+    C.cols.set(id, col);
+    return col;
+  }
+
+  /** Redraws one column when what it shows changed; otherwise only its clock moves, so videos keep playing. */
+  function drawColumn(id) {
+    const col = C.cols.get(id) || cmpColumn(id);
+    const spec = C.specs.get(id);
+    const job = cmpJob(id);
+    const input = spec ? cmpInput(spec) : null;
+    const price = spec ? cmpPriceOf(spec, input) : null;
+    const key = JSON.stringify([!!spec, C.errs.get(id), C.notes.get(id), job && [job.status, job.error, (job.outputs || []).map((o) => o.url), job.finished_at],
+      price && price.text, S.test, input && Object.keys(input).sort(), C.sending, C.image, !!$('#pgCmpPrompt').value.trim(), C.sent.get(id)]);
+    if (key === col.key) return col;
+    col.key = key;
+    const n = col.node;
+    n.textContent = '';
+    const name = spec ? spec.name : id;
+    const x = el('button', { type: 'button', class: 'pg-icon-btn pg-cmp-x', 'aria-label': `Remove ${name}`, title: 'Remove' }, [icon('close')]);
+    x.addEventListener('click', () => cmpRemove(id));
+    n.append(el('div', { class: 'pg-cmp-head' }, [
+      el('span', { class: 'pg-thumb sm', 'aria-hidden': 'true' }, [spec && spec.thumb ? el('img', { src: spec.thumb, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : icon(catIcon(spec && spec.category))]),
+      el('span', { class: 'pg-cmp-title' }, [el('h3', { title: name }, [name]), el('span', { class: 'pg-model-meta' }, [spec ? `${catLabel(spec.category)} · ${id}` : id])]),
+      x,
+    ]));
+    if (C.errs.has(id)) {
+      n.append(el('div', { class: 'pg-cmp-body' }, [el('p', { class: 'pg-cmp-msg err' }, [`${C.errs.get(id)} Remove it and pick another.`])]));
+      return col;
+    }
+    if (!spec) {
+      n.append(el('div', { class: 'pg-cmp-body' }, [el('p', { class: 'pg-cmp-msg' }, ['Loading…'])]));
+      return col;
+    }
+    n.append(el('p', { class: 'pg-cmp-price' }, [S.test ? `Test, free · a real run: ${price.text}` : price.text]));
+    const body = el('div', { class: 'pg-cmp-body' });
+    if (job && isActive(job)) {
+      body.append(el('div', { class: 'pg-cmp-wait' }, [
+        el('p', { class: 'eyebrow' }, [job.status === 'queued' ? (S.test ? 'Waiting' : 'Waiting at fal') : 'Running']),
+        el('p', { class: 'pg-cmp-clock', 'data-from': String(job.created_at) }, [clock(Date.now() / 1000 - job.created_at)]),
+      ]));
+    } else if (job && job.status === 'failed') {
+      body.append(el('div', { class: 'pg-cmp-msg' }, [el('p', { class: 'eyebrow err' }, ['Failed']), el('p', {}, [job.error || 'No reason was given.']), el('p', { class: 'muted' }, [failAdvice(job)])]));
+    } else if (job && (job.outputs || []).length) {
+      body.classList.add('has-media', `kind-${job.outputs[0].kind}`);
+      body.append(bigMedia(job.outputs[0], job));
+    } else if (C.notes.has(id)) {
+      body.append(el('p', { class: 'pg-cmp-msg err' }, [C.notes.get(id)]));
+    } else {
+      const says = [];
+      const w = wordsField(spec);
+      const img = imageField(spec);
+      if (!w) says.push('Takes no words: it runs on the picture alone.');
+      else if (!$('#pgCmpPrompt').value.trim()) says.push("Uses fal's example words until you write a prompt.");
+      if (img && !C.image) says.push(has(input[img.name]) ? "Uses fal's example picture until you add one." : 'Needs a picture: add one above.');
+      const lacking = spec.fields.filter((f) => f.required && !(f.name in input) && f !== img);
+      if (lacking.length) says.push(`Needs ${lacking.map((f) => prettyTitle(f.title || f.name)).join(', ')}: open it to fill that in.`);
+      if (!spec.runnable) says.push(spec.why_not || say('not_runnable'));
+      body.append(el('div', { class: 'pg-cmp-msg' }, [el('p', { class: 'eyebrow' }, ['Ready']), ...says.map((t) => el('p', { class: 'muted' }, [t]))]));
+    }
+    n.append(body);
+    const foot = el('div', { class: 'pg-cmp-foot' });
+    const facts = [];
+    if (job && !isActive(job) && job.finished_at) facts.push(`took ${clock(job.finished_at - job.created_at)}`);
+    if (job && C.sent.has(id)) facts.push(C.sent.get(id));
+    if ((job && (job.outputs || []).length > 1)) facts.push(`${job.outputs.length} results`);
+    foot.append(el('span', { class: 'pg-cmp-facts' }, [facts.join(' · ')]));
+    const acts = el('span', { class: 'pg-cmp-acts' });
+    const open = el('button', { type: 'button', class: 'pg-act' }, [icon('tweak'), 'Open']);
+    open.setAttribute('aria-label', `Open ${name} on its own`);
+    open.addEventListener('click', () => cmpOpen(id));
+    acts.append(open);
+    const out = job && (job.outputs || [])[0];
+    if (out) acts.append(el('a', { class: 'pg-act', href: out.url, download: '', 'aria-label': `Download the result of ${name}` }, [icon('down'), 'Download']));
+    foot.append(acts);
+    n.append(foot);
+    return col;
+  }
+
+  function renderCompare() {
+    if (S.mode !== 'compare') return;
+    const box = $('#pgCmpCols');
+    C.ids.forEach((id, i) => {
+      const { node } = drawColumn(id);
+      if (box.children[i] !== node) box.insertBefore(node, box.children[i] || null);
+    });
+    for (const [id, col] of C.cols) if (!C.ids.includes(id)) { col.node.remove(); C.cols.delete(id); }
+    if (!C.addWrap) {
+      const add = el('button', { type: 'button', class: 'pg-cmp-add' }, [icon('plus'), el('span', {}, ['Add a model']), el('small', {}, ['up to four, from any of fal\'s'])]);
+      add.addEventListener('click', openPicker);
+      C.addWrap = el('div', { role: 'listitem', class: 'pg-cmp-add-wrap' }, [add]);
+    }
+    if (C.ids.length < MAX_CMP) {
+      if (box.lastElementChild !== C.addWrap) box.append(C.addWrap);
+    } else {
+      C.addWrap.remove();
+    }
+    // The shared picture, when a model here needs one.
+    const needs = C.ids.map((id) => C.specs.get(id)).filter((s) => s && imageField(s));
+    $('#pgCmpImageRow').hidden = !needs.length;
+    $('#pgCmpImage_h').textContent = needs.length ? `${needs.map((s) => s.name).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} a picture. Models that take none ignore it.` : '';
+    renderCmpPrice();
+    syncCmpTick();
+  }
+
+  function renderCmpPrice() {
+    const specs = C.ids.map((id) => C.specs.get(id)).filter(Boolean);
+    const box = $('#pgCmpPrice');
+    box.textContent = '';
+    let label = 'Run all';
+    if (!C.ids.length) {
+      box.append(el('span', { class: 'muted' }, ['Add a model to start. Each gets the same prompt.']));
+    } else if (S.test) {
+      label = 'Run all · test, free';
+      box.append(el('span', {}, ['Test mode: runs are free and fake.']));
+    } else {
+      const parts = specs.map((s) => cmpPriceOf(s, cmpInput(s)));
+      const total = parts.reduce((t, p) => t + (p.total || 0), 0);
+      const about = parts.some((p) => p.about) || parts.some((p) => !p.known);
+      if (C.ids.some((id) => C.pstate.get(id) === 'loading') || specs.length < C.ids.length) {
+        box.append(el('span', { class: 'muted' }, ["Asking fal for the prices…"]));
+      } else if (parts.some((p) => p.known)) {
+        label = `Run all · ${about ? 'about ' : ''}${money(total)}`;
+        const unknown = parts.filter((p) => !p.known).length;
+        box.append(el('p', { class: 'pg-price-line' }, [el('b', {}, [`${about ? 'about ' : ''}${money(total)}`]), ` for ${C.ids.length === 1 ? 'one run' : `${C.ids.length} runs`}`,
+          unknown ? el('span', { class: 'muted' }, [` · plus ${unknown === 1 ? 'one model' : `${unknown} models`} without a total`]) : null]));
+        box.append(el('p', { class: 'pg-price-note' }, ["fal's list prices, on your key. Each column shows its own."]));
+      } else if (!S.keySet) {
+        box.append(el('span', { class: 'muted' }, ['Add your fal key to see the prices.']));
+      } else {
+        label = 'Run all · check the prices';
+        box.append(el('span', { class: 'warn' }, ['fal gave no totals for these settings. Each column shows what fal lists.']));
+      }
+    }
+    if (!C.sending) $('#pgCmpRunLabel').textContent = label;
+    $('#pgCmpRun').disabled = !C.ids.length || C.sending || S.offline;
+  }
+
+  /** A one-second clock for the running columns, only while one runs and Compare is on screen. */
+  function syncCmpTick() {
+    const need = S.mode === 'compare' && C.ids.some((id) => { const j = cmpJob(id); return j && isActive(j); });
+    if (need && !C.tick) {
+      C.tick = setInterval(() => {
+        document.querySelectorAll('#pgCmpCols .pg-cmp-clock').forEach((t) => { t.textContent = clock(Date.now() / 1000 - Number(t.dataset.from)); });
+      }, 1000);
+    }
+    if (!need && C.tick) { clearInterval(C.tick); C.tick = null; }
+  }
+
+  function cmpConfirmText(specs, inputs) {
+    const parts = [el('p', {}, [specs.length === 1 ? 'Run all sends one paid run to fal:' : `Run all sends ${specs.length} paid runs to fal, one per model:`])];
+    const list = el('ul', { class: 'pg-cmp-confirm' });
+    specs.forEach((s, i) => list.append(el('li', {}, [el('b', {}, [s.name]), `: ${cmpPriceOf(s, inputs[i]).text}`])));
+    parts.push(list);
+    const prices = specs.map((s, i) => cmpPriceOf(s, inputs[i]));
+    const total = prices.reduce((t, p) => t + (p.total || 0), 0);
+    const unknown = prices.filter((p) => !p.known).length;
+    const about = prices.some((p) => p.about) || unknown > 0;
+    if (total > 0 && specs.length > 1) parts.push(el('p', {}, [unknown ? 'The ones with a total come to ' : 'Together that is ', about ? 'about ' : '', el('b', {}, [money(total)]), unknown ? ', plus the others.' : '.']));
+    parts.push(el('p', { class: 'muted' }, ["Options such as audio, resolution or quality can change fal's rate. It is paid to fal on your key. This question comes once per model."]));
+    return parts;
+  }
+
+  async function cmpRun() {
+    if (S.mode !== 'compare' || C.sending || !C.ids.length || S.offline) return;
+    const specs = C.ids.map((id) => C.specs.get(id));
+    if (C.ids.some((id) => C.errs.has(id))) { cmpNote('A model here could not be loaded. Remove it first.'); return; }
+    if (specs.some((s) => !s)) { cmpNote('A model is still loading. Press Run all again in a moment.'); return; }
+    const off = specs.find((s) => !s.runnable);
+    if (off) { cmpNote(`${off.name} cannot run here. Remove it first.`); return; }
+    const inputs = specs.map(cmpInput);
+    for (let i = 0; i < specs.length; i++) {
+      const lacking = specs[i].fields.filter((f) => f.required && !(f.name in inputs[i]));
+      if (lacking.length) {
+        const img = imageField(specs[i]);
+        cmpNote(img && lacking.includes(img)
+          ? `${specs[i].name} needs a picture. Add one above, or remove it.`
+          : `${specs[i].name} needs ${lacking.map((f) => prettyTitle(f.title || f.name)).join(', ')}. Open it to fill that in, or remove it.`);
+        return;
+      }
+    }
+    if (!S.test && !S.keySet) { $('#pgKey').hidden = false; $('#pgKeyInput').focus(); cmpNote(ERRORS.missing_key); return; }
+    if (!S.test) {
+      // The price question is asked once per model, so never before fal's prices have had their chance to arrive.
+      if (C.ids.some((id) => C.pstate.get(id) === 'loading')) { cmpNote("fal's prices are still loading. Press Run all again in a moment."); return; }
+      if (C.ids.some((id) => !S.confirmed.has(id))) {
+        $('#pgConfirmTitle').textContent = 'Check the prices first';
+        const box = $('#pgConfirmText');
+        box.textContent = '';
+        box.append(...cmpConfirmText(specs, inputs));
+        S.pendingRun = { compare: true, ids: C.ids.slice(), inputs };
+        $('#pgConfirm').showModal();
+        return;
+      }
+    }
+    await cmpSend(C.ids.slice(), inputs);
+  }
+
+  async function cmpSend(ids, inputs) {
+    C.sending = true;
+    $('#pgCmpRunLabel').textContent = 'Sending…';
+    cmpNote('');
+    renderCompare();
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const spec = C.specs.get(id);
+      for (const m of [C.notes, C.jobs, C.sent]) m.delete(id);
+      const r = await call('/api/fal/run', { method: 'POST', body: { id, input: inputs[i], test: S.test } });
+      if (!r.ok) {
+        const code = r.data && r.data.error;
+        if (r.status === 0) { cmpNote('The engine is not answering. Is Agave Studio running?'); break; }
+        if (code === 'not_test_mode') {
+          // The studio restarted for real while this page thought it was in test mode: from now on runs cost money.
+          await loadStatus();
+          S.confirmed.clear();
+          renderTemplates();
+          C.pstate.clear();
+          C.ids.forEach(cmpPrice);
+          cmpNote('The studio is no longer in test mode, so runs now cost money. Check the prices, then press Run all again.');
+          break;
+        }
+        if (code === 'missing_key') { S.keySet = false; $('#pgKey').hidden = false; cmpNote(ERRORS.missing_key); break; }
+        const f = r.data && r.data.field && spec.fields.find((x) => x.name === r.data.field);
+        C.notes.set(id, `${f ? `${prettyTitle(f.title || f.name)}: ` : ''}${code === 'not_runnable' && r.data.why ? r.data.why : say(code)}`);
+        renderCompare();
+        continue;
+      }
+      const job = r.data.job;
+      C.jobs.set(id, job.id);
+      const pr = cmpPriceOf(spec, inputs[i]);
+      if (S.test) C.sent.set(id, 'test, free');
+      else if (pr.total !== null) C.sent.set(id, `${pr.about ? 'about ' : ''}${money(pr.total)}`);
+      upsertJob(job);
+      follow(job.id);
+      renderCompare();
+    }
+    C.sending = false;
+    cmpSave();
+    renderCompare();
+    const first = $('#pgCmpCols .pg-cmp-col');
+    if (first && matchMedia('(max-width: 1080px)').matches) first.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  /** A column on its own page: with the settings of its run, or of the run it would make. */
+  function cmpOpen(id) {
+    const spec = C.specs.get(id);
+    const job = cmpJob(id);
+    const p = job && jobInput(job);
+    setMode('one');
+    loadModel(id, p ? p.input : (spec ? cmpInput(spec) : undefined)).then(() => {
+      if (job) show(job);
+      $('#pgRunNote').textContent = job ? 'The settings of that run. Change anything, then Run.' : 'The settings Compare would send. Change anything, then Run.';
+    });
+  }
+
+  function setMode(mode, focus = false) {
+    if (S.mode === mode) return;
+    S.mode = mode;
+    $('#pgModeOne').setAttribute('aria-selected', String(mode === 'one'));
+    $('#pgModeCmp').setAttribute('aria-selected', String(mode === 'compare'));
+    $('#pgModeOne').tabIndex = mode === 'one' ? 0 : -1;
+    $('#pgModeCmp').tabIndex = mode === 'compare' ? 0 : -1;
+    $('#pgOne').hidden = mode !== 'one';
+    $('#pgCompare').hidden = mode !== 'compare';
+    store.set('pg.mode', mode);
+    if (mode === 'compare') {
+      history.replaceState(null, '', '#compare');
+      cmpStart();
+      if (focus) $('#pgCmpPrompt').focus();
+    } else if (S.spec) {
+      history.replaceState(null, '', `#m=${encodeURIComponent(S.spec.id)}`);
+    }
+    syncCmpTick();
+    syncTick();
+  }
+
+  $('#pgModeOne').addEventListener('click', () => setMode('one'));
+  $('#pgModeCmp').addEventListener('click', () => setMode('compare', true));
+  arrowTabs($('.pg-modes'));
+  $('#pgCmpRun').addEventListener('click', cmpRun);
+  $('#pgCmpPrompt').addEventListener('input', () => { store.set('pg.cmp.prompt', $('#pgCmpPrompt').value); renderCompare(); });
+
   // ------------------------------------------------------------ keys
 
   document.addEventListener('keydown', (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !document.querySelector('dialog[open]')) {
       e.preventDefault();
-      // The same guards as the button: never while a model loads, a run is being sent, or the key repeats.
+      // The same guards as the buttons: never while a model loads, a run is being sent, or the key repeats.
+      if (S.mode === 'compare') { if (!e.repeat && !C.sending && !$('#pgCmpRun').disabled) cmpRun(); return; }
       if (!e.repeat && !S.sending && !$('#pgRun').disabled) run();
       return;
     }
@@ -1419,11 +1874,14 @@
 
   // A model id typed or pasted into the address (#m=...) opens that model.
   window.addEventListener('hashchange', () => {
+    if (location.hash === '#compare') { setMode('compare'); return; }
     const id = startModel();
+    setMode('one');
     if (id && (!S.spec || S.spec.id !== id)) loadModel(id);
   });
 
   async function init() {
+    const startHash = location.hash;
     await loadStatus();
     // Category names for the model header come with the first catalog page.
     call('/api/fal/models').then((r) => {
@@ -1434,6 +1892,7 @@
     loadTemplates();
     await loadModel(startModel());
     loadHistory();
+    if (startHash === '#compare' || (!/^#m=/.test(startHash) && store.get('pg.mode') === 'compare')) setMode('compare');
   }
 
   init();

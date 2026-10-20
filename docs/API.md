@@ -24,7 +24,8 @@ Never return a key value from any endpoint. Never log a key.
   -> 202 {"job":Job}   | 412 {"error":"missing_key","key":"FAL_KEY"} | 400 {"error":"..."}
 - GET  /api/jobs -> {"jobs":[Job]}      GET /api/jobs/:id -> {"job":Job}
   Job = {"id":"j_...","model":"...","mode":"t2v","prompt":"<final prompt>","status":"queued"|"running"|"done"|"failed",
-         "progress":0..1|null,"outputs":[{"url":"...","kind":"video"|"image"|"audio"}],"error":null|"...","created_at":unix}
+         "progress":0..1|null,"outputs":[{"url":"...","kind":"video"|"image"|"audio"|"model"}],"error":null|"...",
+         "created_at":unix,"finished_at":unix}   (finished_at once it is done or failed; absent on jobs from before it)
 
 ## Building blocks
 - POST /api/uploads {"data":"data:<any>;base64,..."} -> 201 {"url":"/outputs/<hex>.<ext>","kind":"image"|"video"|"audio"}

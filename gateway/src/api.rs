@@ -516,6 +516,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         outputs: Vec::new(),
         error: None,
         created_at: now_unix(),
+        finished_at: None,
         request,
     };
     // Kling 3.0 often ignores camera words: a keyframed move (moves.rs) sends where the move ends as the end picture.
@@ -1064,6 +1065,7 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         outputs: Vec::new(),
         error: None,
         created_at: now_unix(),
+        finished_at: None,
         request: None,
     };
     let adapter: std::sync::Arc<dyn providers::Provider> = std::sync::Arc::new(Assemble(plan));

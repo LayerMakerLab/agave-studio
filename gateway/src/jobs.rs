@@ -32,6 +32,9 @@ pub struct Job {
     pub outputs: Vec<Output>,
     pub error: Option<String>,
     pub created_at: u64,
+    /// When it ended, done or failed (unix seconds; absent while it runs and on jobs from before this field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
     /// The request as the client sent it, so a failed job can be run again (absent when large).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<serde_json::Value>,
@@ -146,6 +149,7 @@ pub fn now_unix() -> u64 {
 /// The one place a job becomes "failed".
 fn fail_entry(e: &mut Entry, message: String) {
     e.job.status = "failed".into();
+    e.job.finished_at = Some(now_unix());
     e.job.error = Some(message);
     e.handle = None;
 }
@@ -186,6 +190,7 @@ impl JobStore {
                 let (Some(adapter), Some(handle), true) = (adapter, a.handle, resumable) else {
                     let mut job = a.job;
                     job.status = "failed".into();
+                    job.finished_at = Some(now_unix());
                     job.error = Some(if too_old { "timed out".into() } else { "The studio closed before this job finished. Run it again.".into() });
                     let adapter: Arc<dyn Provider> = Arc::new(crate::providers::Stopped);
                     m.insert(job.id.clone(), Entry { job, handle: None, adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false });
@@ -359,6 +364,7 @@ impl JobStore {
         self.with(|m| {
             if let Some(e) = m.get_mut(id).filter(|e| is_active(&e.job)) {
                 e.job.status = "done".into();
+                e.job.finished_at = Some(now_unix());
                 e.job.progress = Some(1.0);
                 e.job.outputs = outputs;
                 e.handle = None;
@@ -507,6 +513,7 @@ mod tests {
             outputs: Vec::new(),
             error: None,
             created_at: 1,
+            finished_at: None,
             request: None,
         }
     }
@@ -524,6 +531,9 @@ mod tests {
         store.set_failed("failed1", "boom again");
         assert_eq!(store.list().len(), 3, "no duplicate once a live job is saved");
         assert_eq!(store.get("failed1").unwrap().error.as_deref(), Some("boom"), "a job fails only once");
+        assert!(store.get("done1").unwrap().finished_at.is_some_and(|t| t >= 1), "done jobs say when they ended");
+        assert!(store.get("failed1").unwrap().finished_at.is_some());
+        assert!(store.get("run1").unwrap().finished_at.is_none(), "running jobs have no end yet");
         // Restart: the running job is gone, finished ones stay.
         let again = JobStore::load(path).unwrap();
         let ids: Vec<String> = again.list().into_iter().map(|j| j.id).collect();
@@ -533,6 +543,7 @@ mod tests {
         // The running job had not reached its provider, so it comes back failed, ready to run again.
         again.restore(&crate::models::Registry::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml")).unwrap());
         assert_eq!(again.get("run1").unwrap().status, "failed");
+        assert!(again.get("run1").unwrap().finished_at.is_some());
     }
 
     #[test]
