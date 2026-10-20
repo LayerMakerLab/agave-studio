@@ -327,12 +327,16 @@ pub(crate) async fn upright_picture(ctx: &Ctx, start: &str) -> PResult<String> {
     Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, made?)))
 }
 
-/// A fresh work folder for a camera move's pictures inside the owner-only outputs folder, never the system temp
-/// folder (on a shared Linux computer other accounts can read that). Dot names are never served, and a crash's
-/// leftovers go at the next start (fsutil::remove_leftovers).
+/// A fresh owner-only work folder for a camera move's pictures inside the outputs folder, never the system temp
+/// folder (on a shared Linux computer other accounts can read that). It must not exist yet; /outputs never serves
+/// dot names (api::guard), and a crash's leftovers go at the next start (fsutil::remove_leftovers).
 async fn keyframe_work(ctx: &Ctx) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
     let work = ctx.outputs_dir.join(format!(".keyframe-{}", media::random_hex(8)));
-    tokio::fs::create_dir_all(&work).await?;
+    let mut b = std::fs::DirBuilder::new();
+    b.mode(0o700);
+    let path = work.clone();
+    tokio::task::spawn_blocking(move || b.create(&path)).await.map_err(std::io::Error::other)??;
     Ok(work)
 }
 

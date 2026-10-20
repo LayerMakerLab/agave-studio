@@ -69,6 +69,13 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     if req.uri().path().starts_with("//") {
         return fail(StatusCode::NOT_FOUND, "not_found");
     }
+    // /outputs serves only names the gateway itself writes: never a dot folder (edit and camera-move work), a
+    // subfolder or an encoded name.
+    if let Some(name) = req.uri().path().strip_prefix("/outputs/") {
+        if !media::valid_output_name(name) {
+            return fail(StatusCode::NOT_FOUND, "not_found");
+        }
+    }
     if let Some(origin) = req.headers().get(header::ORIGIN) {
         let ok = origin
             .to_str()
@@ -115,9 +122,10 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     let csp = if output {
         "sandbox allow-same-origin; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
     } else {
-        // Scripts and connections only from the studio itself, so a script slipped into a page could neither load
-        // more code nor send anything out. blob: is the 3D viewer reading a model's own textures.
-        "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; script-src 'self'; connect-src 'self' blob:"
+        // Scripts, fetches and frames only from the studio itself: injected markup could not run code from elsewhere
+        // or call out with fetch. (Images stay open: reference pictures can be any https URL.) blob: is the 3D viewer
+        // reading a model's own textures.
+        "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; script-src 'self'; connect-src 'self' blob:; frame-src 'none'"
     };
     h.insert(header::CONTENT_SECURITY_POLICY, header::HeaderValue::from_static(csp));
     // Links out of the studio (provider docs, GitHub) never carry the local address or page path.
@@ -1332,10 +1340,32 @@ mod tests {
             }
         };
         let page = csp("/app/").await;
-        for d in ["script-src 'self'", "connect-src 'self' blob:", "object-src 'none'", "frame-ancestors 'none'"] {
+        for d in ["script-src 'self'", "connect-src 'self' blob:", "frame-src 'none'", "object-src 'none'", "frame-ancestors 'none'"] {
             assert!(page.split("; ").any(|x| x == d), "{d} missing from {page}");
         }
         assert!(csp("/outputs/a.mp4").await.starts_with("sandbox allow-same-origin; default-src 'none'"));
+    }
+
+    /// Work folders (.edit-*, .keyframe-*) and anything that is not a plain output name are never served.
+    #[tokio::test]
+    async fn outputs_serve_only_plain_output_names() {
+        let st = AppState::for_tests("api_outputs_names");
+        let dir = st.ctx.outputs_dir.clone();
+        std::fs::create_dir_all(dir.join(".keyframe-abcd")).unwrap();
+        std::fs::write(dir.join(".keyframe-abcd/start.jpg"), b"x").unwrap();
+        std::fs::write(dir.join("a1b2.png"), b"x").unwrap();
+        let app = router(st);
+        let get = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder().uri(path).header("host", "127.0.0.1:4170").body(Body::empty()).unwrap();
+                app.oneshot(req).await.expect("response").status()
+            }
+        };
+        assert_eq!(get("/outputs/a1b2.png").await, StatusCode::OK);
+        for path in ["/outputs/.keyframe-abcd/start.jpg", "/outputs/%2ekeyframe-abcd/start.jpg", "/outputs/.keyframe-abcd", "/outputs/"] {
+            assert_eq!(get(path).await, StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[tokio::test]
