@@ -121,6 +121,8 @@ pub struct Spec {
     pub outputs: Vec<String>,
     pub runnable: bool,
     pub why_not: Option<String>,
+    /// Shown above Run when the model may make files the Playground does not keep.
+    pub note: Option<String>,
 }
 
 /// A fal endpoint id: owner/name[/more], plain path characters only, so it is safe in a URL path.
@@ -374,6 +376,7 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
         outputs: Vec::new(),
         runnable: false,
         why_not: None,
+        note: None,
         id,
     };
     let Some(openapi) = model.get("openapi").filter(|o| o.is_object()) else {
@@ -420,10 +423,15 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
     spec.outputs = output.map(|o| output_kinds(o, openapi)).unwrap_or_default();
     if spec.status == "deprecated" {
         spec.why_not = Some("fal has retired this model.".into());
+    } else if spec.category == "training" {
+        spec.why_not = Some("Training is not in the Playground: it costs more and makes model weights, not pictures.".into());
     } else if spec.outputs.is_empty() {
         spec.why_not = Some("This model answers with text or data, and the Playground shows files only for now.".into());
     } else {
         spec.runnable = true;
+        if spec.outputs.iter().all(|k| k == "file") {
+            spec.note = Some("fal describes this model's results only as files. The Playground keeps pictures, video, audio and 3D files and skips anything else, such as model weights.".into());
+        }
     }
     Some(spec)
 }
@@ -685,14 +693,23 @@ pub async fn models(State(st): State<AppState>, Query(q): Query<CatalogQuery>) -
     }
 }
 
+/// Why a model's form could not be had: the HTTP status and the error code.
+pub struct SpecErr(StatusCode, &'static str);
+
+impl IntoResponse for SpecErr {
+    fn into_response(self) -> Response {
+        fail(self.0, self.1)
+    }
+}
+
 /// The form spec for one model, from the cache or fal (or the test sample).
-pub async fn spec_for(st: &AppState, id: &str) -> Result<Arc<Spec>, Response> {
+pub async fn spec_for(st: &AppState, id: &str) -> Result<Arc<Spec>, SpecErr> {
     if !valid_endpoint(id) {
-        return Err(fail(StatusCode::BAD_REQUEST, "bad_model_id"));
+        return Err(SpecErr(StatusCode::BAD_REQUEST, "bad_model_id"));
     }
     if let Some(sample) = &st.playground.sample {
         let m = sample.get("models").and_then(Value::as_array).into_iter().flatten().find(|m| m.get("endpoint_id").and_then(Value::as_str) == Some(id));
-        return m.and_then(|m| compile(m, true)).map(Arc::new).ok_or_else(|| fail(StatusCode::NOT_FOUND, "unknown_fal_model"));
+        return m.and_then(|m| compile(m, true)).map(Arc::new).ok_or(SpecErr(StatusCode::NOT_FOUND, "unknown_fal_model"));
     }
     if let Some(s) = get_fresh(&st.playground.specs, id, SPEC_TTL) {
         return Ok(s);
@@ -703,15 +720,15 @@ pub async fn spec_for(st: &AppState, id: &str) -> Result<Arc<Spec>, Response> {
         Fetch::Ok(v) => {
             let m = v.get("models").and_then(Value::as_array).into_iter().flatten().find(|m| m.get("endpoint_id").and_then(Value::as_str) == Some(id));
             let Some(spec) = m.and_then(|m| compile(m, false)) else {
-                return Err(fail(StatusCode::NOT_FOUND, "unknown_fal_model"));
+                return Err(SpecErr(StatusCode::NOT_FOUND, "unknown_fal_model"));
             };
             let spec = Arc::new(spec);
             put(&st.playground.specs, id.to_string(), spec.clone());
             Ok(spec)
         }
-        Fetch::NotFound => Err(fail(StatusCode::NOT_FOUND, "unknown_fal_model")),
-        Fetch::Busy => Err(fail(StatusCode::SERVICE_UNAVAILABLE, "catalog_busy")),
-        Fetch::Failed => Err(fail(StatusCode::BAD_GATEWAY, "catalog_unavailable")),
+        Fetch::NotFound => Err(SpecErr(StatusCode::NOT_FOUND, "unknown_fal_model")),
+        Fetch::Busy => Err(SpecErr(StatusCode::SERVICE_UNAVAILABLE, "catalog_busy")),
+        Fetch::Failed => Err(SpecErr(StatusCode::BAD_GATEWAY, "catalog_unavailable")),
     }
 }
 
@@ -724,7 +741,7 @@ pub struct IdQuery {
 pub async fn model(State(st): State<AppState>, Query(q): Query<IdQuery>) -> Response {
     match spec_for(&st, &q.id).await {
         Ok(spec) => Json(json!({"model": *spec})).into_response(),
-        Err(r) => r,
+        Err(e) => e.into_response(),
     }
 }
 
@@ -828,7 +845,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
     };
     let spec = match spec_for(&st, &req.id).await {
         Ok(s) => s,
-        Err(r) => return r,
+        Err(e) => return e.into_response(),
     };
     if !spec.runnable {
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "not_runnable", "why": spec.why_not}))).into_response();
@@ -1112,8 +1129,18 @@ impl Provider for FalRun {
             outs.push(media::save(ctx, &bytes, &ext, kind).await?);
         }
         if outs.is_empty() {
-            return Ok(Polled::Failed("fal finished but returned no image, video, audio or 3D file.".into()));
+            return Ok(Polled::Failed(
+                "fal finished, but returned no picture, video, audio or 3D file (other files, such as model weights, are not kept here).".into(),
+            ));
         }
+        // The main result first: a 3D model (GLB before other formats), then video, audio, pictures.
+        outs.sort_by_key(|o| match (o.kind.as_str(), o.url.ends_with(".glb")) {
+            ("model", true) => 0,
+            ("model", false) => 1,
+            ("video", _) => 2,
+            ("audio", _) => 3,
+            _ => 4,
+        });
         Ok(Polled::Done(outs))
     }
 }
@@ -1248,6 +1275,21 @@ mod tests {
         let kept: Vec<_> = files.iter().filter_map(|(u, c)| kind_and_ext(u, c.as_deref())).collect();
         assert_eq!(kept, vec![("image", "png".to_string()), ("image", "jpg".to_string()), ("model", "glb".to_string()), ("video", "mp4".to_string())]);
         assert!(kind_and_ext("https://x.test/a.svg", Some("image/svg+xml")).is_none(), "never an svg from the studio's origin");
+    }
+
+    #[test]
+    fn training_is_not_runnable_and_file_only_models_carry_a_note() {
+        let mut m = sample()["models"].as_array().unwrap().iter().find(|m| m["endpoint_id"] == "fal-ai/flux/schnell").unwrap().clone();
+        m["metadata"]["category"] = json!("training");
+        let spec = compile(&m, true).unwrap();
+        assert!(!spec.runnable && spec.why_not.is_some());
+        let mut m = sample()["models"].as_array().unwrap().iter().find(|m| m["endpoint_id"] == "fal-ai/flux/schnell").unwrap().clone();
+        let out = m["openapi"]["components"]["schemas"].as_object_mut().unwrap().iter_mut().find(|(k, _)| k.ends_with("Output")).unwrap().1;
+        out["properties"] = json!({"weights": {"$ref": "#/components/schemas/Image"}});
+        let spec = compile(&m, true).unwrap();
+        assert!(spec.runnable);
+        assert_eq!(spec.outputs, vec!["file"]);
+        assert!(spec.note.is_some());
     }
 
     #[test]
@@ -1403,5 +1445,29 @@ mod tests {
         let (s, v) = call(&app, post_req("/api/fal/run", &json!({"id": "fal-ai/trellis-2", "input": {"image_url": "/outputs/big.png"}}))).await;
         assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(v["error"], "file_too_large");
+    }
+}
+
+#[cfg(test)]
+mod real_schemas {
+    /// Compiles every model in a saved catalog dump and prints what it found. Run by hand:
+    /// PG_REAL=<file made from api.fal.ai/v1/models?expand=openapi-3.0> cargo test real_catalog -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_catalog_compiles() {
+        let path = std::env::var("PG_REAL").expect("PG_REAL");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect("dump")).expect("json");
+        let (mut ok, mut not) = (0, 0);
+        for m in v["models"].as_array().expect("models") {
+            let Some(spec) = super::compile(m, false) else { continue };
+            if spec.runnable {
+                ok += 1;
+            } else {
+                not += 1;
+                println!("not runnable [{}] {}: {:?}", spec.category, spec.id, spec.why_not);
+            }
+        }
+        println!("runnable {ok}, not {not}");
+        assert!(ok > 0);
     }
 }

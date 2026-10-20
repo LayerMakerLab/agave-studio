@@ -274,8 +274,9 @@
       desc.append(' ', el('a', { href: s.page, target: '_blank', rel: 'noopener', class: 'pg-out' }, ['fal page ', el('span', { 'aria-hidden': 'true' }, ['↗'])]));
     }
     const why = $('#pgWhyNot');
-    why.hidden = s.runnable;
-    why.textContent = s.runnable ? '' : (s.why_not || say('not_runnable'));
+    const text = s.runnable ? (s.note || '') : (s.why_not || say('not_runnable'));
+    why.hidden = !text;
+    why.textContent = text;
   }
 
   function renderForm() {

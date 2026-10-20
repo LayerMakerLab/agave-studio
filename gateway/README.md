@@ -37,3 +37,6 @@ Implemented: fal (queue: Kling, Seedance, Wan, Hailuo, Veo, FLUX, Nano Banana, S
 Gemini Veo (no model uses it: Google shuts the Veo 3.1 preview ids down on 22 October 2026), Gemini image,
 Black Forest Labs FLUX, ElevenLabs text to speech, Meshy image to 3D.
 A model whose provider has no adapter returns 501 `adapter_not_implemented`.
+
+`src/playground.rs` runs any fal model outside `models.toml`: it reads fal's catalog and each model's OpenAPI schema,
+checks the input against it, and queues the job as `fal:<endpoint>` (docs/API.md, Playground).

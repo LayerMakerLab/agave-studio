@@ -152,11 +152,39 @@ the last frame, Add to edit) run as soon as the step before them is done; a back
 every 2 s moves runs on with no page open. The last frame is taken by ffmpeg as a local job (model "agave/last-frame",
 shown in the gallery like other jobs), so a restart in the middle fails that step instead of losing it.
 
+## Playground (any fal model)
+- GET  /api/fal/models?q=&category=&cursor= -> {"models":[{"id":"fal-ai/flux/schnell","name":"...","category":"text-to-image",
+       "description":"...","thumb":"https://..."|null,"makes_files":true}],"next_cursor":"..."|null,"has_more":bool,
+       "categories":[{"id":"text-to-image","label":"Text to image"}]}
+  One page (40) of fal's active models, from api.fal.ai/v1/models, cached 10 minutes. `category` must be one of the
+  listed ids. 503 catalog_busy when fal rate-limits, 502 catalog_unavailable when it cannot be reached.
+- GET  /api/fal/model?id=<endpoint> -> {"model":Spec}
+  Spec = {"id","name","category","description","status","thumb","page","runnable":bool,"why_not":"..."|null,
+          "note":"..."|null,"outputs":["image"|"video"|"audio"|"model"|"file"],"fields":[Field]}
+  Field = {"name","title","description","kind":"text"|"longtext"|"integer"|"number"|"boolean"|"choice"|"media"|
+           "medialist"|"json","media":"image"|"video"|"audio"|"file"|null,"required","default","example","choices",
+           "custom_json","min","max","min_strict","max_strict","max_len","advanced","limits"}
+  Compiled from the model's OpenAPI input schema (cached 6 hours). `sync_mode` is never offered. A model is runnable
+  when its result schema holds files; training models and retired ones are not.
+- GET  /api/fal/price?id=<endpoint> -> {"price":{"unit_price":0.07,"unit":"seconds","currency":"USD","average":0.42|null,
+       "checked_at":unix,"test":false}}
+  fal's list price (api.fal.ai/v1/models/pricing) and fal's own average cost of one call (pricing/estimate,
+  historical_api_price), cached 1 hour. Needs FAL_KEY (412 missing_key); 502 price_unavailable when fal gives neither.
+- POST /api/fal/run {"id":"<endpoint>","input":{...}} -> 202 {"job":Job}
+  The input is checked against the Spec: unknown fields, wrong types, values outside the schema's range or choices,
+  and missing required fields are refused with 400 {"error":"unknown_field"|"invalid_value"|"field_required","field":"..."}.
+  Nulls are dropped (fal's default applies). File fields take https URLs, data: URIs, or /outputs/<file> from
+  POST /api/uploads; local files go to fal inline, up to 20 MB each and 40 MB a run (413 file_too_large). The job's
+  model is "fal:<endpoint>", its mode the fal category, and its request {"playground":{"id","input"},"name","price"}.
+  Every file in fal's result that is a picture, video, audio or 3D model is saved under /outputs; other files are not kept.
+
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture
 that says TEST OUTPUT and names the step, and an ffmpeg clip of it for video), with no key and no network; data goes to data/fake-providers (its own jobs,
 Elements, edit and keys file). `AGAVE_FAKE_FAIL=video,3d,image` makes the first job of each listed kind fail once, to try
-Run again. GET /api/health reports `fake_providers` and the studio shows a banner.
+Run again. GET /api/health reports `fake_providers` and the studio shows a banner. The Playground reads seven real fal
+models captured in `gateway/playground-sample.json` instead of the network. `AGAVE_TEST_PORT=4171` runs a test-mode
+gateway on another local port, beside a real one (it is ignored outside test mode).
 
 ## Prompt craft (C++)
 `engine/promptcraft` (C++17) exposes extern "C" `const char* pc_compose(const char* prompt, const char* camera_id, const char* style_id)`

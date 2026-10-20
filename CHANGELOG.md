@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Playground: any of fal's models with its own controls, from fal's own schema. Search and filter fal's catalog, fill
+  the form (or edit the JSON), see fal's list price and average before Run, and keep every run with Tweak, Get code
+  and Download. Opens with fal's example, so Run works at once. Test mode offers seven real models with no network.
 - Veo 3.1 and Veo 3.1 Fast on your Gemini key are gone: Google shuts those preview models down on 22 October 2026.
   Veo 3.1 still runs on your fal key (fal lists those endpoints as deprecated on 17 November 2026). Old failed jobs
   on a model that is gone no longer offer Run again.
