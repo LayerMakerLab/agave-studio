@@ -314,7 +314,8 @@ pub(crate) async fn upright_picture(ctx: &Ctx, start: &str) -> PResult<String> {
         .ok_or_else(|| ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into()))?;
     let dir = std::env::temp_dir();
     let tag = media::random_hex(8);
-    let (src, out) = (dir.join(format!("agave-upright-{tag}.{ext}")), dir.join(format!("agave-upright-{tag}.jpg")));
+    // Distinct names: a JPEG start picture would otherwise be read and overwritten as the same file.
+    let (src, out) = (dir.join(format!("agave-upright-{tag}-src.{ext}")), dir.join(format!("agave-upright-{tag}-out.jpg")));
     let made = async {
         tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
         run(Command::new("ffmpeg")
@@ -698,6 +699,12 @@ mod tests {
         assert!(px(&dir.join("view-last.jpg"), 10, 10).0 > 200, "the end picture is the edit, not the start");
         std::fs::write(dir.join("fake.png"), "not a picture").unwrap();
         assert!(keyframe_frames(&ctx, "/outputs/start.png", EndFrom::Picture("/outputs/fake.png")).await.is_err());
+
+        // A view move's edit starts from the upright decode of a JPEG photo (4:2:0, as cameras and generators save).
+        gen(&["-f", "lavfi", "-i", "color=c=green:s=640x360", "-pix_fmt", "yuvj420p", "-frames:v", "1"], "photo.jpg");
+        let up = upright_picture(&ctx, "/outputs/photo.jpg").await.expect("a JPEG photo decodes upright");
+        let a = probe_any(&decode(&up, "photo-up.jpg")).await.unwrap();
+        assert_eq!((a.0, a.1), (640, 360));
 
         // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
