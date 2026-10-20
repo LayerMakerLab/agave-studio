@@ -2,7 +2,7 @@
 //! `end_frame`, Kling 3.0). Kling often ignores camera words; given the start picture and where the move ends, it
 //! animates between the two. Zoom moves crop the start picture (free, local); moves that change the viewpoint make
 //! the end picture with an image edit on the same key, priced before Generate. Every other move stays words.
-//! Which moves are keyframed, and why, is in docs/CAMERA.md (tested on paid clips, 2026-10-19).
+//! Which moves are keyframed, and how the edit models were picked, is in docs/CAMERA.md.
 
 /// How a camera move gets its end picture.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -29,7 +29,6 @@ const ORBIT_RIGHT: &str = "Show the same moment from a camera that has orbited a
 pub fn keyframe(camera: &str) -> Option<Keyframe> {
     Some(match camera {
         "dolly_in" => Keyframe::Crop(0.65),
-        "push_through" => Keyframe::Crop(0.55),
         "crash_zoom" => Keyframe::Crop(0.4),
         // Picked from viewpoint tests on 2026-10-19: Nano Banana Edit moved the camera back cleanly; Seedream 4 Edit
         // made a real orbit where Nano Banana turned the subject instead.
@@ -55,7 +54,7 @@ mod tests {
         assert!(matches!(keyframe("crash_zoom"), Some(Keyframe::Crop(c)) if c < 0.65));
         assert!(matches!(keyframe("dolly_out"), Some(Keyframe::View { model: "fal/nano-banana-edit", .. })));
         assert!(matches!(keyframe("orbit_right"), Some(Keyframe::View { model: "fal/seedream-4-edit", prompt }) if prompt.contains("right")));
-        for words in ["crane_up", "whip_pan", "handheld", "static_lockoff", "nope"] {
+        for words in ["crane_up", "push_through", "whip_pan", "handheld", "static_lockoff", "nope"] {
             assert_eq!(keyframe(words), None, "{words}");
         }
         assert!(view_prompt(DOLLY_OUT).ends_with("Only the camera position changes."));

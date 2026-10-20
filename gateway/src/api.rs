@@ -510,7 +510,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         Some(moves::Keyframe::View { model: edit, prompt }) => st
             .registry
             .get(edit)
-            .filter(|m| m.key == model.key && m.provider == "fal")
+            .filter(|m| m.key == model.key && m.provider == "fal" && model.provider == "fal")
             .map(|m| providers::KeyframePlan::View { endpoint: m.endpoint.clone(), prompt: moves::view_prompt(prompt) }),
         None => None,
     };

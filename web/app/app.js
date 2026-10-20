@@ -380,13 +380,20 @@
   }
 
   // On a model that takes an end picture (Kling 3.0 image to video), the picked move is keyframed (the engine sends
-  // where the move ends, so it happens) or words only. Null when there is no move or the model takes no end picture.
+  // where the move ends) or words only. Null when there is no move or the model takes no end picture. A view move's
+  // edit runs on the video's own fal key, or the engine sends the move as words (same rule as the engine).
   function cameraPlan() {
     const m = selectedModel();
     const id = els.camera.value;
     if (!id || els.cameraWrap.hidden || !m || !m.end_frame || effectiveMode() !== 'i2v') return null;
     const p = state.presets.camera.find((c) => c.id === id);
-    return p ? (p.keyframe || { kind: 'words' }) : null;
+    if (!p) return null;
+    const plan = p.keyframe || { kind: 'words' };
+    if (plan.kind === 'view') {
+      const em = state.models.find((x) => x.id === plan.model);
+      if (!em || em.key !== m.key || em.provider !== 'fal' || m.provider !== 'fal') return { kind: 'words' };
+    }
+    return plan;
   }
   // A view move's end picture is an image edit on the same key, priced from its model.
   function keyframeCents(plan) {
@@ -399,10 +406,10 @@
     if (!plan) return;
     const name = (els.camera.selectedOptions[0] || {}).textContent || 'This move';
     if (plan.kind === 'crop') {
-      els.cameraHint.textContent = `${name} is keyframed: Agave sends where the move ends, so the camera makes it.`;
+      els.cameraHint.textContent = `${name} is keyframed: Agave also sends where the move ends, a crop of your picture, so the camera should make it.`;
     } else if (plan.kind === 'view') {
       const em = state.models.find((x) => x.id === plan.model);
-      els.cameraHint.textContent = `${name} is keyframed: ${em ? em.name : 'an image edit'} first makes where the move ends (${keyframeCents(plan)}¢, in the price), then the video moves to it.`;
+      els.cameraHint.textContent = `${name} is keyframed: ${em ? em.name : 'an image edit'} first makes where the move ends (${keyframeCents(plan)}¢, in the price, charged even if the video then fails), and the video should move to it.`;
     } else {
       els.cameraHint.textContent = `${name} goes as words only. This model often ignores camera words, so the move may not happen.`;
     }

@@ -41,7 +41,7 @@ verified = true   # fal API schema 2026-10-11: start_image_url (not image_url); 
 params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
 price = { per = "second", usd = 0.168, by_audio = { on = 0.168, off = 0.112 } }   # fal page 2026-10-19: $0.112/s audio off, $0.168/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
 max_elements = 4   # fal OpenAPI 2026-10-19: elements [{frontal_image_url, reference_image_urls 1-3}], @Element1...; the schema sets no count, Agave caps it at 4
-end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; Dolly in sends the start picture cropped in (Kling ignored the words twice, 2026-10-19)
+end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; keyframed camera moves send where the move ends (docs/CAMERA.md)
 
 [[model]]
 id = "fal/seedance-2.5-t2v"
@@ -95,7 +95,7 @@ verified = true   # fal search 2026-10-11; schema assumed same as v3 pro i2v (st
 params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
 price = { per = "second", usd = 0.126, by_audio = { on = 0.126, off = 0.084 } }   # fal page 2026-10-19: $0.084/s audio off, $0.126/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
 max_elements = 4   # fal OpenAPI 2026-10-19: elements [{frontal_image_url, reference_image_urls 1-3}], @Element1...; the schema sets no count, Agave caps it at 4
-end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; Dolly in sends the start picture cropped in (Kling ignored the words twice, 2026-10-19)
+end_frame = true   # fal OpenAPI 2026-10-19: end_image_url; keyframed camera moves send where the move ends (docs/CAMERA.md)
 
 [[model]]
 id = "fal/kling-2.5-turbo-i2v"

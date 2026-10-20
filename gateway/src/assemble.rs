@@ -217,29 +217,53 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
     Ok(if source_len.is_some() { (from, len) } else { (0.0, len) })
 }
 
-/// The start and end pictures for a zoom move (moves.rs: Dolly in, Push through, Crash zoom), as JPEG data URIs made
-/// from one upright decode of the start picture (ffmpeg applies a photo's EXIF rotation where it supports it, and
-/// both pictures come from that same frame, so they always match): the start as decoded, and the end cropped to the
-/// middle `crop` fraction of it at exactly the same size.
-/// Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced and files as the
-/// only protocol; the size is read from the PNG ffmpeg wrote, never guessed by a prober. Errors say what failed
-/// without ffmpeg's text, which can name local paths.
-pub(crate) async fn keyframe_crop_frames(ctx: &Ctx, start: &str, crop: f64) -> PResult<(String, String)> {
+/// Where a keyframed camera move's end picture comes from (moves.rs).
+pub(crate) enum EndFrom<'a> {
+    /// The middle of the start picture at this fraction (zoom moves).
+    Crop(f64),
+    /// A picture made from the start picture by an image edit (view moves): a local /outputs path.
+    Picture(&'a str),
+}
+
+/// Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced.
+fn picture_demuxer(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    match crate::studio::sniff(bytes) {
+        Some(("png", _)) => Some(("png", "png_pipe")),
+        Some(("jpg", _)) => Some(("jpg", "jpeg_pipe")),
+        Some(("webp", _)) => Some(("webp", "webp_pipe")),
+        _ => None,
+    }
+}
+
+/// The start and end pictures for a keyframed camera move, as JPEG data URIs made from one upright decode of the
+/// start picture (ffmpeg applies a photo's EXIF rotation where it supports it): the start as decoded, and the end
+/// at exactly that size, either the start's middle `crop` fraction or the edit's picture scaled to cover the same
+/// frame. So the two always match in size and orientation. Only real PNG, JPEG or WebP pictures reach ffmpeg, with
+/// that demuxer forced and files as the only protocol; the size is read from the PNG ffmpeg wrote, never guessed by
+/// a prober. Errors say what failed without ffmpeg's text, which can name local paths.
+pub(crate) async fn keyframe_frames(ctx: &Ctx, start: &str, end: EndFrom<'_>) -> PResult<(String, String)> {
     let failed = || ProviderError::Failed("The camera move could not make its end picture from the start picture".into());
-    if !(0.2..1.0).contains(&crop) {
-        return Err(failed());
+    let not_a_picture = || ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into());
+    if let EndFrom::Crop(c) = end {
+        if !(0.2..1.0).contains(&c) {
+            return Err(failed());
+        }
     }
     let (bytes, _) = media::load_image(ctx, start).await?;
-    let (ext, demuxer) = match crate::studio::sniff(&bytes) {
-        Some(("png", _)) => ("png", "png_pipe"),
-        Some(("jpg", _)) => ("jpg", "jpeg_pipe"),
-        Some(("webp", _)) => ("webp", "webp_pipe"),
-        _ => return Err(ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into())),
+    let (ext, demuxer) = picture_demuxer(&bytes).ok_or_else(not_a_picture)?;
+    let edited = match end {
+        EndFrom::Picture(p) => {
+            let (b, _) = media::load_image(ctx, p).await.map_err(|_| failed())?;
+            let (e, d) = picture_demuxer(&b).ok_or_else(failed)?;
+            Some((b, e, d))
+        }
+        EndFrom::Crop(_) => None,
     };
     let dir = std::env::temp_dir();
     let tag = media::random_hex(8);
-    let file = |name: &str| dir.join(format!("agave-push-{tag}-{name}"));
+    let file = |name: &str| dir.join(format!("agave-keyframe-{tag}-{name}"));
     let (src, upright, first, last) = (file(&format!("src.{ext}")), file("upright.png"), file("start.jpg"), file("end.jpg"));
+    let edit_src = edited.as_ref().map(|(_, e, _)| file(&format!("edit.{e}")));
     let ff = |input: &std::path::Path, format: &str, vf: String, out: &std::path::Path| {
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", format, "-i"])
@@ -253,17 +277,26 @@ pub(crate) async fn keyframe_crop_frames(ctx: &Ctx, start: &str, crop: f64) -> P
         run(&mut ff(&src, demuxer, "format=rgb24".into(), &upright)).await.map_err(|_| failed())?;
         let png = tokio::fs::read(&upright).await.map_err(|_| failed())?;
         let (w, h) = png_size(&png).ok_or_else(failed)?;
-        let c = crop;
         // Full-chroma JPEG keeps odd sizes exact on every ffmpeg (4:2:0 rounds them to even on some).
         run(&mut ff(&upright, "png_pipe", "format=yuvj444p".into(), &first)).await.map_err(|_| failed())?;
-        let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos,format=yuvj444p");
-        run(&mut ff(&upright, "png_pipe", vf, &last)).await.map_err(|_| failed())?;
+        match (&end, &edited, &edit_src) {
+            (EndFrom::Crop(c), _, _) => {
+                let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos,format=yuvj444p");
+                run(&mut ff(&upright, "png_pipe", vf, &last)).await.map_err(|_| failed())?;
+            }
+            (EndFrom::Picture(_), Some((b, _, d)), Some(path)) => {
+                tokio::fs::write(path, b).await.map_err(|_| failed())?;
+                let vf = format!("scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},format=yuvj444p");
+                run(&mut ff(path, d, vf, &last)).await.map_err(|_| failed())?;
+            }
+            _ => return Err(failed()),
+        }
         let a = tokio::fs::read(&first).await.map_err(|_| failed())?;
         let b = tokio::fs::read(&last).await.map_err(|_| failed())?;
         Ok::<_, ProviderError>((a, b))
     }
     .await;
-    for f in [&src, &upright, &first, &last] {
+    for f in [Some(&src), Some(&upright), Some(&first), Some(&last), edit_src.as_ref()].into_iter().flatten() {
         let _ = tokio::fs::remove_file(f).await;
     }
     let (a, b) = made?;
@@ -591,7 +624,7 @@ mod tests {
         // A 400x200 picture: blue, with a red 100x50 block in the middle. Cropped in, the red block fills more.
         gen(&["-f", "lavfi", "-i", "color=c=blue:s=400x200", "-f", "lavfi", "-i", "color=c=red:s=100x50",
             "-filter_complex", "[0:v][1:v]overlay=150:75", "-frames:v", "1"], "start.png");
-        let (first, last) = keyframe_crop_frames(&ctx, "/outputs/start.png", 0.65).await.unwrap();
+        let (first, last) = keyframe_frames(&ctx, "/outputs/start.png", EndFrom::Crop(0.65)).await.unwrap();
         let (first, last) = (decode(&first, "first.jpg"), decode(&last, "last.jpg"));
         for f in [&first, &last] {
             let (w, h, _, _) = probe_any(f).await.unwrap();
@@ -601,11 +634,11 @@ mod tests {
         assert!(px(&last, 200, 100).0 > 200, "the middle stays red");
         assert!(px(&last, 70, 100).1 > 200 && px(&last, 70, 100).0 < 60, "the edge is still blue: a push, not a fill");
         assert!(px(&last, 140, 100).0 > 200, "the red block grew past its old edge at x=150");
-        assert!(keyframe_crop_frames(&ctx, "/outputs/nope.png", 0.65).await.is_err(), "no start picture, no job");
+        assert!(keyframe_frames(&ctx, "/outputs/nope.png", EndFrom::Crop(0.65)).await.is_err(), "no start picture, no job");
 
         // Odd sizes come back exact (fal refuses pictures under 300 px).
         gen(&["-f", "lavfi", "-i", "color=c=gray:s=320x320", "-vf", "format=rgb24,crop=301:301", "-frames:v", "1"], "odd.png");
-        let (_, last) = keyframe_crop_frames(&ctx, "/outputs/odd.png", 0.65).await.unwrap();
+        let (_, last) = keyframe_frames(&ctx, "/outputs/odd.png", EndFrom::Crop(0.65)).await.unwrap();
         let (w, h, _, _) = probe_any(&decode(&last, "odd-last.jpg")).await.unwrap();
         assert_eq!((w, h), (301, 301));
 
@@ -622,15 +655,25 @@ mod tests {
         rotated.extend_from_slice(&app1);
         rotated.extend_from_slice(&jpg[2..]);
         std::fs::write(dir.join("rotated.jpg"), rotated).unwrap();
-        let (first, last) = keyframe_crop_frames(&ctx, "/outputs/rotated.jpg", 0.65).await.unwrap();
+        let (first, last) = keyframe_frames(&ctx, "/outputs/rotated.jpg", EndFrom::Crop(0.65)).await.unwrap();
         let a = probe_any(&decode(&first, "rot-first.jpg")).await.unwrap();
         let b = probe_any(&decode(&last, "rot-last.jpg")).await.unwrap();
         assert_eq!((a.0, a.1), (b.0, b.1), "start and end match in shape");
         assert!([(400, 300), (300, 400)].contains(&(a.0, a.1)), "{a:?}");
 
+        // A view move's edit comes back in another size: the end picture is scaled to cover the start's exact frame.
+        gen(&["-f", "lavfi", "-i", "color=c=orange:s=640x400", "-frames:v", "1"], "edit.png");
+        let (first, last) = keyframe_frames(&ctx, "/outputs/start.png", EndFrom::Picture("/outputs/edit.png")).await.unwrap();
+        let a = probe_any(&decode(&first, "view-first.jpg")).await.unwrap();
+        let b = probe_any(&decode(&last, "view-last.jpg")).await.unwrap();
+        assert_eq!(((a.0, a.1), (b.0, b.1)), ((400, 200), (400, 200)));
+        assert!(px(&dir.join("view-last.jpg"), 10, 10).0 > 200, "the end picture is the edit, not the start");
+        std::fs::write(dir.join("fake.png"), "not a picture").unwrap();
+        assert!(keyframe_frames(&ctx, "/outputs/start.png", EndFrom::Picture("/outputs/fake.png")).await.is_err());
+
         // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
-        let err = keyframe_crop_frames(&ctx, "/outputs/list.png", 0.65).await.unwrap_err();
+        let err = keyframe_frames(&ctx, "/outputs/list.png", EndFrom::Crop(0.65)).await.unwrap_err();
         assert!(format!("{err:?}").contains("PNG, JPEG or WebP"), "{err:?}");
     }
 
