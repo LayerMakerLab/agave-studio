@@ -19,6 +19,7 @@ use crate::keys::{self, SLOTS};
 use crate::media;
 use crate::moves;
 use crate::pipelines;
+use crate::playground;
 use crate::promptcraft;
 use crate::providers::{self, SubmitReq};
 use crate::reframe;
@@ -157,6 +158,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/setup", get(setup_status))
         .route("/api/setup/download", post(setup_download))
         .route("/api/setup/cancel", post(setup_cancel))
+        .route("/api/fal/models", get(playground::models))
+        .route("/api/fal/model", get(playground::model))
+        .route("/api/fal/price", get(playground::price))
+        .route("/api/fal/run", post(playground::run))
         .route("/api/pipelines", get(pipelines::list))
         .route("/api/pipelines/runs", get(pipelines::runs).post(pipelines::create))
         .route("/api/pipelines/runs/{id}/step", post(pipelines::step))

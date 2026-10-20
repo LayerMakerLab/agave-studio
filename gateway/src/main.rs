@@ -10,6 +10,7 @@ mod models;
 mod moves;
 mod pipelines;
 mod placeholder;
+mod playground;
 mod promptcraft;
 mod providers;
 mod reframe;

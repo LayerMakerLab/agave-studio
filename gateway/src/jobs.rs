@@ -175,7 +175,11 @@ impl JobStore {
         let age = |job: &Job| Duration::from_secs(now_unix().saturating_sub(job.created_at));
         self.with(|m| {
             for a in pending {
-                let adapter = registry.get(&a.job.model).and_then(crate::providers::adapter_for);
+                // Playground jobs (fal:<endpoint>) are not in models.toml; their adapter comes from the id.
+                let adapter = registry
+                    .get(&a.job.model)
+                    .and_then(crate::providers::adapter_for)
+                    .or_else(|| crate::playground::adapter_for_job(&a.job.model));
                 let too_old = age(&a.job) > MAX_JOB_AGE;
                 let started = now.checked_sub(age(&a.job)).unwrap_or(now);
                 let resumable = adapter.is_some() && a.handle.is_some() && !too_old;

@@ -9,6 +9,7 @@ use crate::keys::KeyStore;
 use crate::media::Ctx;
 use crate::models::Registry;
 use crate::pipelines::PipelineStore;
+use crate::playground;
 use crate::promptcraft::{self, PresetCatalog};
 use crate::providers::Fake;
 use crate::studio::Studio;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub studio: Studio,
     /// Library pipelines: runs and their step state (data/pipelines.json).
     pub pipelines: PipelineStore,
+    /// Playground: fal catalog, model forms and prices (cached in memory).
+    pub playground: Arc<playground::Cache>,
     /// Test mode: every model is answered by a local fake provider (no network, no key, no cost). Only set
     /// when the gateway starts with AGAVE_FAKE_PROVIDERS=1, or by unit tests.
     pub fake: Option<Arc<Fake>>,
@@ -73,6 +76,7 @@ impl AppState {
             let fail = std::env::var("AGAVE_FAKE_FAIL").unwrap_or_default();
             let mut st = Self::build(paths, keys)?;
             st.fake = Some(Arc::new(Fake::new(Duration::from_millis(3500), &fail)));
+            st.playground = Arc::new(playground::Cache::new(true));
             return Ok(st);
         }
         let keys = KeyStore::load(paths.keys_file.clone());
@@ -104,6 +108,7 @@ impl AppState {
             jobs,
             studio,
             pipelines,
+            playground: Arc::new(playground::Cache::new(false)),
             fake: None,
             allowed_hosts: Arc::new(hosts),
             allowed_origins: Arc::new(origins),
