@@ -1307,6 +1307,8 @@
     // Words typed while the model loads are the person's and win over the template's, but only when they replaced
     // the old words: typed into an empty field or over all of it (select all, then type or paste). A keystroke in the
     // old model's example is not a new prompt.
+    const box = document.querySelector('#pgFields [data-name="prompt"] :is(textarea, input), #pgFields [data-name="text"] :is(textarea, input)');
+    const before = box ? box.value.trim() : '';
     let typed = null;
     let replaced = false;
     const words = (e) => e.target.closest && e.target.closest('[data-name="prompt"], [data-name="text"]');
@@ -1328,7 +1330,8 @@
       fields.removeEventListener('input', onType);
     }
     if (!S.spec || S.spec.id !== t.model) return;
-    const own = replaced && typeof typed === 'string' && typed.trim() ? typed : null;
+    // Undone back to the old words is not a new prompt either.
+    const own = replaced && typeof typed === 'string' && typed.trim() && typed.trim() !== before ? typed : null;
     const wordsField = typeof t.prompt === 'string' ? ['prompt', own || t.prompt] : typeof t.text === 'string' ? ['text', own || t.text] : null;
     if (wordsField && S.spec.fields.some((f) => f.name === wordsField[0])) {
       S.values[wordsField[0]] = wordsField[1];
