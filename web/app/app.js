@@ -252,6 +252,9 @@
     const m = state.models.find((x) => x.id === id);
     return m ? m.name : id;
   };
+  // Playground runs (fal:<endpoint>) carry the fal model's own name.
+  const jobModelName = (job) => (typeof job.model === 'string' && job.model.startsWith('fal:') && job.request && typeof job.request.name === 'string'
+    ? `${job.request.name} · Playground` : modelName(job.model));
   const currentMode = () => MODES[state.mode];
   // @tags of saved Elements in the prompt (same rule as the engine: not right after a letter, so emails are skipped).
   const TAG_RE = /(^|[^A-Za-z0-9])@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
@@ -655,13 +658,13 @@
       : null;
     const card = el('article', {
       class: `card ${job.status}${isNew ? ' enter' : ''}`,
-      'aria-label': `${label}: ${modelName(job.model)}`,
+      'aria-label': `${label}: ${jobModelName(job)}`,
     }, [
       media,
       el('div', { class: 'card-body' }, [
         el('div', { class: 'card-top' }, [
           el('span', { class: 'state' }, [label]),
-          el('span', { class: 'card-model', title: job.model || '' }, [modelName(job.model)]),
+          el('span', { class: 'card-model', title: job.model || '' }, [jobModelName(job)]),
         ]),
         el('p', { class: 'card-prompt' }, [job.prompt || '']),
         job.status === 'failed' ? el('p', { class: 'card-error', title: job.error || '' }, [jobError(job)]) : null,

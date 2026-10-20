@@ -54,6 +54,7 @@ a:hover { color: var(--silver-1); }
   font: 500 11px/1 var(--font-sans); letter-spacing: 0.01em;
   transition: color 0.4s var(--ease-out), background-color 0.4s var(--ease-out), box-shadow 0.4s var(--ease-out);
 }
+a.mode { text-decoration: none; }
 .mode:hover { color: var(--ink-2); background: rgba(255, 255, 255, 0.03); }
 .mode[aria-pressed="true"] { color: var(--silver-1); background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px var(--line-2); }
 .rail-foot { margin-top: auto; width: 100%; padding: 0 8px; }
@@ -534,7 +535,7 @@ a:hover { color: var(--silver-1); }
 
 @media (max-width: 720px) {
   .rail-foot { display: flex; flex: 0 0 auto; width: auto; gap: 2px; }
-  .rail-foot .mode { width: 42px; flex: 0 0 42px; }
+  .rail-foot .mode { width: 36px; flex: 0 0 36px; }
   .badge { top: 2px; right: 2px; }
   .add-wrap { flex: 0 0 auto; }
   .two { grid-template-columns: 1fr; }

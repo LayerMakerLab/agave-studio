@@ -36,7 +36,7 @@ fn web_dir_from_args() -> Option<PathBuf> {
 
 #[tokio::main]
 async fn main() {
-    let state = match state::AppState::load(web_dir_from_args()) {
+    let mut state = match state::AppState::load(web_dir_from_args()) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("startup failed: {e}");
@@ -53,7 +53,27 @@ async fn main() {
         }
     }
 
-    let addr = ADDR;
+    // Test mode can run beside a real studio: AGAVE_TEST_PORT moves it to another local port. A real studio ignores it.
+    let test_port = std::env::var("AGAVE_TEST_PORT").ok();
+    let owned;
+    let addr = match (test_port, state.fake.is_some()) {
+        (Some(p), true) => match p.parse::<u16>() {
+            Ok(port) if port >= 1024 => {
+                state.use_port(port);
+                owned = format!("127.0.0.1:{port}");
+                owned.as_str()
+            }
+            _ => {
+                eprintln!("AGAVE_TEST_PORT must be a port number from 1024 up");
+                std::process::exit(1);
+            }
+        },
+        (Some(_), false) => {
+            eprintln!("AGAVE_TEST_PORT is ignored outside test mode (AGAVE_FAKE_PROVIDERS=1)");
+            ADDR
+        }
+        (None, _) => ADDR,
+    };
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {

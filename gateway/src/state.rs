@@ -117,6 +117,12 @@ impl AppState {
         })
     }
 
+    /// Answers on 127.0.0.1:<port> instead of 4170 (test mode only; see main.rs).
+    pub fn use_port(&mut self, port: u16) {
+        self.allowed_hosts = Arc::new(vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")]);
+        self.allowed_origins = Arc::new(vec![format!("http://127.0.0.1:{port}"), format!("http://localhost:{port}")]);
+    }
+
     /// State under target/test-tmp with an empty key store (never reads the environment).
     #[cfg(test)]
     pub fn for_tests(name: &str) -> Self {

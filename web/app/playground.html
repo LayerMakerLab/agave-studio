@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Playground · Agave Studio</title>
+<meta name="description" content="Agave Studio Playground: run any fal model with its own controls, on your own key, and see the price before you press Run.">
+<meta name="theme-color" content="#08080a">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/assets/brand/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/assets/brand/favicon-16.png" type="image/png" sizes="16x16">
+<link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+<link rel="stylesheet" href="/css/fonts.css">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/app/app.css">
+<link rel="stylesheet" href="/app/playground.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3.5v10l-6-3.5"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8.5a2 2 0 0 1 2-2h2.2l1.6-2.3h6.4l1.6 2.3H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+    <symbol id="i-audio" viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/></symbol>
+    <symbol id="i-3d" viewBox="0 0 24 24"><path d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2"/></symbol>
+    <symbol id="i-characters" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.6-4 3.7-6 7.5-6s6.9 2 7.5 6"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M4 19h16"/></symbol>
+    <symbol id="i-tweak" viewBox="0 0 24 24"><path d="M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10z"/><path d="M13.5 7.5l3 3"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  </defs>
+</svg>
+
+<div class="shell">
+  <aside class="rail">
+    <a class="brand" href="/" aria-label="Agave Studio home">
+      <img class="brand-logo" src="/assets/brand/mark.svg" alt="" width="30" height="30">
+      <span class="wordmark">Agave Studio</span>
+    </a>
+    <nav class="modes" aria-label="Studio">
+      <a class="mode" href="/app/#image"><svg class="ico" aria-hidden="true"><use href="#i-image"/></svg><span class="lbl">Image</span></a>
+      <a class="mode" href="/app/#video"><svg class="ico" aria-hidden="true"><use href="#i-video"/></svg><span class="lbl">Video</span></a>
+      <a class="mode" href="/app/#camera"><svg class="ico" aria-hidden="true"><use href="#i-camera"/></svg><span class="lbl">Camera</span></a>
+      <a class="mode" href="/app/#audio"><svg class="ico" aria-hidden="true"><use href="#i-audio"/></svg><span class="lbl">Audio</span></a>
+      <a class="mode" href="/app/#3d"><svg class="ico" aria-hidden="true"><use href="#i-3d"/></svg><span class="lbl">3D</span></a>
+      <a class="mode" href="/app/#characters"><svg class="ico" aria-hidden="true"><use href="#i-characters"/></svg><span class="lbl">Characters</span></a>
+    </nav>
+    <div class="rail-foot">
+      <a class="mode" href="/app/playground.html" aria-current="page"><svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg><span class="lbl">Playground</span></a>
+    </div>
+  </aside>
+
+  <main class="stage pg-stage" id="main">
+    <header class="topbar">
+      <div class="titles">
+        <h1>Playground</h1>
+        <p class="sub">Any of fal's models, with its own controls. Pick one, fill in its form and press Run. The price shows before you press.</p>
+      </div>
+    </header>
+
+    <div id="pgTest" class="banner test" role="status" hidden><b>TEST MODE</b> Seven real fal models with fake results. Nothing is sent to fal and nothing is paid.</div>
+    <div id="pgOffline" class="banner" role="status" hidden>The engine is not answering. Start Agave Studio, then reload this page.</div>
+
+    <section id="pgKey" class="pg-key glass" aria-labelledby="pgKeyTitle" hidden>
+      <h2 id="pgKeyTitle">Add your fal key to run models</h2>
+      <p>You can look around without one. Runs are paid to fal on your key; Agave adds nothing. Get a key at <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a>.</p>
+      <form id="pgKeyForm" class="pg-key-form" autocomplete="off">
+        <label class="sr" for="pgKeyInput">fal key</label>
+        <input id="pgKeyInput" type="password" placeholder="Paste your fal key" spellcheck="false" autocomplete="off">
+        <button type="submit" class="pill sm">Save key</button>
+      </form>
+      <p id="pgKeyNote" class="pg-note" aria-live="polite"></p>
+    </section>
+
+    <div class="pg-grid">
+      <section class="pg-left glass" aria-label="Model and settings">
+        <button type="button" id="pgModelBtn" class="pg-model" aria-haspopup="dialog" aria-controls="pgPicker">
+          <span class="pg-thumb" id="pgModelThumb" aria-hidden="true"></span>
+          <span class="pg-model-text">
+            <span class="pg-model-name" id="pgModelName">Loading…</span>
+            <span class="pg-model-meta" id="pgModelMeta"></span>
+          </span>
+          <span class="pg-change">Change<svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></span>
+        </button>
+        <p id="pgModelDesc" class="pg-desc"></p>
+        <p id="pgWhyNot" class="pg-why" role="status" hidden></p>
+
+        <div class="pg-toolbar">
+          <div class="pg-seg" role="tablist" aria-label="Edit as">
+            <button type="button" role="tab" id="pgTabForm" aria-selected="true" aria-controls="pgForm">Form</button>
+            <button type="button" role="tab" id="pgTabJson" aria-selected="false" aria-controls="pgJsonWrap">JSON</button>
+          </div>
+          <button type="button" id="pgReset" class="pg-link-btn">Reset</button>
+        </div>
+
+        <form id="pgForm" class="pg-form" role="tabpanel" aria-labelledby="pgTabForm" novalidate autocomplete="off">
+          <div id="pgFields"></div>
+          <details id="pgMore" class="pg-more" hidden>
+            <summary><span id="pgMoreLabel">More settings</span></summary>
+            <div id="pgMoreFields"></div>
+          </details>
+        </form>
+        <div id="pgJsonWrap" class="pg-json" role="tabpanel" aria-labelledby="pgTabJson" hidden>
+          <label class="sr" for="pgJson">Input as JSON</label>
+          <textarea id="pgJson" spellcheck="false" rows="14"></textarea>
+          <p id="pgJsonNote" class="pg-note">This is exactly what Run sends. Fields you leave out use the model's defaults.</p>
+        </div>
+
+        <div class="pg-run">
+          <div class="pg-price" id="pgPrice" aria-live="polite"></div>
+          <div class="pg-run-row">
+            <button type="button" id="pgCodeBtn" class="pg-icon-btn" title="Get code for this request"><svg class="ico" aria-hidden="true"><use href="#i-code"/></svg><span class="sr">Get code</span></button>
+            <button type="button" id="pgRun" class="pill pg-run-btn" disabled><span class="dot" aria-hidden="true"></span><span id="pgRunLabel">Run</span></button>
+          </div>
+          <p id="pgRunNote" class="pg-note" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section class="pg-right" aria-label="Result">
+        <div id="pgCanvas" class="pg-canvas" aria-live="polite">
+          <div class="pg-canvas-empty" id="pgCanvasEmpty">
+            <p class="eyebrow">Your result shows here</p>
+            <p>Every model opens with a working example, so you can press Run right away, or change anything first.</p>
+            <ul class="pg-keys">
+              <li><kbd>/</kbd> choose a model</li>
+              <li><kbd>⌘</kbd><kbd>↵</kbd> run</li>
+            </ul>
+          </div>
+        </div>
+        <div id="pgResultBar" class="pg-result-bar" hidden>
+          <div class="pg-result-meta" id="pgResultMeta"></div>
+          <div class="pg-result-acts">
+            <button type="button" class="pg-act" id="pgTweak"><svg class="ico" aria-hidden="true"><use href="#i-tweak"/></svg>Tweak</button>
+            <button type="button" class="pg-act" id="pgResultCode"><svg class="ico" aria-hidden="true"><use href="#i-code"/></svg>Code</button>
+            <a class="pg-act" id="pgDownload" download><svg class="ico" aria-hidden="true"><use href="#i-down"/></svg>Download</a>
+          </div>
+        </div>
+        <div class="pg-hist-head">
+          <h2 class="pg-h">Your runs</h2>
+          <p class="pg-note" id="pgHistNote"></p>
+        </div>
+        <div id="pgHistory" class="pg-history" role="list" aria-label="Your runs"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="pgPicker" class="pg-sheet" aria-labelledby="pgPickerTitle">
+  <div class="pg-sheet-head">
+    <h2 id="pgPickerTitle">Choose a model</h2>
+    <button type="button" class="pg-icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="pg-search">
+    <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+    <label class="sr" for="pgSearch">Search fal's models</label>
+    <input id="pgSearch" type="search" placeholder="Search fal's models: kling, upscale, voice, logo…" autocomplete="off" spellcheck="false">
+  </div>
+  <div id="pgCats" class="pg-cats" role="group" aria-label="What it makes"></div>
+  <div id="pgList" class="pg-list" role="list"></div>
+  <p id="pgListMsg" class="pg-note pg-list-msg" aria-live="polite"></p>
+  <div class="pg-list-foot"><button type="button" id="pgMoreModels" class="ghost" hidden>Show more models</button></div>
+</dialog>
+
+<dialog id="pgCode" class="pg-sheet pg-small" aria-labelledby="pgCodeTitle">
+  <div class="pg-sheet-head">
+    <h2 id="pgCodeTitle">Code for this request</h2>
+    <button type="button" class="pg-icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="pg-seg" role="tablist" aria-label="Language" id="pgCodeTabs">
+    <button type="button" role="tab" data-lang="curl" aria-selected="true">cURL</button>
+    <button type="button" role="tab" data-lang="js" aria-selected="false">JavaScript</button>
+    <button type="button" role="tab" data-lang="py" aria-selected="false">Python</button>
+  </div>
+  <pre class="pg-code"><code id="pgCodeText"></code></pre>
+  <p class="pg-note" id="pgCodeNote">Set FAL_KEY in your shell first. Your key is never put into this code.</p>
+  <div class="pg-sheet-foot"><button type="button" class="pill sm" id="pgCopyCode">Copy</button></div>
+</dialog>
+
+<dialog id="pgConfirm" class="pg-sheet pg-small" aria-labelledby="pgConfirmTitle">
+  <div class="pg-sheet-head"><h2 id="pgConfirmTitle">Check the price first</h2></div>
+  <div id="pgConfirmText" class="pg-confirm-text"></div>
+  <div class="pg-sheet-foot">
+    <button type="button" class="ghost" data-close>Not now</button>
+    <button type="button" class="pill sm" id="pgConfirmRun"><span class="dot" aria-hidden="true"></span>Run it</button>
+  </div>
+</dialog>
+
+<script src="/app/playground.js" defer></script>
+</body>
+</html>
