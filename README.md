@@ -72,7 +72,7 @@ variables with the same names also work.
 |---|---|---|
 | [fal.ai](https://fal.ai) | `FAL_KEY` | Kling, Seedance, Wan, Hailuo, Veo, FLUX, Nano Banana, Seedream |
 | [Replicate](https://replicate.com) | `REPLICATE_API_TOKEN` | FLUX schnell |
-| [Google Gemini](https://ai.google.dev) | `GEMINI_API_KEY` | Veo 3.1, Nano Banana |
+| [Google Gemini](https://ai.google.dev) | `GEMINI_API_KEY` | Nano Banana |
 | [OpenAI](https://platform.openai.com) | `OPENAI_API_KEY` | GPT Image |
 | [Black Forest Labs](https://bfl.ai) | `BFL_API_KEY` | FLUX 1.1 pro, FLUX.2 pro |
 | [ElevenLabs](https://elevenlabs.io) | `ELEVENLABS_API_KEY` | Text to speech |

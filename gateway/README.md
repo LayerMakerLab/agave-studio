@@ -34,5 +34,6 @@ Open http://127.0.0.1:4170/ (home) and http://127.0.0.1:4170/app/ (workspace).
 ## Adapters
 
 Implemented: fal (queue: Kling, Seedance, Wan, Hailuo, Veo, FLUX, Nano Banana, Seedream), Replicate, OpenAI images,
-Gemini Veo, Gemini image, Black Forest Labs FLUX, ElevenLabs text to speech, Meshy image to 3D.
+Gemini Veo (no model uses it: Google shuts the Veo 3.1 preview ids down on 22 October 2026), Gemini image,
+Black Forest Labs FLUX, ElevenLabs text to speech, Meshy image to 3D.
 A model whose provider has no adapter returns 501 `adapter_not_implemented`.

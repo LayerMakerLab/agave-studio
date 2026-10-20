@@ -19,7 +19,7 @@ pub struct Slot {
 pub const SLOTS: &[Slot] = &[
     Slot { env: "FAL_KEY", provider: "fal.ai", docs: "https://fal.ai/docs/model-apis/model-endpoints/queue" },
     Slot { env: "REPLICATE_API_TOKEN", provider: "Replicate", docs: "https://replicate.com/docs/reference/http" },
-    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/veo" },
+    Slot { env: "GEMINI_API_KEY", provider: "Google Gemini", docs: "https://ai.google.dev/gemini-api/docs/image-generation" },
     Slot { env: "OPENAI_API_KEY", provider: "OpenAI", docs: "https://developers.openai.com/api/docs/guides/image-generation" },
     Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images" },
     Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert" },

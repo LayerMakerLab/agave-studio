@@ -232,7 +232,7 @@ id = "fal/veo-3.1-t2v"
 name = "Veo 3.1 via fal"
 vendor = "Google"
 provider = "fal"
-endpoint = "fal-ai/veo3.1"
+endpoint = "fal-ai/veo3.1"   # fal page 2026-10-20: "This endpoint will be deprecated on November 17, 2026."
 modality = "video"
 modes = ["t2v"]
 key = "FAL_KEY"
@@ -245,7 +245,7 @@ id = "fal/veo-3.1-i2v"
 name = "Veo 3.1 via fal"
 vendor = "Google"
 provider = "fal"
-endpoint = "fal-ai/veo3.1/image-to-video"
+endpoint = "fal-ai/veo3.1/image-to-video"   # fal page 2026-10-20: "This endpoint will be deprecated on November 17, 2026."
 modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
@@ -336,29 +336,8 @@ params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
 
 # ---------------------------------------------------------------- Google Gemini
 
-[[model]]
-id = "gemini/veo-3.1"
-name = "Veo 3.1"
-vendor = "Google"
-provider = "gemini"
-endpoint = "veo-3.1-generate-preview"
-modality = "video"
-modes = ["t2v", "i2v"]
-key = "GEMINI_API_KEY"
-verified = true   # id and image shape (inlineData) from the Gemini Veo docs, 2026-10-13; 1080p is sent as 8 s
-params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
-
-[[model]]
-id = "gemini/veo-3.1-fast"
-name = "Veo 3.1 Fast"
-vendor = "Google"
-provider = "gemini"
-endpoint = "veo-3.1-fast-generate-preview"
-modality = "video"
-modes = ["t2v", "i2v"]
-key = "GEMINI_API_KEY"
-verified = true
-params = { aspect = ["16:9", "9:16"], duration = [4, 6, 8], resolution = ["720p", "1080p"] }
+# Veo on the Gemini API: Google shuts the veo-3.1 preview ids down on 2026-10-22 (deprecations page, checked
+# 2026-10-20) and points to gemini-omni-1.1-flash, which this gateway has no adapter for yet. Veo 3.1 runs via fal above.
 
 [[model]]
 id = "gemini/nano-banana-2.1"
