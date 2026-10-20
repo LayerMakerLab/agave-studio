@@ -1471,3 +1471,60 @@ mod real_schemas {
         assert!(ok > 0);
     }
 }
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    /// Runs real fal calls on FAL_KEY, so it costs a little (about $0.005). Run by hand only:
+    /// PG_LIVE=1 FAL_KEY=... cargo test live_fal -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_fal_catalog_price_and_runs() {
+        assert_eq!(std::env::var("PG_LIVE").as_deref(), Ok("1"), "set PG_LIVE=1 to spend on fal");
+        let key = std::env::var("FAL_KEY").expect("FAL_KEY");
+        let st = AppState::for_tests("pg_live");
+        st.keys.set("FAL_KEY", &key).expect("key");
+        let app = crate::api::router(st.clone());
+        let req = |uri: &str| axum::http::Request::builder().uri(uri).header("host", "127.0.0.1:4170").body(axum::body::Body::empty()).unwrap();
+        use tower::ServiceExt;
+        for uri in ["/api/fal/models", "/api/fal/models?category=text-to-speech&q=minimax", "/api/fal/model?id=fal-ai/flux/schnell", "/api/fal/price?id=fal-ai/flux/schnell"] {
+            let resp = app.clone().oneshot(req(uri)).await.unwrap();
+            let status = resp.status();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            println!("{uri} -> {status} {}", String::from_utf8_lossy(&body).chars().take(300).collect::<String>());
+            assert!(status.is_success(), "{uri}");
+        }
+        for (id, input) in [
+            ("fal-ai/flux/schnell", json!({"prompt": "a small brass lamp on a wooden desk, soft morning light", "image_size": "square"})),
+            ("fal-ai/minimax/speech-2.8-hd", json!({"prompt": "Hello from the Playground."})),
+        ] {
+            let spec = spec_for(&st, id).await.ok().expect("spec");
+            let (checked, _) = check_input(&spec, input.as_object().unwrap()).expect("input accepted");
+            let adapter = FalRun { input: Value::Object(checked) };
+            let sub = SubmitReq {
+                endpoint: id.into(), mode: String::new(), prompt: String::new(), aspect: None, duration: None, resolution: None,
+                seed: None, image_url: None, image_urls: Vec::new(), voice_id: None, label: None, audio: None,
+                elements: Vec::new(), keyframe: None, end_image_url: None,
+            };
+            let Submitted::Queued(h) = adapter.submit(&st.ctx, &key, &sub).await.ok().expect("submitted") else { panic!("not queued") };
+            let mut done = None;
+            for _ in 0..90 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                match adapter.poll(&st.ctx, &key, &h).await {
+                    Ok(Polled::Running(_)) => continue,
+                    Ok(Polled::Done(outs)) => { done = Some(outs); break }
+                    Ok(Polled::Failed(m)) => panic!("{id} failed: {m}"),
+                    Err(ProviderError::Failed(m)) => println!("{id} transient: {m}"),
+                    Err(ProviderError::NotImplemented) => panic!("not implemented"),
+                }
+            }
+            let outs = done.expect("finished in 3 minutes");
+            for o in &outs {
+                let size = std::fs::metadata(st.ctx.outputs_dir.join(o.url.trim_start_matches("/outputs/"))).map(|m| m.len()).unwrap_or(0);
+                println!("{id} -> {} {} ({size} bytes)", o.kind, o.url);
+                assert!(size > 1000);
+            }
+        }
+    }
+}
