@@ -58,7 +58,7 @@ async fn main() {
         Err(e) => {
             eprintln!("cannot bind {addr}: {e}");
             if e.kind() == std::io::ErrorKind::AddrInUse {
-                eprintln!("Another program is using port 4170, often Agave Studio already running (the Mac app or another terminal). Open http://127.0.0.1:4170/app/, or quit the other copy and start this one again.");
+                eprintln!("Another program is using {addr}, often Agave Studio already running (the Mac app or another terminal). Open http://{addr}/app/, or quit the other copy and start this one again.");
             }
             std::process::exit(1);
         }

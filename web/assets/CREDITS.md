@@ -62,7 +62,7 @@ it. Nothing on the page comes from anywhere else.
 | img/pipe-char-sheet.webp, pipe-char-still.webp | Nano Banana Edit: the Character pipeline's steps 1 (Character sheet) and 2 (Opening still, from the saved Element @hero) | Agave Library pipeline run, 2026-10-19 | Character pipeline, steps 01 and 02 |
 | video/pipe-char-clip1.mp4, pipe-char-clip2.mp4 | Kling O3, 5 s each: the Character pipeline's Clip 1, and Clip 2 started on Clip 1's last frame | Agave Library pipeline run, 2026-10-19 | Character pipeline, steps 03 and 04 |
 | img/final-stage.webp | Meshy | ef15fed (same file at dd2465f) | Background of "Why it is free" |
-| img/hero-atrium.jpg | first frame of hero-atrium.mp4 | ef15fed | Not shown; the website import uses it as the share picture (og:image) |
+| img/hero-atrium.jpg | first frame of hero-atrium.mp4 (in ef15fed; the clip itself was removed 2026-10-19) | ef15fed | Not shown; the website import uses it as the share picture (og:image) |
 
 ## Brand (`web/assets/brand`)
 

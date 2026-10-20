@@ -421,11 +421,15 @@
     const c = state.chips;
     return priceCents(selectedModel(), c.duration, c.resolution, c.audio, cameraPlan());
   }
-  // The same price for a request already sent (Run again), or null when the model lists no dollar price.
+  // The same price for a request already sent (Run again), or null when the model lists no dollar price. It applies
+  // the engine's own rules: an option the request left out is the model's first listed value, and image to video
+  // always has a start picture (yours or an @Element's), so a keyframed move's edit is always part of it.
   function requestCents(req) {
     const m = req && state.models.find((x) => x.id === req.model);
-    const plan = req && req.image_url ? cameraPlanFor(m, req.camera, req.mode) : null;
-    return m ? priceCents(m, req.duration, req.resolution, req.audio, plan) : null;
+    if (!m) return null;
+    const pick = (v, key) => (v === null || v === undefined ? ((m.params && m.params[key]) || [])[0] : v);
+    const plan = (m.max_refs || 0) > 0 ? null : cameraPlanFor(m, req.camera, req.mode);
+    return priceCents(m, pick(req.duration, 'duration'), pick(req.resolution, 'resolution'), pick(req.audio, 'audio'), plan);
   }
   function priceCents(m, duration, resolution, audioOn, plan) {
     const p = m && m.price;
@@ -436,6 +440,9 @@
     if (!units) return null;
     const micro = Math.round(rate * units * 1e6);
     return Math.max(1, Math.ceil(micro / 1e4)) + keyframeCents(plan);
+  }
+  function priceNote(price) {
+    return price === 'price not listed' ? 'the provider lists no price for it' : `${price}, provider list price`;
   }
   // "≈ $0.37" for a list of requests, "about N Vendor credits", or 'price not listed'.
   function requestsPrice(reqs) {
@@ -690,7 +697,7 @@
     }
     if (job.status === 'failed' && job.request && !state.retried.has(job.id)) {
       const price = requestsPrice([job.request]);
-      acts.push(btn(`Run again · ${price}`, `Send the same request again, on your own key (${price}, provider list price)`, (b) => runAgain(job, b)));
+      acts.push(btn(`Run again · ${price}`, `Send the same request again, on your own key (${priceNote(price)})`, (b) => runAgain(job, b)));
     }
     return acts.length ? el('div', { class: 'card-acts' }, acts) : null;
   }
@@ -726,7 +733,7 @@
     if (again.length) {
       const price = requestsPrice(again.map((j) => j.request));
       els.retryAll.textContent = `Run ${again.length} failed again · ${price}`;
-      els.retryAll.title = `Send ${again.length === 1 ? 'that request' : `those ${again.length} requests`} again, on your own key (${price}, provider list price)`;
+      els.retryAll.title = `Send ${again.length === 1 ? 'that request' : `those ${again.length} requests`} again, on your own key (${priceNote(price)})`;
     }
     els.empty.hidden = jobs.length > 0;
     els.gallery.hidden = jobs.length === 0;
@@ -1020,10 +1027,10 @@
     const key = (m && m.key) || 'your key';
     const credit = /balance|credit|billing|payment/i.test(e);
     if (code === '402' || ((code === '401' || code === '403') && credit)) {
-      return `The provider says this account is out of credit or needs billing set up (HTTP ${code}). Add credit with the provider, then press Run again.`;
+      return `The provider says this account is out of credit or needs billing set up (HTTP ${code}). Add credit with the provider, then run it again.`;
     }
-    if (code === '401' || code === '403') return `The provider refused ${key} (HTTP ${code}). Check the key in Settings, then press Run again.`;
-    if (code === '429') return `The provider is limiting requests on ${key} (HTTP 429: too many, or a quota is used up). Wait, then press Run again.`;
+    if (code === '401' || code === '403') return `The provider refused ${key} (HTTP ${code}). Check the key in Settings, then run it again.`;
+    if (code === '429') return `The provider is limiting requests on ${key} (HTTP 429: too many, or a quota is used up). Wait, then run it again.`;
     return e || 'Generation failed.';
   }
 
@@ -2201,7 +2208,7 @@
         } else if (r.status === 503) {
           const b = el('button', { type: 'button', class: 'small-btn' }, ['Set up captions']);
           b.addEventListener('click', () => openSetup(2));
-          els.capNote.replaceChildren('Captions need the speech model, a one-time free download. ', b);
+          els.capNote.replaceChildren('Captions are not set up yet: they need a speech model (a free download) and, for Whisper, whisper-cli. ', b);
           return;
         } else {
           failed++;

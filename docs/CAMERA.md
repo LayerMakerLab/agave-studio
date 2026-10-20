@@ -17,8 +17,8 @@ them, so the move should happen even when the words are ignored.
 The studio says which kind a move is under the Camera chip, and the price before Generate includes the edit.
 Every other move is sent as words only, and the studio says so.
 
-Each keyframed move was checked on one paid clip (Kling 3.0 Pro image to video, audio off, 2026-10-19). One clip
-each is a first check, not a guarantee:
+Four of the five keyframed moves were checked on one paid clip each (Kling 3.0 Pro image to video, audio off,
+2026-10-19). One clip is a first check, not a guarantee:
 
 | Move | Clip | What happened |
 |---|---|---|

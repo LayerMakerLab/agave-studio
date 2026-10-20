@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Run again and Run failed again show their price before you press. Refused keys, missing credit and rate limits
+  are explained in plain words.
+- Captions with Whisper count as ready only when `whisper-cli` is on PATH; setup says what to install.
+- Security: /outputs serves only names the engine writes; camera-move pictures are worked on in an owner-only
+  folder, not the shared temp folder; pages may load scripts and connect only to the studio itself (so compressed
+  Draco/KTX2 3D models do not display).
+- Homepage: labels match the clips, lighter first load, no black flash on loops, keyboard fixes, unused files gone.
+
 - Keyframed camera moves on Kling 3.0 image to video: Dolly in and Crash zoom send a crop of the start picture as
   the end picture; Dolly out and Orbit left/right make the end picture with an image edit, priced before Generate.
   The studio says which moves are keyframed and which go as words only. See docs/CAMERA.md.
