@@ -115,7 +115,9 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     let csp = if output {
         "sandbox allow-same-origin; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
     } else {
-        "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"
+        // Scripts and connections only from the studio itself, so a script slipped into a page could neither load
+        // more code nor send anything out. blob: is the 3D viewer reading a model's own textures.
+        "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; script-src 'self'; connect-src 'self' blob:"
     };
     h.insert(header::CONTENT_SECURITY_POLICY, header::HeaderValue::from_static(csp));
     // Links out of the studio (provider docs, GitHub) never carry the local address or page path.
@@ -786,7 +788,8 @@ async fn setup_status(State(st): State<AppState>) -> Response {
                    "size": m.size(), "progress": setup::progress(m, data)})
         })
         .collect();
-    Json(json!({"speech": {"engine": engine, "parakeet_tool": sp.speech_tool().is_file()}, "models": models})).into_response()
+    Json(json!({"speech": {"engine": engine, "parakeet_tool": sp.speech_tool().is_file(), "whisper_tool": speech::whisper_tool()}, "models": models}))
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -1314,6 +1317,25 @@ mod tests {
         let resp = app.clone().oneshot(req).await.expect("response");
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
         assert!(st.jobs.list().is_empty());
+    }
+
+    /// Pages may run and call only the studio's own scripts and API; generated files never run scripts at all.
+    #[tokio::test]
+    async fn pages_load_scripts_and_connect_only_to_the_studio() {
+        let app = router(AppState::for_tests("api_csp"));
+        let csp = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder().uri(path).header("host", "127.0.0.1:4170").body(Body::empty()).unwrap();
+                let resp = app.oneshot(req).await.expect("response");
+                resp.headers()[header::CONTENT_SECURITY_POLICY].to_str().unwrap().to_string()
+            }
+        };
+        let page = csp("/app/").await;
+        for d in ["script-src 'self'", "connect-src 'self' blob:", "object-src 'none'", "frame-ancestors 'none'"] {
+            assert!(page.split("; ").any(|x| x == d), "{d} missing from {page}");
+        }
+        assert!(csp("/outputs/a.mp4").await.starts_with("sandbox allow-same-origin; default-src 'none'"));
     }
 
     #[tokio::test]

@@ -82,7 +82,7 @@ Never return a key value from any endpoint. Never log a key.
   audio is cut at pauses (silencedetect -35 dB, 0.3 s) and each stretch of speech is transcribed alone, so words never
   land in a pause; sound labels like "(upbeat music)" are dropped. One at a time; cached in data/transcripts/.
   503 captions_unavailable (no whisper or model), 400 invalid_file/too_long (over 30 min), 502 transcribe_failed.
-- GET /api/setup -> {"speech":{"engine":"parakeet"|"whisper"|null,"parakeet_tool"},"models":[{id,name,engine,languages,source,
+- GET /api/setup -> {"speech":{"engine":"parakeet"|"whisper"|null,"parakeet_tool","whisper_tool"},"models":[{id,name,engine,languages,source,
   size,progress:{state:"idle"|"paused"|"downloading"|"checking"|"preparing"|"ready"|"failed",done,total,error}}]}
   ("paused": bytes from a cancelled or broken download are on disk and will be reused). POST
   /api/setup/download {"model":"parakeet-v3"|"whisper-small"} -> 202 {"progress"} starts or resumes a background download;
@@ -165,4 +165,5 @@ language to the user's prompt. Preset tables live in C++.
 
 ## Design
 Use `web/css/tokens.css` (graphite, silver, one ember accent). Primary button = `.pill`.
-Fonts: Geist, Geist Mono, Instrument Serif (Google Fonts).
+Fonts: Geist, Geist Mono, Instrument Serif, served from `web/assets/fonts` (`web/css/fonts.css`); the homepage alone also
+loads Anybody from Google Fonts.

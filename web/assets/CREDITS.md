@@ -17,8 +17,9 @@ it. Nothing on the page comes from anywhere else.
   this page were made with Meshy and animated with Kling 3.0 on fal."
 - **dd2465f** (Agave Studio 0.1.0) has the same Meshy stills, byte for byte, and the play-leaf mark.
 - **Encoding.** Clips were re-encoded with ffmpeg for the web (H.264, no sound, 1600, 720 or 480 px wide). Each poster
-  is the first frame of its clip, and `lastframe-card-character.webp` is the last frame of its clip, saved as WebP
-  with nothing added or changed. Stills were resized and saved as WebP.
+  is the first frame of its clip, saved as WebP with nothing added or changed. Stills were resized and saved as WebP.
+  The five ef15fed clips (card-image, card-lipsync, card-upscale, card-character, card-camera) had their last 0.5 s
+  cut on 2026-10-19: it dipped to near black and faded back, which flashed on every loop.
 
 ## Hero cards (`web/assets/video`, posters in `web/assets/img`)
 
@@ -26,7 +27,7 @@ it. Nothing on the page comes from anywhere else.
 |---|---|---|---|
 | hero-dolly.mp4 | Kling 3.0 Pro (audio off) from a Seedream 4 still of a dancer in a white hall | Camera: Dolly in (Agave sends the start picture and the same picture cropped in as the end picture) | Camera |
 | hero-looks.mp4 | The pastel diner Seedream 4 still for 1 s, a wipe, then Kling 3.0 Pro (audio off) from that still after Agave's Film noir look edit (Seedream 4 Edit, `look` recipe). Joined with a wipe in ffmpeg; the first 0.2 s of the clip are trimmed | Look: Film noir; Camera: Static lock-off | Looks |
-| hero-courier.mp4 | Kling 3.0 Pro from a Seedream 4 still (a courier in a neon alley) | Camera: Tracking side | Animate |
+| hero-courier.mp4 | Kling 3.0 Pro from a Seedream 4 still (a courier in a neon alley) | Camera: Tracking side was picked, but the camera leads the rider head-on instead, so the card names no move | Animate |
 | hero-mara.mp4 | Kling 3.0 Pro (audio off) from a Seedream 4 still of an empty pier, with the Element @mara (saved from a Seedream 4 portrait) sent beside it as a Kling Element. The first 0.3 s are trimmed and the frame is cropped to its middle 70% in ffmpeg | Element @mara beside a start picture | Elements |
 | img/ref-mara.webp | A face crop of that Seedream 4 portrait (the Element's picture) | Element @mara | Elements, the inset |
 
@@ -37,7 +38,7 @@ it. Nothing on the page comes from anywhere else.
 | video/reel-kayak.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Crane up) |
 | video/reel-ink.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Static lock-off) |
 | video/reel-skater.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Low-angle orbit) |
-| video/reel-peonies.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Rack focus) |
+| video/reel-peonies.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Rack focus was picked, but the focus never changes, so the page names no move) |
 | video/reel-surfer.mp4 | Kling 3.0 Pro (audio off) from a Seedream 4 still | Agave, 2026-10-19 (no camera move picked) |
 | img/still-lighthouse.webp, still-matcha.webp, still-watchmaker.webp, still-crossing.webp, still-horse.webp, still-astronomer.webp, still-poster.webp, still-ceramics.webp | Seedream 4 (still-poster.webp shows text on purpose) | Agave, 2026-10-19 |
 | video/card-image.mp4, card-lipsync.mp4, card-upscale.mp4, card-character.mp4 | Kling 3.0 from a Meshy still | ef15fed |

@@ -91,7 +91,7 @@ endpoint = "fal-ai/kling-video/v3/standard/image-to-video"
 modality = "video"
 modes = ["i2v"]
 key = "FAL_KEY"
-verified = true   # fal search 2026-10-11; schema assumed same as v3 pro i2v (start_image_url), confirmed by the live test below
+verified = true   # fal search 2026-10-11; fal OpenAPI 2026-10-19: start_image_url (required), end_image_url, elements, generate_audio, duration; no live run yet
 params = { aspect = [], duration = [5, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution = [], audio = [true, false] }
 price = { per = "second", usd = 0.126, by_audio = { on = 0.126, off = 0.084 } }   # fal page 2026-10-19: $0.084/s audio off, $0.126/s audio on (fal default on); duration "3".."15" (OpenAPI 2026-10-19)
 max_elements = 4   # fal OpenAPI 2026-10-19: elements [{frontal_image_url, reference_image_urls 1-3}], @Element1...; the schema sets no count, Agave caps it at 4

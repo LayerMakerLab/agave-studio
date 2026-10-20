@@ -383,9 +383,10 @@
   // where the move ends) or words only. Null when there is no move or the model takes no end picture. A view move's
   // edit runs on the video's own fal key, or the engine sends the move as words (same rule as the engine).
   function cameraPlan() {
-    const m = selectedModel();
-    const id = els.camera.value;
-    if (!id || els.cameraWrap.hidden || !m || !m.end_frame || effectiveMode() !== 'i2v') return null;
+    return els.cameraWrap.hidden ? null : cameraPlanFor(selectedModel(), els.camera.value, effectiveMode());
+  }
+  function cameraPlanFor(m, id, mode) {
+    if (!id || !m || !m.end_frame || mode !== 'i2v') return null;
     const p = state.presets.camera.find((c) => c.id === id);
     if (!p) return null;
     const plan = p.keyframe || { kind: 'words' };
@@ -417,15 +418,34 @@
 
   // US cents for one job with the current model and options, from the provider list price (rounded up).
   function jobCents() {
-    const m = selectedModel();
+    const c = state.chips;
+    return priceCents(selectedModel(), c.duration, c.resolution, c.audio, cameraPlan());
+  }
+  // The same price for a request already sent (Run again), or null when the model lists no dollar price.
+  function requestCents(req) {
+    const m = req && state.models.find((x) => x.id === req.model);
+    const plan = req && req.image_url ? cameraPlanFor(m, req.camera, req.mode) : null;
+    return m ? priceCents(m, req.duration, req.resolution, req.audio, plan) : null;
+  }
+  function priceCents(m, duration, resolution, audioOn, plan) {
     const p = m && m.price;
     if (!p) return null;
-    const audio = state.chips.audio === null ? null : (state.chips.audio ? 'on' : 'off');
-    const rate = (audio && p.by_audio && p.by_audio[audio]) || (p.by_resolution && p.by_resolution[state.chips.resolution]) || p.usd;
-    const units = p.per === 'second' ? state.chips.duration : 1;
+    const audio = audioOn === null || audioOn === undefined ? null : (audioOn ? 'on' : 'off');
+    const rate = (audio && p.by_audio && p.by_audio[audio]) || (p.by_resolution && p.by_resolution[resolution]) || p.usd;
+    const units = p.per === 'second' ? duration : 1;
     if (!units) return null;
     const micro = Math.round(rate * units * 1e6);
-    return Math.max(1, Math.ceil(micro / 1e4)) + keyframeCents(cameraPlan());
+    return Math.max(1, Math.ceil(micro / 1e4)) + keyframeCents(plan);
+  }
+  // "≈ $0.37" for a list of requests, "about N Vendor credits", or 'price not listed'.
+  function requestsPrice(reqs) {
+    const cents = reqs.map(requestCents);
+    if (cents.every((c) => c !== null)) return `≈ $${(cents.reduce((a, b) => a + b, 0) / 100).toFixed(2)}`;
+    const ms = reqs.map((r) => state.models.find((x) => x.id === r.model));
+    if (ms.every((m) => m && m.provider_credits && m.vendor === ms[0].vendor)) {
+      return `about ${ms.reduce((a, m) => a + m.provider_credits, 0)} ${ms[0].vendor} credits`;
+    }
+    return 'price not listed';
   }
 
   // Cost before every paid step: the provider list price on your own key.
@@ -634,7 +654,7 @@
           el('span', { class: 'card-model', title: job.model || '' }, [modelName(job.model)]),
         ]),
         el('p', { class: 'card-prompt' }, [job.prompt || '']),
-        job.status === 'failed' ? el('p', { class: 'card-error' }, [job.error || 'Generation failed.']) : null,
+        job.status === 'failed' ? el('p', { class: 'card-error', title: job.error || '' }, [jobError(job)]) : null,
         el('div', { class: 'card-foot' }, [el('span', {}, [job.mode || '']), link]),
         cardActions(job, first),
       ]),
@@ -669,7 +689,8 @@
       acts.push(btn('Add to edit', 'Add this clip to the Edit timeline', () => addToEdit(first.url, 'video')));
     }
     if (job.status === 'failed' && job.request && !state.retried.has(job.id)) {
-      acts.push(btn('Run again', 'Send the same request again', (b) => runAgain(job, b)));
+      const price = requestsPrice([job.request]);
+      acts.push(btn(`Run again · ${price}`, `Send the same request again, on your own key (${price}, provider list price)`, (b) => runAgain(job, b)));
     }
     return acts.length ? el('div', { class: 'card-acts' }, acts) : null;
   }
@@ -700,7 +721,13 @@
       }
     }
     const active = jobs.filter(isActive).length;
-    els.retryAll.hidden = !jobs.some((j) => j.status === 'failed' && j.request && !state.retried.has(j.id));
+    const again = jobs.filter((j) => j.status === 'failed' && j.request && !state.retried.has(j.id));
+    els.retryAll.hidden = !again.length;
+    if (again.length) {
+      const price = requestsPrice(again.map((j) => j.request));
+      els.retryAll.textContent = `Run ${again.length} failed again · ${price}`;
+      els.retryAll.title = `Send ${again.length === 1 ? 'that request' : `those ${again.length} requests`} again, on your own key (${price}, provider list price)`;
+    }
     els.empty.hidden = jobs.length > 0;
     els.gallery.hidden = jobs.length === 0;
     els.count.textContent = jobs.length
@@ -983,6 +1010,21 @@
       setStatus('Could not reach the engine.', 'err');
     }
     return false;
+  }
+
+  // A provider's refusal in plain words: what happened and what to do. Its own text stays in the tooltip.
+  function jobError(job) {
+    const e = String(job.error || '');
+    const code = (e.match(/provider HTTP (\d{3})/) || [])[1];
+    const m = job.request && state.models.find((x) => x.id === job.request.model);
+    const key = (m && m.key) || 'your key';
+    const credit = /balance|credit|billing|payment/i.test(e);
+    if (code === '402' || ((code === '401' || code === '403') && credit)) {
+      return `The provider says this account is out of credit or needs billing set up (HTTP ${code}). Add credit with the provider, then press Run again.`;
+    }
+    if (code === '401' || code === '403') return `The provider refused ${key} (HTTP ${code}). Check the key in Settings, then press Run again.`;
+    if (code === '429') return `The provider is limiting requests on ${key} (HTTP 429: too many, or a quota is used up). Wait, then press Run again.`;
+    return e || 'Generation failed.';
   }
 
   async function runAgain(job, b) {
@@ -3471,6 +3513,11 @@
     const main = d.speech.parakeet_tool ? parakeet : whisper;
     const alt = main === parakeet ? whisper : null;
     sEl.models.append(modelCard(main, true));
+    // Whisper runs through whisper.cpp's own tool, which Agave does not ship.
+    if (main === whisper && !d.speech.whisper_tool) {
+      sEl.models.append(el('p', { class: 'key-note' }, ['Whisper also needs whisper.cpp: put ', el('code', {}, ['whisper-cli']),
+        ' on your PATH (on a Mac, ', el('code', {}, ['brew install whisper-cpp']), '), then reopen setup.']));
+    }
     if (alt) {
       if (!['idle'].includes(alt.progress.state)) sEl.models.append(modelCard(alt, false));
       else {
@@ -3508,7 +3555,9 @@
     row(keySet('FAL_KEY'), 'fal.ai key', 'images and video', keySet('FAL_KEY') ? 'Ready' : 'Later');
     const engine = d && d.speech.engine;
     const dl = d && d.models.find((m) => busy(m.progress));
-    row(!!engine, 'Captions', engine === 'parakeet' ? 'Parakeet v3, on device' : engine === 'whisper' ? 'Whisper small, on device' : dl ? `${dl.name} still downloading` : 'needs the speech model',
+    const whisperNoTool = d && !d.speech.whisper_tool && d.models.some((m) => m.engine === 'whisper' && m.progress.state === 'ready');
+    row(!!engine, 'Captions', engine === 'parakeet' ? 'Parakeet v3, on device' : engine === 'whisper' ? 'Whisper small, on device' : dl ? `${dl.name} still downloading`
+      : whisperNoTool ? 'Whisper needs whisper-cli on your PATH' : 'needs the speech model',
       engine ? 'Ready' : dl ? 'Downloading' : 'Later');
     row(keySet('MESHY_API_KEY'), '3D from photos', keySet('MESHY_API_KEY') ? 'Meshy key saved' : 'needs a Meshy key', keySet('MESHY_API_KEY') ? 'Ready' : 'Later');
     sEl.ready.replaceChildren(...rows);

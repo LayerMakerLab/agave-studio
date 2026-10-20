@@ -40,7 +40,12 @@ Agave Studio runs on macOS and Linux. You need:
 - [Rust](https://rustup.rs) 1.88 or newer (install it with rustup; distro packages are often older),
 - a C++17 compiler (on macOS, the Xcode Command Line Tools: `xcode-select --install`; on Debian or Ubuntu,
   `build-essential`),
-- [ffmpeg](https://ffmpeg.org) on your PATH.
+- [ffmpeg](https://ffmpeg.org) on your PATH,
+- for captions on Linux (or on a Mac without the Parakeet tool below): [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s
+  `whisper-cli` on your PATH (on a Mac, `brew install whisper-cpp`).
+
+On Windows, run it inside [WSL](https://learn.microsoft.com/windows/wsl/) with the Linux steps; it does not build as a
+native Windows program.
 
 ```sh
 git clone https://github.com/LayerMakerLab/agave-studio.git
@@ -50,6 +55,10 @@ cargo run --release        # the site and engine on http://127.0.0.1:4170
 
 Then open <http://127.0.0.1:4170/app/>. On first launch the studio walks you through setup: paste a provider key,
 then download the speech model for captions (a one-time, free download). You can reopen setup from Settings.
+
+To try the studio without a key or spending anything, start it with `AGAVE_FAKE_PROVIDERS=1 cargo run --release`:
+every model answers locally with a placeholder that says TEST OUTPUT, and its data stays in `data/fake-providers`
+([docs/API.md](docs/API.md)).
 
 The gateway only listens on 127.0.0.1:4170. It has no sign-in, so do not expose it to a network. It reads `web/`,
 `config/` and `data/` from the checkout it was built in, so run it from there.
@@ -89,8 +98,9 @@ These need macOS 14 or later and Xcode's Swift tools.
   saved key back.
 - Prompts and files go only to the provider you pick, using your key.
 - Captions and transcripts run locally.
-- No analytics, no telemetry, no account. The fonts ship with the studio; only the 3D viewer may fetch its decoders
-  from Google's CDN (`web/vendor/README.md`).
+- No analytics, no telemetry, no account. The studio's fonts ship with it. Two things can reach Google: the homepage
+  (`web/index.html`, not the studio) loads its headline font from Google Fonts, and the 3D viewer may fetch its
+  decoders from Google's CDN for compressed models (`web/vendor/README.md`).
 - The `data/` folder (outputs, job history) is owner-only on disk. While the gateway runs, any program on this
   computer can call it on 127.0.0.1; see [SECURITY.md](SECURITY.md).
 

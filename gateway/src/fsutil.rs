@@ -50,13 +50,13 @@ pub fn ensure_private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Removes work folders and temp files a crash or kill left behind in `dir` (.edit-*, .speech-*, .warm-*,
-/// and *.tmp from write_private). Only called once the gateway owns the port, so no other copy is using them.
+/// Removes work folders and temp files a crash or kill left behind in `dir` (.edit-*, .keyframe-*, .speech-*,
+/// .warm-*, and *.tmp from write_private). Only called once the gateway owns the port, so no other copy is using them.
 pub fn remove_leftovers(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let work = [".edit-", ".speech-", ".warm-"].iter().any(|p| name.starts_with(p));
+        let work = [".edit-", ".keyframe-", ".speech-", ".warm-"].iter().any(|p| name.starts_with(p));
         if !work && !name.ends_with(".tmp") {
             continue;
         }
@@ -82,6 +82,8 @@ mod tests {
     fn leftovers_go_and_real_files_stay() {
         let dir = test_dir("fsutil_leftovers");
         fs::create_dir_all(dir.join(".edit-abc123/x")).unwrap();
+        fs::create_dir_all(dir.join(".keyframe-0a1b2c3d")).unwrap();
+        fs::write(dir.join(".keyframe-0a1b2c3d/src.jpg"), b"x").unwrap();
         fs::write(dir.join(".warm-1a2b.wav"), b"x").unwrap();
         fs::write(dir.join("jobs.json.0011aabb.tmp"), b"x").unwrap();
         fs::write(dir.join("a1b2c3.mp4"), b"x").unwrap();

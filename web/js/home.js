@@ -17,7 +17,15 @@
   };
   burger.addEventListener("click", () => setSheet(sheet.hidden));
   $$("a", sheet).forEach((a) => a.addEventListener("click", () => setSheet(false)));
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet.hidden) { setSheet(false); burger.focus(); } });
+  addEventListener("keydown", (e) => {
+    if (sheet.hidden) return;
+    if (e.key === "Escape") { setSheet(false); burger.focus(); return; }
+    // While the menu is open, Tab moves only between the menu button and the menu's links.
+    if (e.key !== "Tab") return;
+    const stops = [burger, ...$$("a", sheet)], i = stops.indexOf(document.activeElement);
+    const next = e.shiftKey ? (i <= 0 ? stops.length - 1 : i - 1) : (i === -1 || i === stops.length - 1 ? 0 : i + 1);
+    e.preventDefault(); stops[next].focus();
+  });
   matchMedia("(min-width: 961px)").addEventListener("change", (e) => { if (e.matches) setSheet(false); });
 
   /* ---------- Hero reel ----------
@@ -58,7 +66,7 @@
     v.addEventListener("playing", () => {
       if (i !== cur) return;
       runBar(i);
-      if (!reduce) arm(vids[(i + 1) % vids.length]); // warm the next cut once this one plays
+      if (!reduce && !narrow.matches) arm(vids[(i + 1) % vids.length]); // wide screens: warm the next cut once this one plays
     });
     v.addEventListener("pause", () => { if (i === cur) bars[i].classList.remove("run"); });
     v.addEventListener("timeupdate", () => {
@@ -98,6 +106,18 @@
   if (document.readyState === "complete") begin(); else addEventListener("load", begin, { once: true });
 
   /* ---------- Reel and pipeline clips: load near the screen, play only on it ---------- */
+  // Their posters wait too (data-poster), reduced motion included, so the first load is the page and the hero.
+  // A pipeline lane scrolls sideways on phones, so its posters go when the lane itself comes near.
+  const posters = $$("video[data-poster]");
+  const showPoster = (v) => { v.poster = v.dataset.poster; };
+  if ("IntersectionObserver" in window) {
+    const po = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting) return;
+      (e.target.tagName === "VIDEO" ? [e.target] : $$("video[data-poster]", e.target)).forEach(showPoster);
+      po.unobserve(e.target);
+    }), { rootMargin: "600px 0px" });
+    new Set(posters.map((v) => v.closest(".track") || v)).forEach((t) => po.observe(t));
+  } else posters.forEach(showPoster);
   const clips = $$(".masonry video, .track video, .vis-clip video");
   if (!reduce && "IntersectionObserver" in window) {
     const near = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { arm(e.target); near.unobserve(e.target); } }), { rootMargin: "300px 0px" });
@@ -117,14 +137,23 @@
 
   /* ---------- Pipelines: one lane at a time ---------- */
   const laneTabs = $$("#pipelines [data-lane]");
-  laneTabs.forEach((t) => t.addEventListener("click", () => {
-    laneTabs.forEach((x) => {
-      const on = x === t, lane = $("#lane-" + x.dataset.lane);
-      x.classList.toggle("on", on); x.setAttribute("aria-selected", String(on));
-      lane.hidden = !on;
-      if (!on) $$("video", lane).forEach((v) => v.pause());
+  const pick = (t) => laneTabs.forEach((x) => {
+    const on = x === t, lane = $("#lane-" + x.dataset.lane);
+    x.classList.toggle("on", on); x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1;
+    lane.hidden = !on;
+    if (!on) $$("video", lane).forEach((v) => v.pause());
+  });
+  laneTabs.forEach((t, i) => {
+    t.addEventListener("click", () => pick(t));
+    // Arrow keys move between the tabs, as in any tab list.
+    t.addEventListener("keydown", (e) => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      const n = laneTabs[(i + d + laneTabs.length) % laneTabs.length];
+      pick(n); n.focus();
     });
-  }));
+  });
 
   /* ---------- Blocks below the fold wipe up once, left to right in each row ---------- */
   if (!reduce && "IntersectionObserver" in window) {

@@ -49,6 +49,15 @@ pub struct Transcript {
     pub words: Vec<Word>,
 }
 
+/// Whether `whisper-cli` (whisper.cpp) is on PATH, where transcription runs it from.
+pub fn whisper_tool() -> bool {
+    on_path("whisper-cli", std::env::var_os("PATH"))
+}
+
+fn on_path(tool: &str, path: Option<std::ffi::OsString>) -> bool {
+    path.is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()))
+}
+
 /// One transcription at a time; whisper already uses every core.
 fn gate() -> &'static Semaphore {
     static GATE: OnceLock<Semaphore> = OnceLock::new();
@@ -243,12 +252,13 @@ impl Speech {
         crate::setup::model("parakeet-v3").map(|m| m.dest(&self.data_dir)).unwrap_or_default()
     }
 
-    /// Parakeet when its tool and model are installed, else Whisper when its model is, else nothing.
+    /// Parakeet when its tool and model are installed, else Whisper when whisper-cli and its model are,
+    /// else nothing.
     pub fn engine(&self) -> Option<Engine> {
         let parakeet = crate::setup::model("parakeet-v3").is_some_and(|m| m.installed(&self.data_dir));
         if parakeet && self.speech_tool().is_file() {
             Some(Engine::Parakeet)
-        } else if self.model().is_file() {
+        } else if self.model().is_file() && whisper_tool() {
             Some(Engine::Whisper)
         } else {
             None
@@ -373,6 +383,22 @@ impl Speech {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A Whisper model without whisper-cli is not a working engine; setup would otherwise say captions are
+    /// ready while every transcription fails.
+    #[test]
+    fn whisper_needs_its_tool_on_path() {
+        let dir = crate::fsutil::test_dir("whisper_tool");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = |dirs: &[&std::path::Path]| Some(std::env::join_paths(dirs).unwrap());
+        assert!(!on_path("whisper-cli", path(&[&bin])));
+        assert!(!on_path("whisper-cli", None));
+        std::fs::write(bin.join("whisper-cli"), b"").unwrap();
+        assert!(on_path("whisper-cli", path(&[&dir, &bin])));
+        std::fs::create_dir_all(dir.join("whisper-cli")).unwrap();
+        assert!(!on_path("whisper-cli", path(&[&dir])), "a folder with the tool's name is not the tool");
+    }
 
     #[test]
     fn silencedetect_logs_become_pauses() {

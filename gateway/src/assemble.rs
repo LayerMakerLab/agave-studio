@@ -260,11 +260,9 @@ pub(crate) async fn keyframe_frames(ctx: &Ctx, start: &str, end: EndFrom<'_>) ->
         }
         EndFrom::Crop(_) => None,
     };
-    let dir = std::env::temp_dir();
-    let tag = media::random_hex(8);
-    let file = |name: &str| dir.join(format!("agave-keyframe-{tag}-{name}"));
-    let (src, upright, first, last) = (file(&format!("src.{ext}")), file("upright.png"), file("start.jpg"), file("end.jpg"));
-    let edit_src = edited.as_ref().map(|(_, e, _)| file(&format!("edit.{e}")));
+    let work = keyframe_work(ctx).await.map_err(|_| failed())?;
+    let (src, upright, first, last) = (work.join(format!("src.{ext}")), work.join("upright.png"), work.join("start.jpg"), work.join("end.jpg"));
+    let edit_src = edited.as_ref().map(|(_, e, _)| work.join(format!("edit.{e}")));
     let ff = |input: &std::path::Path, format: &str, vf: String, out: &std::path::Path| {
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", format, "-i"])
@@ -297,9 +295,7 @@ pub(crate) async fn keyframe_frames(ctx: &Ctx, start: &str, end: EndFrom<'_>) ->
         Ok::<_, ProviderError>((a, b))
     }
     .await;
-    for f in [Some(&src), Some(&upright), Some(&first), Some(&last), edit_src.as_ref()].into_iter().flatten() {
-        let _ = tokio::fs::remove_file(f).await;
-    }
+    let _ = tokio::fs::remove_dir_all(&work).await;
     let (a, b) = made?;
     let uri = |b: Vec<u8>| format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b));
     Ok((uri(a), uri(b)))
@@ -312,10 +308,9 @@ pub(crate) async fn upright_picture(ctx: &Ctx, start: &str) -> PResult<String> {
     let (bytes, _) = media::load_image(ctx, start).await?;
     let (ext, demuxer) = picture_demuxer(&bytes)
         .ok_or_else(|| ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into()))?;
-    let dir = std::env::temp_dir();
-    let tag = media::random_hex(8);
+    let work = keyframe_work(ctx).await.map_err(|_| failed())?;
     // Distinct names: a JPEG start picture would otherwise be read and overwritten as the same file.
-    let (src, out) = (dir.join(format!("agave-upright-{tag}-src.{ext}")), dir.join(format!("agave-upright-{tag}-out.jpg")));
+    let (src, out) = (work.join(format!("src.{ext}")), work.join("out.jpg"));
     let made = async {
         tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
         run(Command::new("ffmpeg")
@@ -328,9 +323,17 @@ pub(crate) async fn upright_picture(ctx: &Ctx, start: &str) -> PResult<String> {
         tokio::fs::read(&out).await.map_err(|_| failed())
     }
     .await;
-    let _ = tokio::fs::remove_file(&src).await;
-    let _ = tokio::fs::remove_file(&out).await;
+    let _ = tokio::fs::remove_dir_all(&work).await;
     Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, made?)))
+}
+
+/// A fresh work folder for a camera move's pictures inside the owner-only outputs folder, never the system temp
+/// folder (on a shared Linux computer other accounts can read that). Dot names are never served, and a crash's
+/// leftovers go at the next start (fsutil::remove_leftovers).
+async fn keyframe_work(ctx: &Ctx) -> std::io::Result<PathBuf> {
+    let work = ctx.outputs_dir.join(format!(".keyframe-{}", media::random_hex(8)));
+    tokio::fs::create_dir_all(&work).await?;
+    Ok(work)
 }
 
 /// Width and height from a PNG's IHDR chunk (the file ffmpeg itself wrote).
@@ -710,6 +713,9 @@ mod tests {
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
         let err = keyframe_frames(&ctx, "/outputs/list.png", EndFrom::Crop(0.65)).await.unwrap_err();
         assert!(format!("{err:?}").contains("PNG, JPEG or WebP"), "{err:?}");
+
+        // The pictures were worked on inside the owner-only outputs folder, and nothing is left behind.
+        assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".keyframe-")));
     }
 
     /// Needs ffmpeg on PATH; skipped quietly when missing. A red caption shows only in its window.
