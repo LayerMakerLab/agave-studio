@@ -38,7 +38,7 @@ it. Nothing on the page comes from anywhere else.
 | video/reel-ink.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Static lock-off) |
 | video/reel-skater.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Low-angle orbit) |
 | video/reel-peonies.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Rack focus) |
-| video/hero-diner.mp4 | Kling 3.0 Pro from a Seedream 4 still | Agave, 2026-10-19 (Camera: Push through) |
+| video/reel-surfer.mp4 | Kling 3.0 Pro (audio off) from a Seedream 4 still | Agave, 2026-10-19 (no camera move picked) |
 | img/still-lighthouse.webp, still-matcha.webp, still-watchmaker.webp, still-crossing.webp, still-horse.webp, still-astronomer.webp, still-poster.webp, still-ceramics.webp | Seedream 4 (still-poster.webp shows text on purpose) | Agave, 2026-10-19 |
 | video/card-image.mp4, card-lipsync.mp4, card-upscale.mp4, card-character.mp4 | Kling 3.0 from a Meshy still | ef15fed |
 | img/char-b.webp, char-c.webp, reel-t2v.webp | Meshy | ef15fed (same files at dd2465f) |
