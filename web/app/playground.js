@@ -6,6 +6,7 @@
   'use strict';
 
   const DEFAULT_MODEL = 'fal-ai/flux/schnell';
+  const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
   const MAX_FILE = 20 * 1024 * 1024; // the gateway sends local files inline to fal, up to 20 MB each
   const POLL_MS = 2000;
   const ACCEPT = { image: 'image/*', video: 'video/*', audio: 'audio/*', file: 'image/*,video/*,audio/*' };
@@ -133,7 +134,6 @@
   };
   const say = (code) => ERRORS[code] || 'Something went wrong. Try again.';
 
-  /** One polite message for screen readers (the running clock is not announced). */
   /** Puts `nodes` in a live region only when the words differ, so a screen reader is not read the same line again. */
   function setLive(box, nodes) {
     const next = document.createElement('div');
@@ -142,6 +142,7 @@
     box.replaceChildren(...next.childNodes);
   }
 
+  /** One polite message for screen readers (the running clock is not announced). */
   function announce(msg) {
     const live = $('#pgLive');
     live.textContent = '';
@@ -624,10 +625,17 @@
     });
   }
 
-  /** Adds every link typed into a file field but not added yet (Run must not go without it). */
+  /** Adds every link typed into a file field but not added yet (Run must not go without it). True when one was turned
+      down: an added link leaves its box empty. */
   function commitLinks(root) {
-    if (!root) return;
-    root.querySelectorAll('.pg-link').forEach((l) => { if (l.value.trim()) l.dispatchEvent(new Event('change')); });
+    if (!root) return false;
+    let bad = false;
+    root.querySelectorAll('.pg-link').forEach((l) => {
+      if (!l.value.trim()) return;
+      l.dispatchEvent(new Event('change'));
+      if (l.isConnected && l.value.trim()) bad = true;
+    });
+    return bad;
   }
 
   /** Files for one value: upload, drop or paste a link. `get`/`set` hold the value (a URL, or a list of them); `busy`
@@ -664,7 +672,9 @@
             drop.querySelector('span').textContent = 'Uploading…';
             S.uploads += 1;
             if (busy) busy();
-            const r = await uploadFile(fl, kind).finally(() => { S.uploads -= 1; if (busy) busy(); });
+            const r = await uploadFile(fl, kind).finally(() => { S.uploads -= 1; if (busy) busy(); if (C.started) renderCmpPrice(); });
+            // Another model opened meanwhile: this field is gone, and the file is not put into the new one.
+            if (!wrap.isConnected) return;
             drop.disabled = false;
             if (r.error) { error(r.error); draw(); return; }
             next.push(r.url);
@@ -752,6 +762,7 @@
   /** `discard` leaves the JSON box behind without applying it (a template replaces everything anyway). */
   function setTab(tab, discard = false) {
     if (tab === S.tab || !S.spec) return;
+    if (tab === 'json' && S.uploads > 0) { $('#pgRunNote').textContent = 'A file is still uploading. Switch to JSON when it shows.'; return; }
     if (tab === 'form' && !discard && !applyJson()) return;
     S.tab = tab;
     $('#pgTabForm').setAttribute('aria-selected', String(tab === 'form'));
@@ -922,6 +933,7 @@
     if (!S.spec || !S.spec.runnable || S.sending) return;
     if (S.uploads > 0) { $('#pgRunNote').textContent = 'A file is still uploading. Press Run when it shows.'; return; }
     if (S.tab === 'form') commitLinks($('#pgForm'));
+    if (matchMedia('(pointer: coarse)').matches && document.activeElement && document.activeElement.blur) document.activeElement.blur();
     if (S.tab === 'json' && !applyJson()) return;
     const input = collect();
     const wrong = S.tab === 'form' && document.querySelector('#pgForm .pg-field.bad');
@@ -1596,6 +1608,7 @@
     const at = C.ids.indexOf(id);
     const name = (C.specs.get(id) || {}).name || id;
     C.ids = C.ids.filter((x) => x !== id);
+    C.batch = C.batch.filter((jid) => jid !== C.jobs.get(id));
     for (const m of [C.jobs, C.notes, C.sent, C.errs]) m.delete(id);
     const col = C.cols.get(id);
     if (col) col.node.remove();
@@ -1661,10 +1674,17 @@
     const input = spec ? cmpInput(spec) : null;
     const ready = !!spec && !job && !C.notes.has(id);
     const key = JSON.stringify([!!spec, C.errs.get(id), C.notes.get(id), job && [job.id, job.status, job.error, (job.outputs || []).map((o) => o.url)],
-      S.test, C.sending, C.sent.get(id), ready && [Object.keys(input).sort(), C.image, !!$('#pgCmpPrompt').value.trim()]]);
+      S.test, C.sending, C.sent.get(id), S.cats.length, ready && [Object.keys(input).sort(), C.image, !!$('#pgCmpPrompt').value.trim()]]);
     if (key !== col.key) {
       col.key = key;
+      // Focus inside the column comes back to the same control (or the column) after the redraw.
+      const had = col.node.contains(document.activeElement) ? document.activeElement : null;
+      const which = had && ['.pg-cmp-x', '.pg-cmp-open', 'a.pg-act'].find((q) => had.matches(q));
       buildColumn(col, id, spec, job, input);
+      if (had) {
+        const t = which && col.node.querySelector(which);
+        (t && !t.disabled ? t : col.node).focus({ preventScroll: true });
+      }
     }
     if (spec && col.price) {
       const price = cmpPriceOf(spec, input);
@@ -1774,6 +1794,12 @@
     // The shared picture, when a model here needs one.
     const needs = C.ids.map((id) => C.specs.get(id)).filter((s) => s && imageField(s));
     $('#pgCmpImageRow').hidden = !needs.length;
+    if (!needs.length) {
+      // No model needs a picture now: a refused link or upload has nothing left to say.
+      $('#pgCmpImage_e').textContent = '';
+      const l = $('#pgCmpImageRow .pg-link');
+      if (l) l.value = '';
+    }
     const names = needs.map((s) => s.name);
     const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
     $('#pgCmpImage_h').textContent = needs.length ? `For ${list}. Without one, ${needs.length === 1 ? 'it uses' : 'each uses'} fal's example picture where fal has one.` : '';
@@ -1854,8 +1880,8 @@
     if (S.mode !== 'compare' || C.sending || !C.ids.length || S.offline) return;
     // A picture still on its way, or a link typed but not added, would leave fal's example picture in its place.
     if (S.uploads > 0) { cmpNote('The picture is still uploading. Press Run all when it shows.'); return; }
-    commitLinks($('#pgCmpImageRow'));
-    if ($('#pgCmpImage_e').textContent) { cmpNote('Fix the picture first.'); return; }
+    if (!$('#pgCmpImageRow').hidden && commitLinks($('#pgCmpImageRow'))) { cmpNote('Fix the picture link first, or clear it.'); return; }
+    if (matchMedia('(pointer: coarse)').matches && document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const specs = C.ids.map((id) => C.specs.get(id));
     if (C.ids.some((id) => C.errs.has(id))) { cmpNote('A model here could not be loaded. Remove it first.'); return; }
     if (specs.some((s) => !s)) { cmpNote('A model is still loading. Press Run all again in a moment.'); return; }
@@ -1897,6 +1923,7 @@
     // Every column starts fresh, so an old result never reads as one for the new prompt.
     for (const id of C.ids) for (const m of [C.notes, C.jobs, C.sent]) m.delete(id);
     C.batch = [];
+    cmpSave();
     renderCompare();
     try {
       for (let i = 0; i < ids.length; i++) {
@@ -1907,8 +1934,12 @@
         if (!r.ok) {
           const code = r.data && r.data.error;
           let stop = null;
-          if (r.status === 0) stop = 'The engine is not answering. Is Agave Studio running?';
-          else if (code === 'not_test_mode') {
+          if (r.status === 0) {
+            // The engine may have taken this one before the connection dropped: never call it "not sent".
+            stop = 'The engine is not answering. Is Agave Studio running?';
+            C.notes.set(id, 'The engine did not answer. Check Your runs on the One model page before running it again.');
+            i += 1;
+          } else if (code === 'not_test_mode') {
             // The studio restarted for real while this page thought it was in test mode: from now on runs cost money.
             await loadStatus();
             S.confirmed.clear();
@@ -1932,9 +1963,10 @@
           continue;
         }
         const job = r.data && r.data.job;
-        if (!job || typeof job.id !== 'string') { C.notes.set(id, say('')); continue; }
+        if (!job || typeof job.id !== 'string') { C.notes.set(id, 'The engine answered without a run. Check Your runs on the One model page before running it again.'); continue; }
         C.jobs.set(id, job.id);
         C.batch.push(job.id);
+        cmpSave();
         const pr = cmpPriceOf(spec, inputs[i]);
         if (S.test) C.sent.set(id, 'test, free');
         else if (pr.total !== null) C.sent.set(id, `${pr.about ? 'about ' : ''}${money(pr.total)}`);
@@ -1965,7 +1997,7 @@
   }
 
   const SUB_ONE = $('#pgSub').textContent;
-  const SUB_CMP = "One prompt, up to four of fal's models side by side, each with its price before you press Run all. ⌘↵ runs all.";
+  const SUB_CMP = `One prompt, up to four of fal's models side by side, each with its price before you press Run all. ${MAC ? '⌘↵' : 'Ctrl+Enter'} runs all.`;
 
   /** `keepHash`: the address already says where to go (a typed #m=), so it is not rewritten. */
   function setMode(mode, keepHash = false) {
@@ -2034,6 +2066,7 @@
 
   async function init() {
     const startHash = location.hash;
+    if (!MAC) $('#pgModKey').textContent = 'Ctrl';
     await loadStatus();
     // Category names for the model header come with the first catalog page.
     call('/api/fal/models').then((r) => {
