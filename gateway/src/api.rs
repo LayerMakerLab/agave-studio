@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State};
-use axum::http::{header, Method, StatusCode};
+use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -41,6 +41,29 @@ pub(crate) fn fail(status: StatusCode, code: impl AsRef<str>) -> Response {
     (status, Json(json!({"error": code.as_ref()}))).into_response()
 }
 
+/// A browser loading a page as a document (typed, bookmarked or linked): what browsers send and a page's
+/// scripts cannot set.
+fn is_page_load(headers: &HeaderMap) -> bool {
+    let is = |name: &str, want: &str| headers.get(name).and_then(|v| v.to_str().ok()).is_some_and(|v| v.eq_ignore_ascii_case(want));
+    is("sec-fetch-mode", "navigate") && is("sec-fetch-dest", "document")
+}
+
+/// The request carries this launch's cookie (compared in constant time).
+fn has_launch_cookie(headers: &HeaderMap, st: &AppState) -> bool {
+    let want = st.launch_token.as_bytes();
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .filter(|(name, _)| *name == st.launch_cookie.as_str())
+        .any(|(_, value)| {
+            let got = value.as_bytes();
+            got.len() == want.len() && got.iter().zip(want).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+        })
+}
+
 
 /// Rejects requests that did not come from the gateway's own pages:
 /// - Host must be 127.0.0.1:4170 or localhost:4170 (blocks DNS rebinding), on every route. (A test-mode gateway on
@@ -52,6 +75,9 @@ pub(crate) fn fail(status: StatusCode, code: impl AsRef<str>) -> Response {
 /// - Every non-GET/HEAD request must be Content-Type application/json, so a cross-site
 ///   "simple" request (form or text/plain) can never reach a handler without a CORS preflight,
 ///   and the gateway never answers preflights.
+/// - Every non-GET/HEAD /api/ request must carry this launch's cookie (`AppState::launch_token`), which only a
+///   browser page load gets: another program on this computer cannot start a paid job or change a key through
+///   the API. A page opened before a restart is told to reload (`launch_token`).
 ///
 /// Host and Origin lists come from AppState: the gateway's own local addresses.
 async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
@@ -106,12 +132,23 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
         if !json {
             return fail(StatusCode::UNSUPPORTED_MEDIA_TYPE, "json_required");
         }
+        if req.uri().path().starts_with("/api/") && !has_launch_cookie(req.headers(), &st) {
+            return fail(StatusCode::FORBIDDEN, "launch_token");
+        }
     }
     // Pages, scripts and styles revalidate on every load (a cheap 304 when unchanged), so a browser never runs an
     // old app.js after an update. Chrome's reload only revalidates the page itself, not its scripts.
     let output = req.uri().path().starts_with("/outputs/");
     let page = !req.uri().path().starts_with("/api/") && !output;
+    let navigation = page && is_page_load(req.headers());
     let mut resp = next.run(req).await;
+    if navigation {
+        // HttpOnly: the page's scripts never see it; SameSite=Strict: no other site's request carries it.
+        let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Strict", st.launch_cookie, st.launch_token);
+        if let Ok(v) = header::HeaderValue::from_str(&cookie) {
+            resp.headers_mut().append(header::SET_COOKIE, v);
+        }
+    }
     if page && !resp.headers().contains_key(header::CACHE_CONTROL) {
         resp.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
     }
@@ -1111,12 +1148,14 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
+    /// A POST as the studio's page sends it: JSON, with this launch's cookie.
     fn post_json(uri: &str, body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
             .uri(uri)
             .header("host", "127.0.0.1:4170")
             .header("content-type", "application/json")
+            .header("cookie", format!("agave_launch_4170={}", crate::state::TEST_LAUNCH_TOKEN))
             .body(Body::from(body.to_string()))
             .unwrap()
     }
@@ -1412,6 +1451,86 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK, "{origin}");
         }
         assert!(st.keys.is_set("FAL_KEY"));
+    }
+
+    #[tokio::test]
+    async fn changes_need_this_launchs_cookie() {
+        let st = AppState::for_tests("api_guard_launch");
+        let app = router(st.clone());
+        let key = r#"{"env":"FAL_KEY","value":"abcdefgh1234"}"#;
+        let with = |cookie: Option<&str>, uri: &str, body: &str| {
+            let mut b = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("host", "127.0.0.1:4170")
+                .header("content-type", "application/json");
+            if let Some(c) = cookie {
+                b = b.header("cookie", c);
+            }
+            let mut req = b.body(Body::from(body.to_string())).unwrap();
+            req.extensions_mut().insert(from([127, 0, 0, 1]));
+            req
+        };
+        // No cookie, a wrong one, another port's, or a longer value: refused before any handler runs.
+        let wrong = [
+            None,
+            Some("agave_launch_4170=nope"),
+            Some("agave_launch_4171=test-launch-token"),
+            Some("agave_launch_4170=test-launch-token0"),
+            Some("xagave_launch_4170=test-launch-token"),
+        ];
+        for cookie in wrong {
+            for (uri, body) in [("/api/keys", key), ("/api/fal/run", r#"{"id":"fal-ai/flux/schnell","input":{}}"#), ("/api/generate", r#"{"model":"test/offline","mode":"t2v","prompt":"x"}"#)] {
+                let resp = app.clone().oneshot(with(cookie, uri, body)).await.expect("response");
+                assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri} {cookie:?}");
+                assert_eq!(body_json(resp).await["error"], "launch_token");
+            }
+        }
+        assert!(!st.keys.is_set("FAL_KEY"));
+        // Reading needs nothing.
+        let resp = app.clone().oneshot(get_req("/api/health")).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        // The right cookie, among others as a browser sends them, passes.
+        let resp = app.clone().oneshot(with(Some("theme=dark; agave_launch_4170=test-launch-token; x=y"), "/api/keys", key)).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(st.keys.is_set("FAL_KEY"));
+    }
+
+    #[tokio::test]
+    async fn only_a_page_load_gets_the_launch_cookie() {
+        let app = router(AppState::for_tests("api_launch_cookie"));
+        let load = |uri: &str, mode: &str, dest: &str| {
+            Request::builder()
+                .uri(uri)
+                .header("host", "127.0.0.1:4170")
+                .header("sec-fetch-mode", mode)
+                .header("sec-fetch-dest", dest)
+                .header("sec-fetch-site", "none")
+                .body(Body::empty())
+                .unwrap()
+        };
+        let resp = app.clone().oneshot(load("/app/", "navigate", "document")).await.expect("response");
+        let cookie = resp.headers().get(header::SET_COOKIE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+        assert_eq!(cookie, "agave_launch_4170=test-launch-token; Path=/; HttpOnly; SameSite=Strict");
+        // A script's fetch, a frame, an API call and a plain request (curl) get nothing.
+        for req in [
+            load("/app/app.js", "no-cors", "script"),
+            load("/app/", "navigate", "iframe"),
+            load("/api/health", "navigate", "document"),
+            get_req("/app/"),
+        ] {
+            let uri = req.uri().to_string();
+            let resp = app.clone().oneshot(req).await.expect("response");
+            assert!(resp.headers().get(header::SET_COOKIE).is_none(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn a_test_gateway_has_its_own_cookie() {
+        let mut st = AppState::for_tests("api_launch_port");
+        assert_eq!(st.launch_cookie.as_str(), "agave_launch_4170");
+        st.use_port(4171);
+        assert_eq!(st.launch_cookie.as_str(), "agave_launch_4171");
     }
 
     #[tokio::test]

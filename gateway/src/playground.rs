@@ -1680,6 +1680,7 @@ mod tests {
             .uri(uri)
             .header("host", "127.0.0.1:4170")
             .header("content-type", "application/json")
+            .header("cookie", format!("agave_launch_4170={}", crate::state::TEST_LAUNCH_TOKEN))
             .body(Body::from(body.to_string()))
             .unwrap()
     }

@@ -232,8 +232,18 @@
     const res = await fetch(path, init);
     let data = null;
     try { data = await res.json(); } catch (_) { data = null; }
+    if (res.status === 403 && data && data.error === 'launch_token') showStale();
     return { ok: res.ok, status: res.status, data };
   }
+
+  /** The engine restarted: this page's launch cookie is old, and only a reload gets the new one. */
+  function showStale() {
+    const b = document.getElementById('staleBanner');
+    if (!b || !b.hidden) return;
+    b.hidden = false;
+    b.scrollIntoView({ block: 'nearest' });
+  }
+  document.getElementById('staleReload')?.addEventListener('click', () => location.reload());
 
   function setOffline(v) {
     const changed = state.offline !== v;

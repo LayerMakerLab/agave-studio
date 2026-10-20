@@ -63,8 +63,20 @@ pub struct AppState {
     /// Host headers and Origins the gateway answers to (its own local addresses only).
     pub allowed_hosts: Arc<Vec<String>>,
     pub allowed_origins: Arc<Vec<String>>,
+    /// A random value made at every start. Only a browser page load gets it (an HttpOnly cookie, `launch_cookie`),
+    /// and every /api/ call that changes something must carry it: another program on this computer, an agent's
+    /// curl included, cannot start a paid job or change a key by calling the API directly.
+    pub launch_token: Arc<String>,
+    /// The cookie's name. It carries the port: cookies ignore ports, so a test gateway must not replace the
+    /// studio's own.
+    pub launch_cookie: Arc<String>,
     pub ctx: Arc<Ctx>,
 }
+
+/// The launch token every test state uses, so route tests can send it.
+#[cfg(test)]
+pub const TEST_LAUNCH_TOKEN: &str = "test-launch-token";
+
 
 impl AppState {
     pub fn load(web: Option<PathBuf>) -> Result<Self, String> {
@@ -112,6 +124,8 @@ impl AppState {
             fake: None,
             allowed_hosts: Arc::new(hosts),
             allowed_origins: Arc::new(origins),
+            launch_token: Arc::new(crate::media::random_hex(32)),
+            launch_cookie: Arc::new("agave_launch_4170".to_string()),
             ctx: Arc::new(ctx),
             paths: Arc::new(paths),
         })
@@ -121,6 +135,7 @@ impl AppState {
     pub fn use_port(&mut self, port: u16) {
         self.allowed_hosts = Arc::new(vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")]);
         self.allowed_origins = Arc::new(vec![format!("http://127.0.0.1:{port}"), format!("http://localhost:{port}")]);
+        self.launch_cookie = Arc::new(format!("agave_launch_{port}"));
     }
 
     /// State under target/test-tmp with an empty key store (never reads the environment).
@@ -143,6 +158,7 @@ impl AppState {
         };
         let keys = KeyStore::empty(paths.keys_file.clone());
         let mut st = Self::build(paths, keys).expect("test state");
+        st.launch_token = Arc::new(TEST_LAUNCH_TOKEN.to_string());
         // A model on the always-failing test provider, so route tests never call a real provider.
         let mut reg = Registry::load(&st.paths.models_file).expect("registry");
         reg.models.push(crate::models::ModelDef {
@@ -170,5 +186,32 @@ impl AppState {
         reg.models.push(none);
         st.registry = Arc::new(reg);
         st
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_start_makes_a_new_launch_token() {
+        let state = |name: &str| {
+            let dir = crate::fsutil::test_dir(name);
+            let paths = Paths {
+                web: dir.join("web"),
+                keys_file: dir.join("keys.env"),
+                jobs_file: dir.join("jobs.json"),
+                outputs_dir: dir.join("outputs"),
+                models_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml"),
+                studio_file: dir.join("studio.json"),
+                pipelines_file: dir.join("pipelines.json"),
+            };
+            let keys = KeyStore::empty(paths.keys_file.clone());
+            AppState::build(paths, keys).expect("state")
+        };
+        let (a, b) = (state("launch_token_a"), state("launch_token_b"));
+        assert_eq!(a.launch_token.len(), 64);
+        assert!(a.launch_token.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a.launch_token, b.launch_token);
     }
 }

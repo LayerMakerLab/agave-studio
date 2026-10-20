@@ -949,7 +949,11 @@ mod tests {
     }
 
     async fn call(st: &AppState, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let mut b = Request::builder().method(method).uri(uri).header("host", "127.0.0.1:4170");
+        let mut b = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:4170")
+            .header("cookie", format!("agave_launch_4170={}", crate::state::TEST_LAUNCH_TOKEN));
         if body.is_some() {
             b = b.header("content-type", "application/json");
         }

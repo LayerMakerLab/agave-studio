@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Only the studio's pages can start a paid job or change a key: every POST to the API needs a cookie made fresh at
+  each start and given only to a browser loading a page. Another program on the computer (an agent's curl included)
+  is refused; a page opened before a restart shows "Reload the page".
 - Playground, from a first-time-user test: the code window names the run or form it is for, remembers its language
   and says how to install the client; each run in Your runs shows its words, and opening one brings its result into
   view (and focus, from the keyboard); Compare's picker marks models already in it; fal's help reads plainer ("The

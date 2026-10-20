@@ -17,6 +17,7 @@
   };
 
   const $ = (s, root = document) => root.querySelector(s);
+  document.getElementById('pgStaleReload')?.addEventListener('click', () => location.reload());
   const EMPTY_CANVAS = document.getElementById('pgCanvasEmpty');
   const S = {
     test: false, keySet: false, offline: false,
@@ -75,6 +76,8 @@
       const r = await fetch(url, init);
       let data = null;
       try { data = await r.json(); } catch (_) { data = null; }
+      // The engine restarted: this page's launch cookie is old, and only a reload gets the new one.
+      if (r.status === 403 && data && data.error === 'launch_token') { const b = $('#pgStale'); if (b) b.hidden = false; }
       return { ok: r.ok, status: r.status, data };
     } catch (_) {
       return { ok: false, status: 0, data: null };
@@ -131,6 +134,7 @@
     not_runnable: 'This model cannot run in the Playground yet.',
     price_unavailable: 'fal did not give a price for this model.',
     bad_request: 'The request was not understood. Reload the page and try again.',
+    launch_token: 'The studio restarted since this page opened. Reload the page, then try again.',
   };
   const say = (code) => ERRORS[code] || 'Something went wrong. Try again.';
 

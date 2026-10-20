@@ -4,6 +4,13 @@ Gateway: Rust (axum), binds 127.0.0.1:4170 (test mode: `AGAVE_TEST_PORT`). Serve
 Keys: read from env and from `config/keys.env` (gitignored, chmod 600). `config/keys.example.env` lists every slot.
 Never return a key value from any endpoint. Never log a key.
 
+Who may call it: only the studio's own pages. Every request must name the gateway's own host (no DNS rebinding), a
+request from another site is refused (Origin, Sec-Fetch-Site), and every POST must be JSON. Every POST under /api/
+also needs this launch's cookie, `agave_launch_<port>`: a random value made at every start and given only to a
+browser loading a page (Sec-Fetch-Mode navigate, Sec-Fetch-Dest document), HttpOnly and SameSite=Strict. So no
+other program on the computer can start a paid job or change a key through the API; a page opened before a restart
+gets 403 {"error":"launch_token"} and asks to be reloaded. GETs need no cookie.
+
 ## Endpoints (JSON)
 - GET  /api/health -> {"ok":true,"version":"0.1.0","fake_providers":false}
 - GET  /api/models -> {"models":[Model]}
