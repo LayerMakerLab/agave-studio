@@ -24,7 +24,7 @@
     price: null, priceState: 'none', confirmed: new Set(),
     jobs: [], polls: new Map(), shown: null, shownOut: 0, tick: null,
     cats: [], cat: '', q: '', cursor: null, listSeq: 0,
-    codeLang: 'curl', codeReq: null, pendingRun: null, loadSeq: 0, sending: false,
+    codeLang: (() => { try { const l = localStorage.getItem('pg.codeLang'); return ['curl', 'js', 'py'].includes(l) ? l : 'curl'; } catch (_) { return 'curl'; } })(), codeReq: null, pendingRun: null, loadSeq: 0, sending: false,
     templates: [], sampleIds: null, uploads: 0,
   };
 
@@ -352,9 +352,13 @@
 
   function helpText(f) {
     const parts = [];
-    if (f.description) parts.push(/[.!?]$/.test(f.description) ? f.description : `${f.description}.`);
+    let d = String(f.description || '').trim();
+    // Under an upload box "URL of the image to be used for the video." reads as if a link were needed.
+    if (f.kind === 'media' || f.kind === 'medialist') d = d.replace(/^(?:the\s+)?urls?\s+(?:of|to|for)\s+(?:the\s+|an?\s+)?/i, 'The ');
+    if (d) parts.push(/[.!?]$/.test(d) ? d : `${d}.`);
     if (has(f.default) && f.kind !== 'longtext' && f.kind !== 'media') {
-      parts.push(`Default: ${typeof f.default === 'object' ? JSON.stringify(f.default) : String(f.default)}.`);
+      const shown = typeof f.default === 'object' ? JSON.stringify(f.default) : Array.isArray(f.choices) ? choiceLabel(f.default, f.choices) : String(f.default);
+      parts.push(`Default: ${shown}.`);
     }
     if (f.limits) parts.push(f.limits);
     return parts.join(' ');
@@ -365,12 +369,13 @@
     const row = el('div', { class: `pg-field kind-${f.kind}`, 'data-name': f.name });
     const head = el('div', { class: 'pg-field-head' }, [
       el('label', { for: id, id: `${id}_l` }, [prettyTitle(f.title || f.name)]),
-      f.required ? el('span', { class: 'pg-tag' }, ['needed']) : null,
+      f.required ? el('span', { class: 'pg-tag', title: 'The model cannot run without it.' }, ['needed']) : null,
       S.exampled.has(f.name) ? el('span', { class: 'pg-tag ex', title: "fal's example. Replace it with your own." }, ['example']) : null,
     ]);
     row.append(head, control(f, id));
     const help = helpText(f);
-    if (help) row.append(el('p', { class: 'pg-help', id: `${id}_h` }, [help]));
+    // fal writes syntax in backticks: show it as code, not with the backticks.
+    if (help) row.append(el('p', { class: 'pg-help', id: `${id}_h` }, help.split(/`([^`]+)`/).map((t, i) => (i % 2 ? el('code', {}, [t]) : t))));
     row.append(el('p', { class: 'pg-err', id: `${id}_e`, role: 'alert' }));
     return row;
   }
@@ -497,9 +502,13 @@
     return b;
   }
 
-  /** landscape_16_9 -> Landscape 16:9, square_hd -> Square HD; anything else as fal wrote it. */
-  function choiceLabel(c) {
+  /** landscape_16_9 -> Landscape 16:9, square_hd -> Square HD; anything else as fal wrote it, except a plain word
+      among such choices ("square" beside "square_hd"), which is capitalised to match. */
+  function choiceLabel(c, all) {
     if (typeof c !== 'string') return String(c);
+    if (/^[a-z]+$/.test(c) && Array.isArray(all) && all.some((x) => typeof x === 'string' && /^[a-z0-9]+(_[a-z0-9]+)+$/.test(x))) {
+      return c.charAt(0).toUpperCase() + c.slice(1);
+    }
     if (!/^[a-z0-9_]+$/.test(c) || !c.includes('_')) return c;
     const t = c.replace(/_(\d+)_(\d+)$/, ' $1:$2').replace(/_/g, ' ').replace(/\bhd\b/g, 'HD');
     return t.charAt(0).toUpperCase() + t.slice(1);
@@ -513,12 +522,12 @@
   function choiceControl(f, id) {
     const cur = current(f);
     const isCustom = cur !== null && typeof cur === 'object';
-    const short = f.choices.length <= 6 && f.choices.every((c) => choiceLabel(c).length <= 14) && !f.custom_json;
+    const short = f.choices.length <= 6 && f.choices.every((c) => choiceLabel(c, f.choices).length <= 14) && !f.custom_json;
     if (short) {
       const g = el('div', { class: 'pg-choices', role: 'radiogroup', id, 'aria-labelledby': `${id}_l`, 'aria-describedby': `${id}_h ${id}_e` });
       f.choices.forEach((c, i) => {
         const on = cur !== null && sameValue(c, cur);
-        const label = f.name === 'duration' && /^\d+(\.\d+)?$/.test(String(c)) ? `${c} s` : choiceLabel(c);
+        const label = f.name === 'duration' && /^\d+(\.\d+)?$/.test(String(c)) ? `${c} s` : choiceLabel(c, f.choices);
         const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(on), tabindex: on || (cur === null && i === 0) ? '0' : '-1' }, [label]);
         b.addEventListener('click', () => {
           g.querySelectorAll('[role=radio]').forEach((x) => { x.setAttribute('aria-checked', 'false'); x.tabIndex = -1; });
@@ -543,7 +552,7 @@
     const wrap = el('div', { class: 'pg-select-wrap' });
     const sel = el('select', { id, 'aria-describedby': `${id}_h ${id}_e` });
     if (cur === null) sel.append(el('option', { value: '' }, ['Model default']));
-    f.choices.forEach((c, i) => sel.append(el('option', { value: String(i) }, [choiceLabel(c)])));
+    f.choices.forEach((c, i) => sel.append(el('option', { value: String(i) }, [choiceLabel(c, f.choices)])));
     if (f.custom_json) sel.append(el('option', { value: 'custom' }, ['Custom…']));
     const custom = f.custom_json ? el('textarea', { class: 'pg-custom', rows: 2, spellcheck: 'false', 'aria-label': `${f.title} as JSON`, placeholder: '{"width": 1024, "height": 1024}' }) : null;
     if (isCustom) {
@@ -596,7 +605,12 @@
     const k = kindOfUrl(url, kind);
     if (k === 'video') return video({ src: url, playsinline: true, preload: 'metadata', loop: true });
     if (k === 'audio') return el('audio', { src: url, controls: true, preload: 'none' });
-    if (k === 'image') return el('img', { src: url, alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+    if (k === 'image') {
+      const img = el('img', { src: url, alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+      // The run still sends the link; only this browser could not show it.
+      img.addEventListener('error', () => img.replaceWith(el('span', { class: 'pg-file' }, ['No preview'])), { once: true });
+      return img;
+    }
     return el('span', { class: 'pg-file' }, [url.split('/').pop().slice(0, 40)]);
   }
 
@@ -866,10 +880,14 @@
     if (u === '1000 character') {
       const text = String(fieldValue('prompt') ?? fieldValue('text') ?? '');
       const k = Math.max(1, Math.ceil(text.length / 1000));
-      return { total: p.unit_price * k, exact: false, how: `${text.length} characters` };
+      // fal states a price per 1000 characters and nothing about a shorter text, so this is the most it can be.
+      return { total: p.unit_price * k, exact: false, upTo: true, how: `${text.length} characters` };
     }
     return null;
   }
+
+  /** The word before an estimate: none when exact, "up to" for a ceiling, else "about". */
+  const approx = (est) => (est.exact ? '' : est.upTo ? 'up to ' : 'about ');
 
   /** True while a run of the model on screen is still going (the button then says Run another). */
   const runningHere = () => !!S.spec && S.jobs.some((j) => isActive(j) && j.model === `fal:${S.spec.id}`);
@@ -879,7 +897,7 @@
     const est = estimate();
     const avg = S.price && S.price.average;
     if (est && est.exact) return { label: `Run · ${money(est.total)}`, exact: true, est, avg };
-    if (est) return { label: `Run · about ${money(est.total)}`, exact: false, est, avg };
+    if (est) return { label: `Run · ${approx(est)}${money(est.total)}`, exact: false, est, avg };
     if (num(avg)) return { label: `Run · about ${money(avg)}`, exact: false, avg };
     return { label: 'Run · check the price', exact: false };
   }
@@ -896,7 +914,7 @@
     if (S.test) {
       box.append(el('span', {}, ['Test mode: runs are free and fake.']));
       if (p && num(p.unit_price)) {
-        const real = sum.est ? ` A real run: ${sum.est.how} → ${sum.est.exact ? '' : 'about '}${money(sum.est.total)}.` : '';
+        const real = sum.est ? ` A real run: ${sum.est.how} → ${approx(sum.est)}${money(sum.est.total)}.` : '';
         box.append(el('span', { class: 'muted' }, [` fal lists ${money(p.unit_price)} per ${perUnit(p.unit)}.${real}`]));
       }
       done();
@@ -911,7 +929,7 @@
     }
     const line = el('p', { class: 'pg-price-line' });
     if (num(p.unit_price)) line.append(el('b', {}, [money(p.unit_price)]), ` per ${perUnit(p.unit)}`);
-    if (sum.est) line.append(el('span', { class: 'muted' }, [` · ${sum.est.how} → ${sum.est.exact ? '' : 'about '}${money(sum.est.total)}`]));
+    if (sum.est) line.append(el('span', { class: 'muted' }, [` · ${sum.est.how} → ${approx(sum.est)}${money(sum.est.total)}`]));
     if (num(p.average)) line.append(el('span', { class: 'muted' }, [` · fal's average run ${money(p.average)}`]));
     box.append(line, el('p', { class: 'pg-price-note' }, ['fal\'s list price, on your key. Options such as audio, resolution or quality can change the rate: ', el('a', { href: S.spec.page, target: '_blank', rel: 'noopener' }, ['full table on fal ↗'])]));
     done();
@@ -923,7 +941,7 @@
     const p = S.price;
     const parts = [];
     if (p && num(p.unit_price)) parts.push(el('p', {}, ['fal lists ', el('b', {}, [money(p.unit_price)]), ` per ${perUnit(p.unit)} for ${S.spec.name}.`]));
-    if (sum.est) parts.push(el('p', {}, [`For these settings (${sum.est.how}) that is ${sum.est.exact ? '' : 'about '}`, el('b', {}, [money(sum.est.total)]), '.']));
+    if (sum.est) parts.push(el('p', {}, [`For these settings (${sum.est.how}) that is ${approx(sum.est)}`, el('b', {}, [money(sum.est.total)]), '.']));
     if (p && num(p.average)) parts.push(el('p', {}, ['fal\'s average for one run of this model is ', el('b', {}, [money(p.average)]), '.']));
     if (!p) parts.push(el('p', {}, ['fal did not give a price for this model, so the studio cannot show one.']));
     parts.push(el('p', { class: 'muted' }, ['Options such as audio, resolution or quality can change fal\'s rate. ', el('a', { href: S.spec.page, target: '_blank', rel: 'noopener' }, ['See the full table on fal ↗']), ' It is paid to fal on your key. You are asked once per model.']));
@@ -1047,6 +1065,12 @@
   const isActive = (j) => j.status === 'queued' || j.status === 'running';
   const jobName = (j) => (j.request && j.request.name) || (j.model || '').replace(/^fal:/, '');
   const jobInput = (j) => j.request && j.request.playground ? j.request.playground : null;
+  /** The words a run was given (its prompt or text), for its tile. */
+  const jobWords = (j) => {
+    const p = jobInput(j);
+    const w = p && p.input ? (typeof p.input.prompt === 'string' ? p.input.prompt : typeof p.input.text === 'string' ? p.input.text : '') : '';
+    return w.trim().slice(0, 200);
+  };
 
   function upsertJob(job) {
     const i = S.jobs.findIndex((j) => j.id === job.id);
@@ -1108,6 +1132,13 @@
       return el('model-viewer', { src: out.url, alt, 'camera-controls': true, 'auto-rotate': true, 'shadow-intensity': '1', 'interaction-prompt': 'none' });
     }
     return el('img', { src: out.url, alt, decoding: 'async' });
+  }
+
+  /** When the result's top is off screen or low on it (a run opened from far down the list), scroll to it. */
+  function bringResultIntoView() {
+    const c = $('#pgCanvas');
+    const top = c.getBoundingClientRect().top;
+    if (top < 0 || top > innerHeight * 0.5) c.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   }
 
   function show(job) {
@@ -1198,11 +1229,16 @@
     const jobs = S.jobs.slice(0, 60);
     $('#pgHistNote').textContent = jobs.length ? 'They are in the studio gallery too.' : 'Nothing yet. Your Playground runs collect here.';
     for (const j of jobs) {
-      const b = el('button', { type: 'button', class: `pg-hist ${j.status}`, 'data-id': j.id, 'aria-current': String(!!(S.shown && S.shown.id === j.id)) }, [
-        el('span', { class: 'pg-hist-thumb' }, [histThumb(j)]),
-        el('span', { class: 'pg-hist-text' }, [el('span', { class: 'pg-hist-name' }, [jobName(j)]), el('span', { class: 'pg-hist-when' }, [isActive(j) ? 'running' : j.status === 'failed' ? 'failed' : ago(j.created_at)])]),
+      const words = jobWords(j);
+      const b = el('button', { type: 'button', class: `pg-hist ${j.status}`, 'data-id': j.id, 'aria-current': String(!!(S.shown && S.shown.id === j.id)), title: words || null }, [
+        el('span', { class: 'pg-hist-thumb', 'aria-hidden': 'true' }, [histThumb(j)]),
+        el('span', { class: 'pg-hist-text' }, [
+          el('span', { class: 'pg-hist-name' }, [jobName(j)]),
+          words ? el('span', { class: 'pg-hist-words' }, [words]) : null,
+          el('span', { class: 'pg-hist-when' }, [isActive(j) ? 'running' : j.status === 'failed' ? 'failed' : ago(j.created_at)]),
+        ]),
       ]);
-      b.addEventListener('click', () => show(j));
+      b.addEventListener('click', () => { show(j); bringResultIntoView(); });
       h.append(el('div', { role: 'listitem' }, [b]));
     }
   }
@@ -1260,9 +1296,14 @@
   /** Loads the template's model with its words, and fal's example for any file it needs, so Run works at once. */
   async function useTemplate(t) {
     if (S.tab === 'json') setTab('form', true);
-    await loadModel(t.model);
+    // Words typed while the model loads are the person's: they win over the template's.
+    let typed = null;
+    const onType = (e) => { if (e.target.closest && e.target.closest('[data-name="prompt"], [data-name="text"]')) typed = e.target.value; };
+    $('#pgFields').addEventListener('input', onType);
+    try { await loadModel(t.model); } finally { $('#pgFields').removeEventListener('input', onType); }
     if (!S.spec || S.spec.id !== t.model) return;
-    const words = typeof t.prompt === 'string' ? ['prompt', t.prompt] : typeof t.text === 'string' ? ['text', t.text] : null;
+    const own = typeof typed === 'string' && typed.trim() ? typed : null;
+    const words = typeof t.prompt === 'string' ? ['prompt', own || t.prompt] : typeof t.text === 'string' ? ['text', own || t.text] : null;
     if (words && S.spec.fields.some((f) => f.name === words[0])) {
       S.values[words[0]] = words[1];
       S.touched.add(words[0]);
@@ -1276,10 +1317,14 @@
         S.exampled.add(f.name);
       }
     }
+    // The model may have filled fal's example in when it opened, before the loop above.
+    const files = S.spec.fields.some((f) => (f.kind === 'media' || f.kind === 'medialist') && S.exampled.has(f.name));
     renderForm();
     renderPrice();
     if (S.tab === 'json') showJson();
-    $('#pgRunNote').textContent = `${t.title}: ready to run. Change the words or replace fal's example with your own file.`;
+    $('#pgRunNote').textContent = files
+      ? `${t.title}: ready to run. Change the words or replace fal's example with your own file.`
+      : `${t.title}: ready to run. Change the words, then press Run.`;
     const first = document.querySelector('#pgFields textarea, #pgFields .pg-drop');
     if (first) first.focus();
   }
@@ -1323,8 +1368,9 @@
     return { code, local };
   }
 
-  function openCode(id, input) {
+  function openCode(id, input, title) {
     S.codeReq = { id, input };
+    $('#pgCodeTitle').textContent = title;
     renderCode();
     $('#pgCode').showModal();
   }
@@ -1333,21 +1379,26 @@
     if (!S.codeReq) return;
     const { code, local } = codeFor(S.codeLang, S.codeReq.id, S.codeReq.input);
     $('#pgCodeText').textContent = code;
-    $('#pgCodeNote').textContent = (local ? 'Files you uploaded here live only on this computer: put each one at a public link and replace https://YOUR-FILE-URL. ' : '') + 'Set FAL_KEY in your shell first. Your key is never put into this code.';
+    const setup = { py: 'Install the client with pip install fal-client. ', js: 'Install the client with npm install @fal-ai/client. ' }[S.codeLang] || '';
+    $('#pgCodeNote').textContent = (local ? 'Files you uploaded here live only on this computer: put each one at a public link and replace https://YOUR-FILE-URL. ' : '') + setup + 'Set FAL_KEY in your shell first. Your key is never put into this code.';
     document.querySelectorAll('#pgCodeTabs [role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.lang === S.codeLang)));
   }
 
-  document.querySelectorAll('#pgCodeTabs [role=tab]').forEach((t) => t.addEventListener('click', () => { S.codeLang = t.dataset.lang; renderCode(); }));
+  document.querySelectorAll('#pgCodeTabs [role=tab]').forEach((t) => t.addEventListener('click', () => {
+    S.codeLang = t.dataset.lang;
+    try { localStorage.setItem('pg.codeLang', S.codeLang); } catch (_) { /* private window: this visit only */ }
+    renderCode();
+  }));
   $('#pgCodeBtn').addEventListener('click', () => {
     if (!S.spec) return;
     if (S.tab === 'json' && !applyJson()) return;
-    openCode(S.spec.submit_path || S.spec.id, collect());
+    openCode(S.spec.submit_path || S.spec.id, collect(), `Code for ${S.spec.name}, as set in the form`);
   });
   $('#pgResultCode').addEventListener('click', () => {
     const p = S.shown && jobInput(S.shown);
     if (!p) return;
     // The code uses fal's own path; it is the model's id unless fal's schema says otherwise (known for the model on screen).
-    openCode(S.spec && S.spec.id === p.id ? (S.spec.submit_path || p.id) : p.id, p.input || {});
+    openCode(S.spec && S.spec.id === p.id ? (S.spec.submit_path || p.id) : p.id, p.input || {}, `Code for this run of ${jobName(S.shown)}`);
   });
   $('#pgCopyCode').addEventListener('click', async () => {
     const b = $('#pgCopyCode');
@@ -1363,6 +1414,7 @@
     if (S.mode === 'compare' && C.ids.length >= MAX_CMP) { cmpNote('Compare takes up to four models. Remove one first.'); return; }
     $('#pgSearch').placeholder = S.test ? 'Search the seven test models: kling, voice, 3d…' : 'Search fal\'s models: kling, upscale, voice, logo…';
     $('#pgPickerTitle').textContent = S.mode === 'compare' ? 'Add a model to compare' : 'Choose a model';
+    markAdded();
     d.showModal();
     $('#pgSearch').focus();
     if (!$('#pgList').children.length) searchModels(true);
@@ -1380,18 +1432,31 @@
     S.cats.forEach((c) => box.append(chip(c.id, c.label)));
   }
 
+  /** In Compare, the cards of models already in it say so and do nothing; the list is kept between opens. */
+  function markAdded() {
+    document.querySelectorAll('#pgList .pg-card[data-id]').forEach((b) => {
+      const added = S.mode === 'compare' && C.ids.includes(b.dataset.id);
+      b.classList.toggle('added', added);
+      b.setAttribute('aria-label', b.dataset.label + (added ? ', already in the comparison' : ''));
+      if (added) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+      const tag = b.querySelector('.pg-card-added');
+      if (tag) tag.hidden = !added;
+    });
+  }
+
   function modelCard(m) {
     const label = `${m.name}, ${catLabel(m.category)}${m.makes_files ? '' : ', text only'}`;
-    const b = el('button', { type: 'button', class: 'pg-card', 'aria-label': label, title: m.id }, [
+    const b = el('button', { type: 'button', class: 'pg-card', 'aria-label': label, 'data-id': m.id, 'data-label': label, title: m.id }, [
       el('span', { class: 'pg-card-thumb', 'aria-hidden': 'true' }, [m.thumb ? el('img', { src: m.thumb, alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' }) : el('span', { class: 'pg-card-ph' }, [catLabel(m.category)])]),
       el('span', { class: 'pg-card-body' }, [
         el('span', { class: 'pg-card-name' }, [m.name]),
-        el('span', { class: 'pg-card-cat' }, [catLabel(m.category), m.makes_files ? null : ' · text only']),
+        el('span', { class: 'pg-card-cat' }, [catLabel(m.category), m.makes_files ? null : ' · text only', el('span', { class: 'pg-card-added', hidden: true }, [' · added'])]),
         m.description ? el('span', { class: 'pg-card-desc' }, [m.description]) : null,
         el('span', { class: 'pg-card-id' }, [m.id]),
       ]),
     ]);
     b.addEventListener('click', () => {
+      if (b.getAttribute('aria-disabled') === 'true') return; // already a column; the label says so
       $('#pgPicker').close();
       if (S.mode === 'compare') cmpAdd(m.id, m.name);
       else if (!S.spec || S.spec.id !== m.id) loadModel(m.id);
@@ -1430,11 +1495,14 @@
     if (r.data.categories && !S.cats.length) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); renderCompare(); }
     const models = r.data.models || [];
     models.forEach((m) => list.append(modelCard(m)));
+    markAdded();
     S.cursor = r.data.next_cursor || null;
     more.hidden = !r.data.has_more;
-    let empty = S.q ? `No fal model matches “${S.q}”.${/\s/.test(S.q) ? ' Try fewer words.' : ''}` : 'No models of this kind.';
-    if (S.test) empty += ' Test mode has seven sample models; with your fal key, all of fal\'s models show here.';
-    msg.textContent = list.children.length ? '' : empty;
+    const sample = S.test ? ' Test mode has seven sample models; with your fal key, all of fal\'s models show here.' : '';
+    const empty = (S.q ? `No fal model matches “${S.q}”.${/\s/.test(S.q) ? ' Try fewer words.' : ''}` : 'No models of this kind.') + sample;
+    const cards = [...list.querySelectorAll('.pg-card[data-id]')];
+    const allAdded = cards.length && !r.data.has_more && cards.every((b) => b.classList.contains('added'));
+    msg.textContent = !cards.length ? empty : allAdded ? `${cards.length === 1 ? 'This model is' : 'These models are'} already in the comparison. Pick another kind or search.${sample}` : '';
   }
 
   let searchTimer = null;
@@ -1524,7 +1592,7 @@
     const p = C.prices.get(spec.id);
     const est = cmpEstimate(spec, input);
     if (st === 'loading' || !st) return { text: 'Asking fal for the price…', total: null, known: false };
-    if (est) return { text: `${est.exact ? '' : 'about '}${money(est.total)} · ${est.how}`, total: est.total, about: !est.exact, known: true };
+    if (est) return { text: `${approx(est)}${money(est.total)} · ${est.how}`, total: est.total, about: !est.exact, known: true };
     if (p && num(p.average)) return { text: `about ${money(p.average)} · fal's average run`, total: p.average, about: true, known: true };
     if (p && num(p.unit_price)) return { text: `${money(p.unit_price)} per ${perUnit(p.unit)}`, total: null, known: false };
     if (st === 'nokey') return { text: 'Add your fal key to see the price.', total: null, known: false };
@@ -1541,7 +1609,7 @@
       if (!has(v) || typeof v === 'object') continue;
       if (name === 'duration') bits.push(`${String(v).replace(/s$/, '')} s`);
       else if (name === 'num_images') bits.push(`${v} image${Number(v) === 1 ? '' : 's'}`);
-      else bits.push(choiceLabel(v));
+      else bits.push(choiceLabel(v, f.choices));
     }
     return bits.length ? `Sends ${bits.join(', ')}` : '';
   }

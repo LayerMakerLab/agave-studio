@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Playground, from a first-time-user test: the code window names the run or form it is for, remembers its language
+  and says how to install the client; each run in Your runs shows its words, and opening one brings its result into
+  view; Compare's picker marks models already in it; fal's help reads plainer ("The image to be used…", option
+  labels for defaults, code shown as code); a template's note mentions a file only when it filled one in, and words
+  typed while it loads are kept; a price per 1000 characters on a short text says "up to"; a picture that can't be
+  shown says "No preview"; the kinds of model wrap instead of hiding off the edge.
 - Playground Compare: one prompt (and one picture, for models that need one) to up to four fal models side by side.
   Each column shows the model's price and what it sends before Run all, and its result, time and price after; when a
   model has not been asked about yet, one price question lists every model and the total; Open takes a column to its
