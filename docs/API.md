@@ -187,12 +187,15 @@ shown in the gallery like other jobs), so a restart in the middle fails that ste
   "why"), 412 missing_key (with "key"), 409 not_test_mode (the page said test mode but the studio is not in it),
   429 too_many_jobs, and the /api/fal/model errors. The job's model is "fal:<endpoint>", its mode the fal category,
   and its request {"playground":{"id","input"},"name","price"} (kept when 16 KB or less, as for /api/generate).
-  Up to 24 files in fal's result are saved under /outputs when they are a picture, video, audio or 3D model (never SVG
-  or HTML), up to 512 MB each and 2 GB a run; other files, and links that are not https, are skipped. Every result
-  file is fetched only from a host that resolves to public addresses, pinned to the checked address, with redirects
-  refused. A file that fails for a reason another try will not fix (not public, too large, refused, HTTP 4xx) is
-  skipped; any other failure removes the files that poll saved and the poll is tried again, so a job never ends with
-  its main file silently missing. Test mode answers voice and sound models with a short tone.
+  Up to 24 files in fal's result (read from at most 200 file links) are saved under /outputs when they are a picture,
+  video, audio or 3D model (never SVG or HTML), up to 512 MB each and 2 GB a run; other files, and links that are not
+  https, are skipped. Every result file is fetched only from a host that resolves to public addresses, pinned to the
+  checked addresses, with redirects refused, and tried once more a second later when it fails for a reason that may
+  pass (network, HTTP 5xx, 408, 429); not public, too large, a redirect and other HTTP 4xx do not pass. Files rank 3D
+  model, video, audio, picture, and the most central file that failed decides: one less central than a saved file (a
+  preview beside the video) is let go; one as central or more that may pass makes the poll remove what it saved and
+  run again (3 polls at most); after that, or when it cannot pass, a more central file still missing fails the job with
+  the reason, and one of several equal files is let go. Test mode answers voice and sound models with a short tone.
 
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture

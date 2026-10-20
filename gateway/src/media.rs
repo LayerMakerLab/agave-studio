@@ -206,13 +206,13 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
 }
 
 /// Fetches a user-supplied https image. The host must resolve only to public addresses, the
-/// connection is pinned to the checked address (no DNS rebinding), and redirects are refused.
+/// connection is pinned to the checked addresses (no DNS rebinding), and redirects are refused.
 async fn fetch_user_image(src: &str) -> PResult<(Vec<u8>, Option<String>)> {
     fetch_public(src, MAX_INPUT_IMAGE_BYTES, Duration::from_secs(60), "image").await
 }
 
 /// GET an https URL whose host must resolve only to public addresses; the connection is pinned to the checked
-/// address (no DNS rebinding) and redirects are refused. `timeout` bounds the whole download; `what` names the file
+/// addresses (no DNS rebinding) and redirects are refused. `timeout` bounds the whole download; `what` names the file
 /// in errors ("image URL must be https").
 pub async fn fetch_public(src: &str, limit: usize, timeout: Duration, what: &str) -> PResult<(Vec<u8>, Option<String>)> {
     let url = parse_https_url(src).ok_or_else(|| ProviderError::Failed(format!("{what} URL must be https")))?;
@@ -237,7 +237,8 @@ pub async fn fetch_public(src: &str, limit: usize, timeout: Duration, what: &str
         if addrs.is_empty() || !addrs.iter().all(|a| is_public_ip(a.ip())) {
             return Err(ProviderError::Failed(format!("{what} URL host is not public")));
         }
-        builder = builder.resolve(bare, addrs[0]);
+        // Every checked address, so a broken route to one (IPv6 down) falls back to the next; none other is used.
+        builder = builder.resolve_to_addrs(bare, &addrs);
     }
     let client = builder.build().map_err(|_| ProviderError::Failed("http client error".into()))?;
     let resp = client.get(url).send().await.map_err(net)?;

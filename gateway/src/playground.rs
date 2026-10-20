@@ -9,6 +9,7 @@
 //! of the network, and runs go to the fake provider.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -50,6 +51,9 @@ const MAX_RESULT_LINKS: usize = 200;
 const MAX_RUN_BYTES: usize = 2 << 30;
 /// Longest a single result file download may take.
 const RESULT_TIMEOUT: Duration = Duration::from_secs(300);
+/// Result polls that may end in another try when a file fails for a passing reason; the last one settles the job.
+/// Below the poller's own limit of failed polls in a row (jobs::MAX_TRANSIENT_FAILURES).
+const RESULT_TRIES: u32 = 3;
 const MAX_SAVED_REQUEST_BYTES: usize = 16 << 10;
 /// Fields never shown or sent: sync_mode makes fal answer with inline data instead of file URLs.
 const HIDDEN: &[&str] = &["sync_mode"];
@@ -933,7 +937,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
             };
             // Only file and JSON fields may name local files to send inline; a /outputs/ path in a text field stays text.
             let inline = spec.fields.iter().filter(|f| matches!(f.kind, Kind::Media | Kind::MediaList | Kind::Json)).map(|f| f.name.clone()).collect();
-            (Arc::new(FalRun { input: Value::Object(input.clone()), inline }) as Arc<dyn Provider>, key)
+            (Arc::new(FalRun::new(Value::Object(input.clone()), inline)) as Arc<dyn Provider>, key)
         }
     };
     let prompt = ["prompt", "text"].iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(|p| clean_text(p, 2000)).unwrap_or_else(|| spec.name.clone());
@@ -979,7 +983,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
 /// The adapter for a Playground job picked up again after a restart (it is only polled).
 pub fn adapter_for_job(model: &str) -> Option<Arc<dyn Provider>> {
     let id = model.strip_prefix(JOB_PREFIX)?;
-    valid_endpoint(id).then(|| Arc::new(FalRun { input: Value::Null, inline: Vec::new() }) as Arc<dyn Provider>)
+    valid_endpoint(id).then(|| Arc::new(FalRun::new(Value::Null, Vec::new())) as Arc<dyn Provider>)
 }
 
 // ---------------------------------------------------------------- fal adapter for Playground runs
@@ -989,6 +993,14 @@ pub struct FalRun {
     input: Value,
     /// The fields whose values may name local files to send inline (file and JSON fields).
     inline: Vec<String>,
+    /// Result polls so far that missed a file (see `poll`).
+    result_tries: AtomicU32,
+}
+
+impl FalRun {
+    fn new(input: Value, inline: Vec<String>) -> Self {
+        Self { input, inline, result_tries: AtomicU32::new(0) }
+    }
 }
 
 fn mime_for(name: &str) -> Option<&'static str> {
@@ -1164,6 +1176,61 @@ fn lasting(e: &ProviderError) -> bool {
         .is_some_and(|c| (300..500).contains(&c) && c != 408 && c != 429)
 }
 
+/// How central a kind of file is to a run's result: a 3D model, then video, audio, pictures.
+fn rank(kind: &str) -> u8 {
+    match kind {
+        "model" => 0,
+        "video" => 1,
+        "audio" => 2,
+        _ => 3,
+    }
+}
+
+fn rank_word(rank: u8) -> &'static str {
+    ["3D model", "video", "audio", "picture"][usize::from(rank.min(3))]
+}
+
+/// Keeps the most central file that failed; between equals, one another try may bring.
+fn note_miss(missed: &mut Option<(u8, bool, String)>, rank: u8, passing: bool, e: ProviderError) {
+    let why = match e {
+        ProviderError::Failed(m) => m,
+        ProviderError::NotImplemented => "not implemented".into(),
+    };
+    if missed.as_ref().is_none_or(|(r, p, _)| rank < *r || (rank == *r && passing && !*p)) {
+        *missed = Some((rank, passing, why));
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Settle {
+    /// Remove what this poll saved and poll again.
+    Retry,
+    /// Remove what this poll saved and fail the job.
+    Fail,
+    /// Finish with the files that saved.
+    Keep,
+}
+
+/// What a result poll does when its most central missing file has rank `missed` (`passing`: another try may bring it)
+/// and its most central saved file has rank `best`, on its `tries`th miss.
+fn settle(best: Option<u8>, missed: u8, passing: bool, tries: u32) -> Settle {
+    if passing && tries < RESULT_TRIES && best.is_none_or(|b| missed <= b) {
+        Settle::Retry
+    } else if best.is_none_or(|b| missed < b) {
+        Settle::Fail
+    } else {
+        Settle::Keep
+    }
+}
+
+async fn remove_saved(ctx: &Ctx, outs: &[Output]) {
+    for o in outs {
+        if let Some(name) = o.url.strip_prefix("/outputs/").filter(|n| media::valid_output_name(n)) {
+            let _ = tokio::fs::remove_file(ctx.outputs_dir.join(name)).await;
+        }
+    }
+}
+
 /// One result file's bytes and how to save them, or None to skip it (not https, not a kept type, bad data: URI).
 async fn result_bytes(url: &str, content_type: Option<&str>) -> PResult<Option<(Vec<u8>, &'static str, String)>> {
     if let Some(rest) = url.strip_prefix("data:") {
@@ -1177,11 +1244,14 @@ async fn result_bytes(url: &str, content_type: Option<&str>) -> PResult<Option<(
         return Ok(None);
     }
     let Some((kind, ext)) = kind_and_ext(url, content_type) else { return Ok(None) };
-    // One retry: a single dropped connection should not cost a whole poll.
+    // One retry, a second later: a single dropped connection should not cost a whole poll.
     let bytes = match fetch_result(url).await {
         Ok(b) => b,
         Err(e) if lasting(&e) => return Err(e),
-        Err(_) => fetch_result(url).await?,
+        Err(_) => {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            fetch_result(url).await?
+        }
     };
     Ok(Some((bytes, kind, ext)))
 }
@@ -1237,21 +1307,24 @@ impl Provider for FalRun {
         };
         let mut files = Vec::new();
         result_files(&result, 0, &mut files);
-        // A file that may come with another try fails the whole poll, and the files this poll saved are removed, so
-        // the main file is never dropped silently and nothing is left without a job; the poller tries again. A file
-        // that never will (see `lasting`) is skipped.
+        // Every file is tried; then the most central one that failed decides. A file less central than one that saved
+        // (a preview beside the video) is let go. One as central or more that another try may bring makes this poll
+        // fail, after removing what it saved, so the poller tries again; RESULT_TRIES polls in, or when no try will
+        // bring it, a more central file that is still missing fails the job with the reason, and an equal one is let
+        // go. Nothing saved here is ever left without a job.
         let mut outs: Vec<Output> = Vec::new();
         let mut bytes_kept = 0usize;
-        let mut passing: Option<ProviderError> = None;
-        let mut skipped: Option<ProviderError> = None;
+        let mut missed: Option<(u8, bool, String)> = None;
         for (url, ct) in files {
             if outs.len() >= MAX_OUTPUT_FILES {
                 break;
             }
+            let r = kind_and_ext(&url, ct.as_deref()).map_or(3, |(k, _)| rank(k));
             match result_bytes(&url, ct.as_deref()).await {
                 Ok(Some((bytes, kind, ext))) => {
                     if bytes_kept + bytes.len() > MAX_RUN_BYTES {
-                        skipped = Some(ProviderError::Failed("the run's files are too large in all".into()));
+                        let e = ProviderError::Failed(format!("the run's files are over {} GB in all", MAX_RUN_BYTES >> 30));
+                        note_miss(&mut missed, rank(kind), false, e);
                         continue;
                     }
                     match media::save(ctx, &bytes, &ext, kind).await {
@@ -1259,32 +1332,32 @@ impl Provider for FalRun {
                             bytes_kept += bytes.len();
                             outs.push(o);
                         }
-                        Err(e) => {
-                            passing = Some(e);
-                            break;
-                        }
+                        Err(e) => note_miss(&mut missed, rank(kind), true, e),
                     }
                 }
                 Ok(None) => {}
-                Err(e) if lasting(&e) => skipped = Some(e),
                 Err(e) => {
-                    passing = Some(e);
-                    break;
+                    let passing = !lasting(&e);
+                    note_miss(&mut missed, r, passing, e);
                 }
             }
         }
-        if let Some(e) = passing {
-            for o in &outs {
-                if let Some(name) = o.url.strip_prefix("/outputs/").filter(|n| media::valid_output_name(n)) {
-                    let _ = tokio::fs::remove_file(ctx.outputs_dir.join(name)).await;
+        let best = outs.iter().map(|o| rank(&o.kind)).min();
+        if let Some((r, passing, why)) = missed {
+            let tries = self.result_tries.fetch_add(1, Ordering::Relaxed) + 1;
+            match settle(best, r, passing, tries) {
+                Settle::Retry => {
+                    remove_saved(ctx, &outs).await;
+                    return Err(ProviderError::Failed(why));
                 }
+                Settle::Fail => {
+                    remove_saved(ctx, &outs).await;
+                    return Ok(Polled::Failed(format!("fal finished, but its {} could not be kept: {why}.", rank_word(r))));
+                }
+                Settle::Keep => {}
             }
-            return Err(e);
         }
         if outs.is_empty() {
-            if let Some(ProviderError::Failed(why)) = skipped {
-                return Ok(Polled::Failed(format!("fal finished, but its files could not be kept: {why}.")));
-            }
             return Ok(Polled::Failed(
                 "fal finished, but returned no picture, video, audio or 3D file (other files, such as model weights, are not kept here).".into(),
             ));
@@ -1504,6 +1577,30 @@ mod tests {
         assert!(ok("seed", json!(7)));
         assert!(!ok("seed", json!("other")));
         assert!(ok("voice", json!("Someone_Else")), "a free text field takes any text");
+    }
+
+    #[test]
+    fn a_missing_file_decides_by_how_central_it_is() {
+        let (video, picture) = (rank("video"), rank("image"));
+        // A preview beside a saved video is let go, whatever the reason.
+        assert_eq!(settle(Some(video), picture, true, 1), Settle::Keep);
+        assert_eq!(settle(Some(video), picture, false, 1), Settle::Keep);
+        // The video itself: tried again while tries are left, then the job fails with the reason, never a silent done.
+        assert_eq!(settle(Some(picture), video, true, 1), Settle::Retry);
+        assert_eq!(settle(Some(picture), video, true, RESULT_TRIES), Settle::Fail);
+        assert_eq!(settle(Some(picture), video, false, 1), Settle::Fail);
+        assert_eq!(settle(None, video, true, RESULT_TRIES - 1), Settle::Retry);
+        assert_eq!(settle(None, video, false, 1), Settle::Fail);
+        // One of several pictures: tried again, and on the last try the others are kept.
+        assert_eq!(settle(Some(picture), picture, true, 1), Settle::Retry);
+        assert_eq!(settle(Some(picture), picture, true, RESULT_TRIES), Settle::Keep);
+        assert_eq!(settle(Some(picture), picture, false, 1), Settle::Keep);
+        let mut missed = None;
+        note_miss(&mut missed, picture, true, ProviderError::Failed("a".into()));
+        note_miss(&mut missed, video, false, ProviderError::Failed("b".into()));
+        note_miss(&mut missed, video, true, ProviderError::Failed("c".into()));
+        note_miss(&mut missed, video, false, ProviderError::Failed("d".into()));
+        assert_eq!(missed, Some((video, true, "c".to_string())), "the most central miss, a passing one between equals");
     }
 
     #[test]
@@ -1767,7 +1864,7 @@ mod live {
             let Ok(spec) = spec_for(&st, id).await else { panic!("no spec for {id}") };
             let (checked, _) = check_input(&spec, input.as_object().unwrap()).expect("input accepted");
             let inline = spec.fields.iter().filter(|f| matches!(f.kind, Kind::Media | Kind::MediaList | Kind::Json)).map(|f| f.name.clone()).collect();
-            let adapter = FalRun { input: Value::Object(checked), inline };
+            let adapter = FalRun::new(Value::Object(checked), inline);
             let sub = SubmitReq {
                 endpoint: spec.submit_path.clone(), mode: String::new(), prompt: String::new(), aspect: None, duration: None, resolution: None,
                 seed: None, image_url: None, image_urls: Vec::new(), voice_id: None, label: None, audio: None,

@@ -442,9 +442,9 @@
     const slider = f.min !== null && f.max !== null && f.max - f.min <= 100000
       ? el('input', { type: 'range', min: f.min, max: f.max, step: step === 'any' ? (f.max - f.min) / 100 : step, 'aria-labelledby': `${id}_l`, tabindex: '-1' })
       : null;
-    if (slider) slider.value = String(v ?? f.min);
+    if (slider) slider.value = String(num(v) ? v : f.min);
     const put = (raw, from) => {
-      if (raw === '' || raw === null) { setValue(f.name, null); if (slider) slider.value = String(fieldDefault(f) ?? f.min); return; }
+      if (raw === '' || raw === null) { setValue(f.name, null); if (slider) slider.value = String(num(fieldDefault(f)) ? fieldDefault(f) : f.min); return; }
       let n = Number(raw);
       if (!isFinite(n)) return;
       if (f.kind === 'integer') n = Math.round(n);
@@ -456,6 +456,7 @@
     box.addEventListener('input', () => {
       const raw = box.value.trim();
       if (words.includes(raw)) { setValue(f.name, raw); markTouched(wrap.closest('.pg-field')); return; }
+      if (/^[-+]?\.?$/.test(raw) && raw !== '') return; // a number still being typed
       const n = Number(raw);
       if (raw !== '' && !isFinite(n)) { showFieldError(f.name, words.length ? `Use a number or ${words.map((w) => `"${w}"`).join(' or ')}.` : 'Use a number.'); return; }
       const out = raw !== '' && ((num(f.min) && (f.min_strict ? n <= f.min : n < f.min)) || (num(f.max) && (f.max_strict ? n >= f.max : n > f.max)));
