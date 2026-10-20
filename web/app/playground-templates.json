@@ -1,12 +1,13 @@
 {
-  "note": "Starter templates for the Playground. Each sets a fal model and, when the model has one, its prompt or text. Pictures and other files come from the model's own example on fal. Model ids checked in fal's catalog on 2026-10-20.",
+  "note": "Starter templates for the Playground. Each sets a fal model and, when the model has one, its prompt or text. Pictures and other files come from the model's own example on fal; a template's note, when it has one, is what the page says after it loads. Model ids checked in fal's catalog on 2026-10-20.",
   "templates": [
     {"id": "picture", "title": "A quick picture", "blurb": "Words to a picture in about a second. The cheapest way to try an idea.", "kind": "image",
      "model": "fal-ai/flux/schnell", "prompt": "A small brass lamp on a walnut desk by a rainy window, soft morning light, shallow depth of field"},
     {"id": "poster", "title": "A poster with words on it", "blurb": "For signs, covers and titles, where the letters have to come out right.", "kind": "image",
      "model": "ideogram/v4", "prompt": "A bold summer music festival poster that reads \"SUNSET SESSIONS\" in big hand-painted letters, palm trees, warm orange sky"},
     {"id": "edit", "title": "Change a photo with words", "blurb": "Upload a photo and say what to change: the background, the light, the season.", "kind": "image",
-     "model": "google/nano-banana-2.1/edit", "prompt": "Make it a snowy winter evening, keep everything else the same"},
+     "model": "google/nano-banana-2.1/edit", "prompt": "Make it a snowy winter evening, keep everything else the same",
+     "note": "Add your photo above and change the words, then press Run."},
     {"id": "cutout", "title": "Cut out the background", "blurb": "Upload a photo and get the subject on a clear background, ready for a product page.", "kind": "image",
      "model": "fal-ai/birefnet/v2"},
     {"id": "upscale", "title": "Sharpen and enlarge", "blurb": "Make a small or soft picture bigger and crisper.", "kind": "image",

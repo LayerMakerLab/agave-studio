@@ -23,7 +23,7 @@
     spec: null, values: {}, touched: new Set(), exampled: new Set(), tab: 'form',
     price: null, priceState: 'none', confirmed: new Set(),
     jobs: [], polls: new Map(), shown: null, shownOut: 0, tick: null,
-    cats: [], cat: '', q: '', cursor: null, listSeq: 0,
+    cats: [], cat: '', q: '', cursor: null, listSeq: 0, listHasMore: false,
     codeLang: (() => { try { const l = localStorage.getItem('pg.codeLang'); return ['curl', 'js', 'py'].includes(l) ? l : 'curl'; } catch (_) { return 'curl'; } })(), codeReq: null, pendingRun: null, loadSeq: 0, sending: false,
     templates: [], sampleIds: null, uploads: 0,
   };
@@ -354,10 +354,12 @@
     const parts = [];
     let d = String(f.description || '').trim();
     // Under an upload box "URL of the image to be used for the video." reads as if a link were needed.
-    if (f.kind === 'media' || f.kind === 'medialist') d = d.replace(/^(?:the\s+)?urls?\s+(?:of|to|for)\s+(?:the\s+|an?\s+)?/i, 'The ');
+    if (f.kind === 'media' || f.kind === 'medialist') {
+      d = d.replace(/^(?:the\s+)?urls?\s+(?:of|to|for)\s+(?:(?:the|an?)\s+(?=\S)|(?=(?:image|video|audio|input|file|mask|photo)s?\b))/i, 'The ');
+    }
     if (d) parts.push(/[.!?]$/.test(d) ? d : `${d}.`);
     if (has(f.default) && f.kind !== 'longtext' && f.kind !== 'media') {
-      const shown = typeof f.default === 'object' ? JSON.stringify(f.default) : Array.isArray(f.choices) ? choiceLabel(f.default, f.choices) : String(f.default);
+      const shown = typeof f.default === 'object' ? JSON.stringify(f.default) : f.kind === 'choice' ? choiceLabel(f.default, f.choices) : String(f.default);
       parts.push(`Default: ${shown}.`);
     }
     if (f.limits) parts.push(f.limits);
@@ -880,8 +882,9 @@
     if (u === '1000 character') {
       const text = String(fieldValue('prompt') ?? fieldValue('text') ?? '');
       const k = Math.max(1, Math.ceil(text.length / 1000));
-      // fal states a price per 1000 characters and nothing about a shorter text, so this is the most it can be.
-      return { total: p.unit_price * k, exact: false, upTo: true, how: `${text.length} characters` };
+      // fal states a price per 1000 characters and nothing about a shorter text, so this is the most it can be (when
+      // no option can change the rate).
+      return { total: p.unit_price * k, exact: false, upTo: sure, how: `${text.length} characters` };
     }
     return null;
   }
@@ -1230,7 +1233,7 @@
     $('#pgHistNote').textContent = jobs.length ? 'They are in the studio gallery too.' : 'Nothing yet. Your Playground runs collect here.';
     for (const j of jobs) {
       const words = jobWords(j);
-      const b = el('button', { type: 'button', class: `pg-hist ${j.status}`, 'data-id': j.id, 'aria-current': String(!!(S.shown && S.shown.id === j.id)), title: words || null }, [
+      const b = el('button', { type: 'button', class: `pg-hist ${j.status}`, 'data-id': j.id, 'aria-current': String(!!(S.shown && S.shown.id === j.id)) }, [
         el('span', { class: 'pg-hist-thumb', 'aria-hidden': 'true' }, [histThumb(j)]),
         el('span', { class: 'pg-hist-text' }, [
           el('span', { class: 'pg-hist-name' }, [jobName(j)]),
@@ -1238,7 +1241,12 @@
           el('span', { class: 'pg-hist-when' }, [isActive(j) ? 'running' : j.status === 'failed' ? 'failed' : ago(j.created_at)]),
         ]),
       ]);
-      b.addEventListener('click', () => { show(j); bringResultIntoView(); });
+      b.addEventListener('click', (e) => {
+        show(j);
+        bringResultIntoView();
+        // From the keyboard (Enter or Space), focus follows to the result so the next Tab starts there.
+        if (e.detail === 0 && !$('#pgResultBar').hidden) $('#pgResultMeta').focus({ preventScroll: true });
+      });
       h.append(el('div', { role: 'listitem' }, [b]));
     }
   }
@@ -1296,13 +1304,17 @@
   /** Loads the template's model with its words, and fal's example for any file it needs, so Run works at once. */
   async function useTemplate(t) {
     if (S.tab === 'json') setTab('form', true);
-    // Words typed while the model loads are the person's: they win over the template's.
+    // Words typed while the model loads are the person's: they win over the template's, but only when they replaced
+    // the old words (a keystroke in the old model's example is not a new prompt).
+    const box = document.querySelector('#pgFields [data-name="prompt"] textarea, #pgFields [data-name="text"] textarea');
+    const before = box ? box.value.trim() : '';
     let typed = null;
     const onType = (e) => { if (e.target.closest && e.target.closest('[data-name="prompt"], [data-name="text"]')) typed = e.target.value; };
     $('#pgFields').addEventListener('input', onType);
     try { await loadModel(t.model); } finally { $('#pgFields').removeEventListener('input', onType); }
     if (!S.spec || S.spec.id !== t.model) return;
-    const own = typeof typed === 'string' && typed.trim() ? typed : null;
+    const edited = before && typeof typed === 'string' && (typed.includes(before.slice(0, 12)) || typed.includes(before.slice(-12)));
+    const own = typeof typed === 'string' && typed.trim() && !edited ? typed : null;
     const words = typeof t.prompt === 'string' ? ['prompt', own || t.prompt] : typeof t.text === 'string' ? ['text', own || t.text] : null;
     if (words && S.spec.fields.some((f) => f.name === words[0])) {
       S.values[words[0]] = words[1];
@@ -1322,9 +1334,12 @@
     renderForm();
     renderPrice();
     if (S.tab === 'json') showJson();
-    $('#pgRunNote').textContent = files
-      ? `${t.title}: ready to run. Change the words or replace fal's example with your own file.`
-      : `${t.title}: ready to run. Change the words, then press Run.`;
+    // What there is to change: the words, fal's example file. A template can say it better (one that needs your photo).
+    const steps = [];
+    if (S.spec.fields.some((f) => f.name === 'prompt' || f.name === 'text')) steps.push('change the words');
+    if (files) steps.push("replace fal's example with your own file");
+    const next = steps.length ? `${steps.join(' or ')}, then press Run.` : 'Press Run.';
+    $('#pgRunNote').textContent = typeof t.note === 'string' ? `${t.title}: ${t.note}` : `${t.title}: ready to run. ${next.charAt(0).toUpperCase()}${next.slice(1)}`;
     const first = document.querySelector('#pgFields textarea, #pgFields .pg-drop');
     if (first) first.focus();
   }
@@ -1434,7 +1449,8 @@
 
   /** In Compare, the cards of models already in it say so and do nothing; the list is kept between opens. */
   function markAdded() {
-    document.querySelectorAll('#pgList .pg-card[data-id]').forEach((b) => {
+    const cards = [...document.querySelectorAll('#pgList .pg-card[data-id]')];
+    cards.forEach((b) => {
       const added = S.mode === 'compare' && C.ids.includes(b.dataset.id);
       b.classList.toggle('added', added);
       b.setAttribute('aria-label', b.dataset.label + (added ? ', already in the comparison' : ''));
@@ -1442,6 +1458,13 @@
       const tag = b.querySelector('.pg-card-added');
       if (tag) tag.hidden = !added;
     });
+    // Every card listed is already a column (and fal has no more of this kind): say so.
+    const msg = $('#pgListMsg');
+    const allAdded = cards.length && !S.listHasMore && cards.every((b) => b.classList.contains('added'));
+    const sample = S.test ? ' Test mode has seven sample models; with your fal key, all of fal\'s models show here.' : '';
+    if (allAdded) msg.textContent = `${cards.length === 1 ? 'This model is' : 'These models are'} already in the comparison. Pick another kind or search.${sample}`;
+    else if (cards.length && msg.dataset.added) msg.textContent = '';
+    msg.dataset.added = allAdded ? '1' : '';
   }
 
   function modelCard(m) {
@@ -1495,14 +1518,14 @@
     if (r.data.categories && !S.cats.length) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); renderCompare(); }
     const models = r.data.models || [];
     models.forEach((m) => list.append(modelCard(m)));
-    markAdded();
     S.cursor = r.data.next_cursor || null;
+    S.listHasMore = !!r.data.has_more;
     more.hidden = !r.data.has_more;
     const sample = S.test ? ' Test mode has seven sample models; with your fal key, all of fal\'s models show here.' : '';
     const empty = (S.q ? `No fal model matches “${S.q}”.${/\s/.test(S.q) ? ' Try fewer words.' : ''}` : 'No models of this kind.') + sample;
-    const cards = [...list.querySelectorAll('.pg-card[data-id]')];
-    const allAdded = cards.length && !r.data.has_more && cards.every((b) => b.classList.contains('added'));
-    msg.textContent = !cards.length ? empty : allAdded ? `${cards.length === 1 ? 'This model is' : 'These models are'} already in the comparison. Pick another kind or search.${sample}` : '';
+    msg.textContent = list.querySelector('.pg-card[data-id]') ? '' : empty;
+    msg.dataset.added = '';
+    markAdded();
   }
 
   let searchTimer = null;
@@ -1592,11 +1615,19 @@
     const p = C.prices.get(spec.id);
     const est = cmpEstimate(spec, input);
     if (st === 'loading' || !st) return { text: 'Asking fal for the price…', total: null, known: false };
-    if (est) return { text: `${approx(est)}${money(est.total)} · ${est.how}`, total: est.total, about: !est.exact, known: true };
-    if (p && num(p.average)) return { text: `about ${money(p.average)} · fal's average run`, total: p.average, about: true, known: true };
+    if (est) return { text: `${approx(est)}${money(est.total)} · ${est.how}`, total: est.total, about: !est.exact, word: approx(est), known: true };
+    if (p && num(p.average)) return { text: `about ${money(p.average)} · fal's average run`, total: p.average, about: true, word: 'about ', known: true };
     if (p && num(p.unit_price)) return { text: `${money(p.unit_price)} per ${perUnit(p.unit)}`, total: null, known: false };
     if (st === 'nokey') return { text: 'Add your fal key to see the price.', total: null, known: false };
     return { text: 'fal did not give a price for this model.', total: null, known: false };
+  }
+
+  /** The word before a total: none when every price is exact, "up to" when every inexact one is a ceiling, else "about". */
+  function totalWord(prices, unknown) {
+    if (unknown > 0) return 'about ';
+    const loose = prices.filter((p) => p.known && p.about);
+    if (!loose.length) return '';
+    return loose.every((p) => p.word === 'up to ') ? 'up to ' : 'about ';
   }
 
   /** The settings a column sends besides the words and the picture, in a few words. */
@@ -1900,10 +1931,10 @@
       const prices = specs.map((s) => cmpPriceOf(s, cmpInput(s)));
       const total = prices.reduce((t, p) => t + (p.total || 0), 0);
       const unknown = prices.filter((p) => !p.known).length;
-      const about = unknown > 0 || prices.some((p) => p.about);
+      const word = totalWord(prices, unknown);
       if (prices.some((p) => p.known)) {
-        label = `${again} · ${about ? 'about ' : ''}${money(total)}`;
-        parts.push(el('p', { class: 'pg-price-line' }, [el('b', {}, [`${about ? 'about ' : ''}${money(total)}`]), ` for ${specs.length === 1 ? 'one run' : `${specs.length} runs`}`,
+        label = `${again} · ${word}${money(total)}`;
+        parts.push(el('p', { class: 'pg-price-line' }, [el('b', {}, [`${word}${money(total)}`]), ` for ${specs.length === 1 ? 'one run' : `${specs.length} runs`}`,
           unknown ? el('span', { class: 'muted' }, [` · plus ${unknown === 1 ? 'one model' : `${unknown} models`} with no total`]) : null]));
         parts.push(el('p', { class: 'pg-price-note' }, ["fal's list prices, on your key. Each column shows its own."]));
       } else {
@@ -1938,7 +1969,9 @@
     if (C.told || !C.batch.length) return;
     C.told = true;
     const failed = ended.filter((j) => j.status === 'failed').length;
-    announce(`All ${C.batch.length} finished: ${ended.length - failed} done${failed ? `, ${failed} failed` : ''}.`);
+    announce(C.batch.length === 1
+      ? (failed ? 'The run failed.' : 'The run is done.')
+      : `All ${C.batch.length} finished: ${ended.length - failed} done${failed ? `, ${failed} failed` : ''}.`);
   }
 
   function cmpConfirmText(specs, inputs) {
@@ -1949,8 +1982,7 @@
     const prices = specs.map((s, i) => cmpPriceOf(s, inputs[i]));
     const total = prices.reduce((t, p) => t + (p.total || 0), 0);
     const unknown = prices.filter((p) => !p.known).length;
-    const about = prices.some((p) => p.about) || unknown > 0;
-    if (total > 0 && specs.length > 1) parts.push(el('p', {}, [unknown ? 'The ones with a total come to ' : 'Together that is ', about ? 'about ' : '', el('b', {}, [money(total)]), unknown ? ', plus the others.' : '.']));
+    if (total > 0 && specs.length > 1) parts.push(el('p', {}, [unknown ? 'The ones with a total come to ' : 'Together that is ', totalWord(prices, unknown), el('b', {}, [money(total)]), unknown ? ', plus the others.' : '.']));
     parts.push(el('p', { class: 'muted' }, ["Options such as audio, resolution or quality can change fal's rate. It is paid to fal on your key. You are asked once per model."]));
     return parts;
   }
@@ -2053,7 +2085,7 @@
         C.batch.push(job.id);
         const pr = cmpPriceOf(spec, inputs[i]);
         if (S.test) C.sent.set(id, 'test, free');
-        else if (pr.total !== null) C.sent.set(id, `${pr.about ? 'about ' : ''}${money(pr.total)}`);
+        else if (pr.total !== null) C.sent.set(id, `${pr.word || ''}${money(pr.total)}`);
         cmpSave();
         upsertJob(job);
         follow(job.id);
