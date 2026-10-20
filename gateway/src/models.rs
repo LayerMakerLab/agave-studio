@@ -69,8 +69,8 @@ pub struct ModelDef {
     /// How many @tagged Elements the model takes beside its start frame (Kling 3.0 `elements`; 0: none).
     #[serde(default)]
     pub max_elements: u32,
-    /// Takes an end picture (fal `end_image_url`). Dolly in on image to video then sends the start picture cropped
-    /// in as the end picture, because Kling 3.0 ignores the words alone.
+    /// Takes an end picture (fal `end_image_url`). Keyframed camera moves (moves.rs) then also send where the move
+    /// ends, because Kling 3.0 often ignores camera words alone.
     #[serde(default)]
     pub end_frame: bool,
     /// Cost in the provider's own credits, shown when there is no US-dollar list price (Meshy).

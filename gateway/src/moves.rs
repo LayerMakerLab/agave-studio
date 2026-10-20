@@ -1,4 +1,4 @@
-//! Camera moves that Agave makes happen with an end picture, for image to video models that take one (models.toml
+//! Camera moves that Agave keyframes with an end picture, for image to video models that take one (models.toml
 //! `end_frame`, Kling 3.0). Kling often ignores camera words; given the start picture and where the move ends, it
 //! animates between the two. Zoom moves crop the start picture (free, local); moves that change the viewpoint make
 //! the end picture with an image edit on the same key, priced before Generate. Every other move stays words.

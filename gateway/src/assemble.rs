@@ -238,7 +238,8 @@ fn picture_demuxer(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
 /// The start and end pictures for a keyframed camera move, as JPEG data URIs made from one upright decode of the
 /// start picture (ffmpeg applies a photo's EXIF rotation where it supports it): the start as decoded, and the end
 /// at exactly that size, either the start's middle `crop` fraction or the edit's picture scaled to cover the same
-/// frame. So the two always match in size and orientation. Only real PNG, JPEG or WebP pictures reach ffmpeg, with
+/// frame. So the two always match in size (and, since a view move's edit is made from upright_picture, in
+/// orientation). Only real PNG, JPEG or WebP pictures reach ffmpeg, with
 /// that demuxer forced and files as the only protocol; the size is read from the PNG ffmpeg wrote, never guessed by
 /// a prober. Errors say what failed without ffmpeg's text, which can name local paths.
 pub(crate) async fn keyframe_frames(ctx: &Ctx, start: &str, end: EndFrom<'_>) -> PResult<(String, String)> {
@@ -302,6 +303,33 @@ pub(crate) async fn keyframe_frames(ctx: &Ctx, start: &str, end: EndFrom<'_>) ->
     let (a, b) = made?;
     let uri = |b: Vec<u8>| format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b));
     Ok((uri(a), uri(b)))
+}
+
+/// The start picture decoded once, upright (EXIF rotation applied where this ffmpeg supports it), as a JPEG data
+/// URI. A view move's edit gets this frame, so the edit and the video's start picture are the same picture.
+pub(crate) async fn upright_picture(ctx: &Ctx, start: &str) -> PResult<String> {
+    let failed = || ProviderError::Failed("The camera move could not read the start picture".into());
+    let (bytes, _) = media::load_image(ctx, start).await?;
+    let (ext, demuxer) = picture_demuxer(&bytes)
+        .ok_or_else(|| ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into()))?;
+    let dir = std::env::temp_dir();
+    let tag = media::random_hex(8);
+    let (src, out) = (dir.join(format!("agave-upright-{tag}.{ext}")), dir.join(format!("agave-upright-{tag}.jpg")));
+    let made = async {
+        tokio::fs::write(&src, &bytes).await.map_err(|_| failed())?;
+        run(Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-protocol_whitelist", "file", "-f", demuxer, "-i"])
+            .arg(&src)
+            .args(["-vf", "format=yuvj444p", "-frames:v", "1", "-q:v", "2", "-protocol_whitelist", "file"])
+            .arg(&out))
+        .await
+        .map_err(|_| failed())?;
+        tokio::fs::read(&out).await.map_err(|_| failed())
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&src).await;
+    let _ = tokio::fs::remove_file(&out).await;
+    Ok(format!("data:image/jpeg;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, made?)))
 }
 
 /// Width and height from a PNG's IHDR chunk (the file ffmpeg itself wrote).

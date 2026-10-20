@@ -58,7 +58,7 @@ pub struct SubmitReq {
 /// How Fal::submit makes the end picture of a keyframed camera move.
 #[derive(Clone, Debug, PartialEq)]
 pub enum KeyframePlan {
-    /// The middle of the start picture at this fraction, scaled back (assemble::keyframe_crop_frames).
+    /// The middle of the start picture at this fraction, scaled back (assemble::keyframe_frames).
     Crop(f64),
     /// An image edit of the start picture on fal: the edit model's endpoint and the full prompt.
     View { endpoint: String, prompt: String },
@@ -305,8 +305,10 @@ impl Provider for Fal {
                     r.end_image_url = Some(last);
                 }
                 KeyframePlan::View { endpoint, prompt } => {
-                    let end = fal_view_end(ctx, key, &endpoint, &prompt, &start).await?;
-                    let frames = crate::assemble::keyframe_frames(ctx, &start, crate::assemble::EndFrom::Picture(&end)).await;
+                    // The edit and the video start from the same upright frame, so the two pictures match.
+                    let upright = crate::assemble::upright_picture(ctx, &start).await?;
+                    let end = fal_view_end(ctx, key, &endpoint, &prompt, &upright).await?;
+                    let frames = crate::assemble::keyframe_frames(ctx, &upright, crate::assemble::EndFrom::Picture(&end)).await;
                     // The edit's own file is only a step on the way: it is inlined (or failed) and not kept.
                     if let Some(name) = end.strip_prefix("/outputs/").filter(|n| media::valid_output_name(n)) {
                         let _ = tokio::fs::remove_file(ctx.outputs_dir.join(name)).await;
@@ -394,7 +396,7 @@ impl Provider for Fal {
 }
 
 /// The end picture of a view move (moves.rs): an image edit of the start picture on fal, on the same key, waited for
-/// here (up to 3 minutes, riding out up to 5 poll errors in a row like the job poller) before the video is sent.
+/// here (up to 3 minutes; like the job poller it gives up on the 5th poll error in a row) before the video is sent.
 /// Returns the edited picture, saved under /outputs. Once queued the edit is charged by fal even if this then fails.
 async fn fal_view_end(ctx: &Ctx, key: &str, endpoint: &str, prompt: &str, start: &str) -> PResult<String> {
     let failed = |why: &str| ProviderError::Failed(format!("The camera move could not make its end picture: {why}"));
@@ -422,7 +424,11 @@ async fn fal_view_end(ctx: &Ctx, key: &str, endpoint: &str, prompt: &str, start:
     let mut errors = 0;
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let polled = match Fal.poll(ctx, key, &handle).await {
+        let poll = tokio::time::timeout_at(deadline, Fal.poll(ctx, key, &handle));
+        let Ok(result) = poll.await else {
+            return Err(failed("the edit took too long"));
+        };
+        let polled = match result {
             Ok(p) => {
                 errors = 0;
                 p

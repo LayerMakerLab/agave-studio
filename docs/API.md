@@ -47,7 +47,8 @@ Never return a key value from any endpoint. Never log a key.
   i2v). Models with `max_elements` (Kling 3.0 image to video) take a start picture and @tagged Elements side by side:
   each Element with pictures becomes @Element1, @Element2... in the words and goes to fal as `elements` (400
   {"error":"too_many_element_tags","max","got"} past the limit). Models with `end_frame` (Kling 3.0 image to video)
-  get keyframed camera moves (docs/CAMERA.md): Dolly in and Crash zoom send the start picture and its crop; Dolly out and Orbit left/right first make the end picture with an image edit on the same key. GET /api/presets
+  get keyframed camera moves (docs/CAMERA.md): Dolly in and Crash zoom send the start picture and its crop; Dolly
+  out and Orbit left/right first make the end picture with an image edit on the same key. GET /api/presets
   marks each camera move with "keyframe": {"kind":"crop"} | {"kind":"view","model":"<edit model id>"} | null (words).
   A "look" recipe keeps the picture's own frame (no aspect is sent). The project style prefix is put in front of image
   and video prompts. The job keeps its request as Job.request (when 16 KB or less) for "Run again".
