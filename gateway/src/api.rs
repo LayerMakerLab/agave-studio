@@ -317,6 +317,9 @@ pub(crate) struct GenerateReq {
     /// Set by pipeline steps ("Step 3 · Video"); never read from a request.
     #[serde(skip)]
     pub(crate) label: Option<String>,
+    /// What the page showed this job costs, for the spend log (never sent to a provider).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) estimate: Option<jobs::PageEstimate>,
 }
 
 /// The requested option if the model allows it, else the first allowed value.
@@ -558,6 +561,17 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         created_at: now_unix(),
         finished_at: None,
         request,
+        // The list price for these options (a keyframed move's picture edit is in the page's estimate, not here).
+        cost: Some(
+            jobs::Cost {
+                unit_price: model.price.as_ref().map(|p| p.rate(resolution.as_deref(), audio)),
+                unit: model.price.as_ref().map(|p| p.per.clone()),
+                credits: model.provider_credits,
+                test: st.fake.is_some(),
+                ..Default::default()
+            }
+            .with_estimate(req.estimate.as_ref()),
+        ),
     };
     // Kling 3.0 often ignores camera words: a keyframed move (moves.rs) sends where the move ends as the end picture.
     // A view move's edit runs on the same key as the video, or the move stays words.
@@ -1107,6 +1121,7 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         created_at: now_unix(),
         finished_at: None,
         request: None,
+        cost: None,
     };
     let adapter: std::sync::Arc<dyn providers::Provider> = std::sync::Arc::new(Assemble(plan));
     if !st.jobs.insert(job.clone(), adapter.clone(), String::new()) {
@@ -1718,6 +1733,27 @@ mod tests {
         assert_eq!((s, v["error"].as_str()), (StatusCode::BAD_REQUEST, Some("unknown_recipe")));
         let (s, _) = post(&app, "/api/generate", base("grid4", "")).await;
         assert_eq!(s, StatusCode::PRECONDITION_FAILED, "a grid needs no extra words");
+    }
+
+    #[tokio::test]
+    async fn a_generate_keeps_its_list_price_and_the_page_estimate_for_the_spend_log() {
+        let mut st = AppState::for_tests("api_cost");
+        st.fake = Some(std::sync::Arc::new(crate::providers::Fake::new(std::time::Duration::from_millis(5), "")));
+        let app = router(st);
+        let body = json!({"model": "fal/kling-3-pro-t2v", "mode": "t2v", "prompt": "a lighthouse at dusk", "duration": 5,
+            "audio": false, "estimate": {"usd": 0.56, "kind": "about", "how": "5 s"}});
+        let (s, v) = post(&app, "/api/generate", body).await;
+        assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+        let cost = &v["job"]["cost"];
+        assert_eq!(cost["unit_price"], 0.112, "the rate for these options (audio off), not the model's highest");
+        assert_eq!(cost["unit"], "second");
+        assert_eq!(cost["estimate_usd"], 0.56);
+        assert_eq!(cost["test"], true);
+        // A free local job (an edit) has no cost and adds no spend line.
+        let img = upload_png(&app).await;
+        let (s, v) = post(&app, "/api/assemble", json!({"clips": [{"url": img, "to": 2.0}], "frame": "9:16"})).await;
+        assert_eq!(s, StatusCode::ACCEPTED);
+        assert!(v["job"].get("cost").is_none());
     }
 
     #[tokio::test]

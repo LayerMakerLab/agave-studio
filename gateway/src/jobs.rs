@@ -1,6 +1,7 @@
 //! Job store and the background poller (every 3 s). Finished jobs are kept in data/jobs.json, so the
 //! gallery survives a restart. Running jobs are also written to data/active-jobs.json with their provider
-//! handle (never a key), so a job that is already paid for is picked up again after a restart.
+//! handle (never a key), so a job that is already paid for is picked up again after a restart. Every finished job
+//! that went to a provider adds one line to data/spend.jsonl (docs/API.md, "Spend log").
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -38,6 +39,79 @@ pub struct Job {
     /// The request as the client sent it, so a failed job can be run again (absent when large).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<serde_json::Value>,
+    /// What the job costs, for a job that goes to a provider (absent for the studio's own local jobs, and on jobs
+    /// from before this field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+}
+
+/// A paid job's price, as the studio knew it when the job started. Nothing here is guessed: the estimate is the one
+/// the page showed before the run (from the provider's list price and the run's settings), and the list price is
+/// the provider's own.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Cost {
+    /// The page's estimate for this run in US dollars, when it showed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_usd: Option<f64>,
+    /// How sure that estimate is: "exact", "about" or "up to".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<String>,
+    /// What the estimate counted, as the page put it ("5 s", "2 images").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub how: Option<String>,
+    /// The provider's list price per unit, in US dollars.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_price: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// fal's own average cost of one call of this model, when it gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average: Option<f64>,
+    /// Cost in the provider's own credits, for a provider that lists no dollar price (Meshy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits: Option<u32>,
+    /// Test mode: a fake provider answered, so nothing was paid.
+    #[serde(default)]
+    pub test: bool,
+}
+
+/// The estimate a page sends with a run: what it showed before Run.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PageEstimate {
+    pub usd: f64,
+    pub kind: String,
+    #[serde(default)]
+    pub how: String,
+}
+
+impl Cost {
+    /// Takes the page's estimate when it is a plausible one; a bad one is left out rather than refusing the run
+    /// (the log is bookkeeping, and the run was already confirmed on the page).
+    pub fn with_estimate(mut self, estimate: Option<&PageEstimate>) -> Self {
+        let Some(e) = estimate else { return self };
+        if e.usd.is_finite() && (0.0..=MAX_ESTIMATE_USD).contains(&e.usd) && matches!(e.kind.as_str(), "exact" | "about" | "up to") {
+            self.estimate_usd = Some(e.usd);
+            self.estimate = Some(e.kind.clone());
+            let how: String = e.how.chars().filter(|c| !c.is_control()).take(120).collect();
+            self.how = Some(how).filter(|h| !h.trim().is_empty());
+        }
+        self
+    }
+}
+
+/// The largest estimate a page may record for one run.
+const MAX_ESTIMATE_USD: f64 = 1_000.0;
+
+/// One line of data/spend.jsonl.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SpendLine {
+    /// When the job ended (unix seconds).
+    pub at: u64,
+    pub job: String,
+    pub model: String,
+    /// "done" or "failed".
+    pub status: String,
+    pub cost: Cost,
 }
 
 struct Entry {
@@ -117,6 +191,11 @@ pub struct JobStore {
 
 fn active_path(jobs_file: &std::path::Path) -> PathBuf {
     jobs_file.with_file_name("active-jobs.json")
+}
+
+/// The spend log beside jobs.json (data/spend.jsonl; in test mode data/fake-providers/spend.jsonl).
+pub fn spend_path(jobs_file: &std::path::Path) -> PathBuf {
+    jobs_file.with_file_name("spend.jsonl")
 }
 
 fn is_active(job: &Job) -> bool {
@@ -248,6 +327,27 @@ impl JobStore {
         });
         if fresh.is_empty() {
             return;
+        }
+        // Each finished job is new here exactly once per run of the studio, so it adds its spend line once. (A crash
+        // between this line and jobs.json can repeat it after a restart; readers keep the last line per job.)
+        let spend = spend_path(path);
+        for s in &fresh {
+            let Some(cost) = s.job.cost.clone() else { continue };
+            let line = SpendLine {
+                at: s.job.finished_at.unwrap_or_else(now_unix),
+                job: s.job.id.clone(),
+                model: s.job.model.clone(),
+                status: s.job.status.clone(),
+                cost,
+            };
+            match serde_json::to_string(&line) {
+                Ok(text) => {
+                    if let Err(e) = crate::fsutil::append_private_line(&spend, &text) {
+                        eprintln!("jobs: write {}: {e}", spend.display());
+                    }
+                }
+                Err(e) => eprintln!("jobs: encode spend: {e}"),
+            }
         }
         let mut saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
         for s in fresh {
@@ -515,6 +615,7 @@ mod tests {
             created_at: 1,
             finished_at: None,
             request: None,
+            cost: None,
         }
     }
 
@@ -571,6 +672,60 @@ mod tests {
         let due = again.due(&HashSet::new());
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].handle.status_url, "https://queue.fal.run/x/status");
+    }
+
+    #[test]
+    fn every_finished_paid_job_adds_one_spend_line() {
+        let dir = crate::fsutil::test_dir("jobs_spend");
+        let store = JobStore::load(dir.join("jobs.json")).unwrap();
+        let paid = |id: &str, est: Option<PageEstimate>| {
+            let mut j = job(id);
+            j.cost = Some(Cost { unit_price: Some(0.003), unit: Some("image".into()), ..Default::default() }.with_estimate(est.as_ref()));
+            j
+        };
+        let shown = PageEstimate { usd: 0.006, kind: "exact".into(), how: "2 images".into() };
+        assert!(store.insert(paid("p1", Some(shown)), Arc::new(Never), "FAL_KEY".into()));
+        assert!(store.insert(paid("p2", None), Arc::new(Never), "FAL_KEY".into()));
+        assert!(store.insert(job("local1"), Arc::new(Never), String::new()), "a free local job has no cost");
+        assert!(store.insert(paid("p3", None), Arc::new(Never), "FAL_KEY".into()));
+        store.set_done("p1", vec![Output { url: "/outputs/x.png".into(), kind: "image".into() }]);
+        store.set_failed("p2", "boom");
+        store.set_done("local1", Vec::new());
+        store.set_failed("p2", "again");
+        let read = || -> Vec<SpendLine> {
+            std::fs::read_to_string(spend_path(&dir.join("jobs.json"))).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+        };
+        let lines = read();
+        assert_eq!(lines.iter().map(|l| (l.job.as_str(), l.status.as_str())).collect::<Vec<_>>(), [("p1", "done"), ("p2", "failed")]);
+        assert_eq!(lines[0].cost.estimate_usd, Some(0.006));
+        assert_eq!(lines[0].cost.estimate.as_deref(), Some("exact"));
+        assert_eq!(lines[0].cost.how.as_deref(), Some("2 images"));
+        assert_eq!(lines[1].cost.estimate_usd, None, "no estimate shown, none recorded");
+        assert_eq!(lines[1].cost.unit_price, Some(0.003), "the list price is kept either way");
+        assert!(lines.iter().all(|l| l.at >= 1));
+        // The running one adds its line when it ends; nothing repeats.
+        store.set_done("p3", Vec::new());
+        assert_eq!(read().len(), 3);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(spend_path(&dir.join("jobs.json"))).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "owner only, like the other state files");
+        }
+    }
+
+    #[test]
+    fn an_estimate_the_page_could_not_have_shown_is_left_out() {
+        let est = |usd: f64, kind: &str| Cost::default().with_estimate(Some(&PageEstimate { usd, kind: kind.into(), how: "x".into() }));
+        assert_eq!(est(0.25, "about").estimate_usd, Some(0.25));
+        assert_eq!(est(0.25, "up to").estimate.as_deref(), Some("up to"));
+        assert_eq!(est(-1.0, "about").estimate_usd, None);
+        assert_eq!(est(f64::INFINITY, "about").estimate_usd, None);
+        assert_eq!(est(5_000.0, "about").estimate_usd, None);
+        assert_eq!(est(0.25, "roughly").estimate_usd, None);
+        let long = Cost::default().with_estimate(Some(&PageEstimate { usd: 1.0, kind: "exact".into(), how: format!("{}\n{}", "a".repeat(200), "b") }));
+        assert_eq!(long.how.as_ref().map(|h| h.chars().count()), Some(120));
+        assert!(!long.how.unwrap().contains('\n'));
     }
 
     #[test]

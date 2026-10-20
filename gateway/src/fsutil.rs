@@ -31,6 +31,19 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
+/// Appends `line` and a newline to `path`, creating it owner-only (0600) in an owner-only folder. One `write` call
+/// per line (O_APPEND), so lines from one process never interleave.
+pub fn append_private_line(path: &Path, line: &str) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        ensure_private_dir(dir)?;
+    }
+    let mut file = OpenOptions::new().append(true).create(true).mode(0o600).open(path)?;
+    let mut bytes = Vec::with_capacity(line.len() + 1);
+    bytes.extend_from_slice(line.as_bytes());
+    bytes.push(b'\n');
+    file.write_all(&bytes)
+}
+
 /// Creates `dir` (and missing parents) as owner-only (0700). An existing folder that others can read is tightened
 /// to 0700; if that fails (another owner, a read-only or chmod-less volume) a warning is printed and startup goes on.
 /// A symlinked folder is left as the user set it up. Only a failure to create the folder is an error.

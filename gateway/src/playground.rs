@@ -870,6 +870,9 @@ pub struct RunReq {
     /// rather than spending money it called free.
     #[serde(default)]
     test: Option<bool>,
+    /// What the page showed this run costs, for the spend log.
+    #[serde(default)]
+    estimate: Option<jobs::PageEstimate>,
 }
 
 fn fake_mode(category: &str) -> &'static str {
@@ -942,6 +945,14 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
     };
     let prompt = ["prompt", "text"].iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(|p| clean_text(p, 2000)).unwrap_or_else(|| spec.name.clone());
     let price = cached_price(&st, &spec.id);
+    let cost = jobs::Cost {
+        unit_price: price.as_ref().and_then(|p| p.unit_price),
+        unit: price.as_ref().and_then(|p| p.unit.clone()),
+        average: price.as_ref().and_then(|p| p.average),
+        test: st.fake.is_some(),
+        ..Default::default()
+    }
+    .with_estimate(req.estimate.as_ref());
     let request = json!({"playground": {"id": spec.id, "input": input}, "name": spec.name, "price": price});
     let job = Job {
         id: format!("j_{}", media::random_hex(8)),
@@ -955,6 +966,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
         created_at: now_unix(),
         finished_at: None,
         request: Some(request).filter(|v| v.to_string().len() <= MAX_SAVED_REQUEST_BYTES),
+        cost: Some(cost),
     };
     let aspect = input.get("aspect_ratio").and_then(Value::as_str).filter(|a| matches!(*a, "16:9" | "9:16" | "1:1")).map(str::to_string);
     let sub = SubmitReq {
@@ -1731,10 +1743,15 @@ mod tests {
     async fn runs_go_through_the_job_queue() {
         let st = test_state("pg_run", true);
         let app = crate::api::router(st.clone());
-        let body = json!({"id": "fal-ai/flux/schnell", "input": {"prompt": "a lamp on a desk", "num_images": 1, "seed": null}});
+        let body = json!({"id": "fal-ai/flux/schnell", "input": {"prompt": "a lamp on a desk", "num_images": 1, "seed": null},
+            "estimate": {"usd": 0.003, "kind": "exact", "how": "1 image"}});
         let (s, v) = call(&app, post_req("/api/fal/run", &body)).await;
         assert_eq!(s, StatusCode::ACCEPTED, "{v}");
         assert_eq!(v["job"]["model"], "fal:fal-ai/flux/schnell");
+        // The spend log gets what the page showed, marked as a test run (nothing was paid).
+        assert_eq!(v["job"]["cost"]["estimate_usd"], 0.003);
+        assert_eq!(v["job"]["cost"]["how"], "1 image");
+        assert_eq!(v["job"]["cost"]["test"], true);
         assert_eq!(v["job"]["mode"], "text-to-image");
         assert_eq!(v["job"]["request"]["playground"]["input"]["prompt"], "a lamp on a desk");
         assert!(v["job"]["request"]["playground"]["input"].get("seed").is_none(), "nulls are dropped");
@@ -1751,6 +1768,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(done, "the fake run finished");
+        let log = std::fs::read_to_string(crate::jobs::spend_path(&st.paths.jobs_file)).expect("spend log");
+        let line: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+        assert_eq!((line["job"].as_str(), line["status"].as_str()), (Some(id.as_str()), Some("done")));
+        assert_eq!(line["cost"]["estimate"], "exact");
         let fake = st.fake.as_ref().unwrap();
         let seen = fake.seen.lock().unwrap();
         assert_eq!(seen.last().unwrap().endpoint, "fal-ai/flux/schnell");

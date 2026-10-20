@@ -455,6 +455,16 @@
     const micro = Math.round(rate * units * 1e6);
     return Math.max(1, Math.ceil(micro / 1e4)) + keyframeCents(plan);
   }
+  // What a generate request sends for Agave's spend log: the list-price estimate the studio shows (rounded up to the
+  // cent, so "about"), or nothing when the model lists no dollar price.
+  function spendNote(req) {
+    const cents = requestCents(req);
+    const m = state.models.find((x) => x.id === req.model);
+    if (cents === null || !m || !m.price) return undefined;
+    const dur = req.duration ?? ((m.params && m.params.duration) || [])[0];
+    const how = m.price.per === 'second' ? `${dur} s` : '1 image';
+    return { usd: cents / 100, kind: 'about', how };
+  }
   function priceNote(price) {
     return price === 'price not listed' ? 'the provider lists no price for it' : `${price}, provider list price`;
   }
@@ -959,7 +969,8 @@
     setStatus(`Putting ${lookName(style)} on the picture with ${m.name}...`);
     try {
       // No aspect: the engine keeps the picture's own frame for a look.
-      const r = await call('/api/generate', { method: 'POST', body: { model: m.id, mode: 'i2i', recipe: 'look', prompt: '', style, image_url: pic } });
+      const look = { model: m.id, mode: 'i2i', recipe: 'look', prompt: '', style, image_url: pic };
+      const r = await call('/api/generate', { method: 'POST', body: { ...look, estimate: spendNote(look) } });
       if (!(r.status === 202 && r.data && r.data.job)) {
         const err = r.data && r.data.error;
         if (r.status === 412 && err === 'missing_key') {
@@ -1008,7 +1019,9 @@
   // Sends one generate request and reports the outcome in the status line. True when queued.
   async function sendGenerate(body, label = '') {
     try {
-      const r = await call('/api/generate', { method: 'POST', body });
+      // A request sent again (Run again) carries its old note; the one sent is always this request's own.
+      const { estimate: _old, ...req } = body;
+      const r = await call('/api/generate', { method: 'POST', body: { ...req, estimate: spendNote(req) } });
       if (r.status === 202 && r.data && r.data.job) {
         upsertJob(r.data.job);
         setStatus('Queued.' + label);

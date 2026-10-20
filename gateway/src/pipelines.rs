@@ -680,6 +680,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         created_at: now_unix(),
         finished_at: None,
         request: None,
+        cost: None,
     };
     let adapter: Arc<dyn crate::providers::Provider> = Arc::new(LastFrame { clip });
     if !st.jobs.insert(job.clone(), adapter.clone(), String::new()) {

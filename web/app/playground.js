@@ -896,6 +896,9 @@
   /** The word before an estimate: none when exact, "up to" for a ceiling, else "about". */
   const approx = (est) => (est.exact ? '' : est.upTo ? 'up to ' : 'about ');
 
+  /** What a run sends for Agave's spend log: the estimate shown before Run, or nothing when there was none. */
+  const spendNote = (est) => (est && num(est.total) ? { usd: est.total, kind: est.exact ? 'exact' : est.upTo ? 'up to' : 'about', how: est.how || '' } : undefined);
+
   /** True while a run of the model on screen is still going (the button then says Run another). */
   const runningHere = () => !!S.spec && S.jobs.some((j) => isActive(j) && j.model === `fal:${S.spec.id}`);
 
@@ -1026,7 +1029,8 @@
     btn.disabled = true;
     $('#pgRunLabel').textContent = 'Sending…';
     $('#pgRunNote').textContent = '';
-    const r = await call('/api/fal/run', { method: 'POST', body: { id, input, test: S.test } });
+    const shown = S.spec && S.spec.id === id ? estimate() : null;
+    const r = await call('/api/fal/run', { method: 'POST', body: { id, input, test: S.test, estimate: spendNote(shown) } });
     S.sending = false;
     btn.disabled = !(S.spec && S.spec.runnable) || S.offline;
     renderPrice();
@@ -2068,7 +2072,7 @@
         const id = ids[i];
         if (!C.ids.includes(id)) continue;
         const spec = C.specs.get(id);
-        const r = await call('/api/fal/run', { method: 'POST', body: { id, input: inputs[i], test: S.test } });
+        const r = await call('/api/fal/run', { method: 'POST', body: { id, input: inputs[i], test: S.test, estimate: spendNote(spec && cmpEstimate(spec, inputs[i])) } });
         if (!r.ok) {
           const code = r.data && r.data.error;
           let stop = null;

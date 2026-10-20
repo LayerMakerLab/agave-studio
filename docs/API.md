@@ -33,7 +33,22 @@ a browser gets the cookie like any page. GETs need no cookie.
 - GET  /api/jobs -> {"jobs":[Job]}      GET /api/jobs/:id -> {"job":Job}
   Job = {"id":"j_...","model":"...","mode":"t2v","prompt":"<final prompt>","status":"queued"|"running"|"done"|"failed",
          "progress":0..1|null,"outputs":[{"url":"...","kind":"video"|"image"|"audio"|"model"}],"error":null|"...",
-         "created_at":unix,"finished_at":unix}   (finished_at once it is done or failed; absent on jobs from before it)
+         "created_at":unix,"finished_at":unix,"cost":Cost}   (finished_at once it is done or failed; absent on jobs from before it)
+  Cost = {"estimate_usd":0.56,"estimate":"exact"|"about"|"up to","how":"5 s","unit_price":0.112,"unit":"second",
+          "average":0.0024,"credits":5,"test":false}   on jobs that go to a provider (absent on the studio's own local
+  jobs: edits, frames). `estimate_*` and `how` are what the page showed before Run; `unit_price`/`unit` are the
+  provider's list price for the job's options (`average`: fal's own average per call; `credits`: a provider that
+  prices in its own credits). Fields with no value are left out. POST /api/generate and POST /api/fal/run take an
+  optional `"estimate":{"usd":0.56,"kind":"about","how":"5 s"}`; one the page could not have shown (negative, over
+  $1000, another kind) is left out, never refused.
+
+## Spend log
+`data/spend.jsonl` (test mode: `data/fake-providers/spend.jsonl`, every line `"test":true`): one line per job that went
+to a provider, written when it ends, done or failed:
+`{"at":unix,"job":"j_...","model":"fal:fal-ai/flux/schnell","status":"done"|"failed","cost":Cost}`.
+Owner-only (0600), appended, never rewritten. The amounts are estimates from list prices; the provider's own bill is
+what was charged. A crash between a job's line and data/jobs.json can repeat its line after a restart, so a reader
+keeps the last line per `job`.
 
 ## Building blocks
 - POST /api/uploads {"data":"data:<any>;base64,..."} -> 201 {"url":"/outputs/<hex>.<ext>","kind":"image"|"video"|"audio"}

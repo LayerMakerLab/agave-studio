@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Spend log: every job that goes to a provider (the studio, the Playground, Compare, pipeline steps) adds one line to
+  `data/spend.jsonl` when it ends, with the estimate its page showed before Run and the provider's list price for its
+  options. Jobs carry the same as `cost`. Test mode writes its own log, marked test. See docs/API.md, "Spend log".
 - A paid job or a key change needs the studio's page: every request that changes something needs a cookie made fresh
   at each start and given to a browser when it loads a page. A script or agent that only calls the API (a plain curl)
   is refused; a page opened before a restart, or a browser that keeps no cookies, shows "Reload the page". It is a
