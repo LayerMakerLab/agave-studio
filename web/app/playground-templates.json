@@ -1,0 +1,27 @@
+{
+  "note": "Starter templates for the Playground. Each sets a fal model and, when the model has one, its prompt or text. Pictures and other files come from the model's own example on fal. Model ids checked in fal's catalog on 2026-10-20.",
+  "templates": [
+    {"id": "picture", "title": "A quick picture", "blurb": "Words to a picture in about a second. The cheapest way to try an idea.", "kind": "image",
+     "model": "fal-ai/flux/schnell", "prompt": "A small brass lamp on a walnut desk by a rainy window, soft morning light, shallow depth of field"},
+    {"id": "poster", "title": "A poster with words on it", "blurb": "For signs, covers and titles, where the letters have to come out right.", "kind": "image",
+     "model": "ideogram/v4", "prompt": "A bold summer music festival poster that reads \"SUNSET SESSIONS\" in big hand-painted letters, palm trees, warm orange sky"},
+    {"id": "edit", "title": "Change a photo with words", "blurb": "Upload a photo and say what to change: the background, the light, the season.", "kind": "image",
+     "model": "google/nano-banana-2.1/edit", "prompt": "Make it a snowy winter evening, keep everything else the same"},
+    {"id": "cutout", "title": "Cut out the background", "blurb": "Upload a photo and get the subject on a clear background, ready for a product page.", "kind": "image",
+     "model": "fal-ai/birefnet/v2"},
+    {"id": "upscale", "title": "Sharpen and enlarge", "blurb": "Make a small or soft picture bigger and crisper.", "kind": "image",
+     "model": "fal-ai/seedvr/upscale/image"},
+    {"id": "animate", "title": "Bring a photo to life", "blurb": "Upload a photo and describe the motion. Five or ten seconds of video.", "kind": "video",
+     "model": "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", "prompt": "Slow push in, the subject turns gently toward the camera, soft wind"},
+    {"id": "clip", "title": "A video from words", "blurb": "Describe a shot and get a clip with sound.", "kind": "video",
+     "model": "fal-ai/kling-video/v3/standard/text-to-video", "prompt": "A slow drone shot over a misty pine forest at sunrise, birds lifting off the treetops"},
+    {"id": "voice", "title": "A voice line", "blurb": "Type a line and hear it spoken.", "kind": "audio",
+     "model": "fal-ai/minimax/speech-2.8-hd", "prompt": "Hello, and welcome. This voice was made from a single line of text."},
+    {"id": "music", "title": "A music clip", "blurb": "Describe the mood and get a short piece of music.", "kind": "audio",
+     "model": "fal-ai/minimax-music/v2.6", "prompt": "Warm lo-fi beat with soft piano and vinyl crackle, relaxed and late at night"},
+    {"id": "sfx", "title": "A sound effect", "blurb": "Footsteps, doors, rain, whooshes: describe it and get the sound.", "kind": "audio",
+     "model": "fal-ai/elevenlabs/sound-effects/v2", "text": "Heavy wooden door creaking open slowly in an empty stone hall"},
+    {"id": "model3d", "title": "A 3D model from a photo", "blurb": "Upload a photo of one object and get a textured 3D model you can turn and download.", "kind": "3d",
+     "model": "fal-ai/trellis-2"}
+  ]
+}

@@ -1,6 +1,6 @@
 # Agave Studio: gateway API
 
-Gateway: Rust (axum), binds 127.0.0.1:4170. Serves `web/` as static root (`/` homepage, `/app/` workspace).
+Gateway: Rust (axum), binds 127.0.0.1:4170 (test mode: `AGAVE_TEST_PORT`). Serves `web/` as static root (`/` homepage, `/app/` workspace).
 Keys: read from env and from `config/keys.env` (gitignored, chmod 600). `config/keys.example.env` lists every slot.
 Never return a key value from any endpoint. Never log a key.
 
@@ -157,26 +157,39 @@ shown in the gallery like other jobs), so a restart in the middle fails that ste
        "description":"...","thumb":"https://..."|null,"makes_files":true}],"next_cursor":"..."|null,"has_more":bool,
        "categories":[{"id":"text-to-image","label":"Text to image"}]}
   One page (40) of fal's active models, from api.fal.ai/v1/models, cached 10 minutes. `category` must be one of the
-  listed ids. 503 catalog_busy when fal rate-limits, 502 catalog_unavailable when it cannot be reached.
+  listed ids (400 unknown_category; 400 bad_query for a query over 100 characters or a malformed cursor). 503 catalog_busy
+  when fal rate-limits, 502 catalog_unavailable when it cannot be reached. Test mode adds `"test":true`.
 - GET  /api/fal/model?id=<endpoint> -> {"model":Spec}
-  Spec = {"id","name","category","description","status","thumb","page","runnable":bool,"why_not":"..."|null,
-          "note":"..."|null,"outputs":["image"|"video"|"audio"|"model"|"file"],"fields":[Field]}
+  Spec = {"id","submit_path","name","category","description","status","thumb","page","runnable":bool,
+          "why_not":"..."|null,"note":"..."|null,"outputs":["image"|"video"|"audio"|"model"|"file"],"fields":[Field]}
+  `submit_path` is the POST path in fal's schema, where runs go (for a few models it differs from the catalog id).
+  400 bad_model_id, 404 unknown_fal_model, and the catalog's 503 and 502.
   Field = {"name","title","description","kind":"text"|"longtext"|"integer"|"number"|"boolean"|"choice"|"media"|
            "medialist"|"json","media":"image"|"video"|"audio"|"file"|null,"required","default","example","choices",
            "custom_json","min","max","min_strict","max_strict","max_len","advanced","limits"}
-  Compiled from the model's OpenAPI input schema (cached 6 hours). `sync_mode` is never offered. A model is runnable
-  when its result schema holds files; training models and retired ones are not.
+  Compiled from the model's OpenAPI input schema (cached 6 hours). `sync_mode` is never offered. An enum beside a free
+  string or number keeps the field free, with the enum in `choices` as suggestions. A model is runnable when its result
+  schema holds files; training models and retired ones are not.
 - GET  /api/fal/price?id=<endpoint> -> {"price":{"unit_price":0.07,"unit":"seconds","currency":"USD","average":0.42|null,
        "checked_at":unix,"test":false}}
   fal's list price (api.fal.ai/v1/models/pricing) and fal's own average cost of one call (pricing/estimate,
-  historical_api_price), cached 1 hour. Needs FAL_KEY (412 missing_key); 502 price_unavailable when fal gives neither.
-- POST /api/fal/run {"id":"<endpoint>","input":{...}} -> 202 {"job":Job}
+  historical_api_price), cached 1 hour. Any of unit_price, unit, currency and average can be null. Needs FAL_KEY
+  (412 {"error":"missing_key","key":"FAL_KEY"}); 502 price_unavailable when fal gives neither.
+- POST /api/fal/run {"id":"<endpoint>","input":{...},"test":bool?} -> 202 {"job":Job}
   The input is checked against the Spec: unknown fields, wrong types, values outside the schema's range or choices,
   and missing required fields are refused with 400 {"error":"unknown_field"|"invalid_value"|"field_required","field":"..."}.
-  Nulls are dropped (fal's default applies). File fields take https URLs, data: URIs, or /outputs/<file> from
-  POST /api/uploads; local files go to fal inline, up to 20 MB each and 40 MB a run (413 file_too_large). The job's
-  model is "fal:<endpoint>", its mode the fal category, and its request {"playground":{"id","input"},"name","price"}.
-  Every file in fal's result that is a picture, video, audio or 3D model is saved under /outputs; other files are not kept.
+  Nulls are dropped (fal's default applies). Text takes up to the field's maxLength (20,000 characters when the schema
+  gives none), a JSON field up to 64 KB, a file list up to 16 items. The request body is capped at 2 MB (400
+  bad_request), so send bigger files through POST /api/uploads. File fields take https URLs, data: URIs, or
+  /outputs/<file>; local files in file and JSON fields go to fal inline, up to 20 MB each and 40 MB a run
+  (413 {"error":"file_too_large"|"files_too_large","max_mb":n}; 400 file_missing). Other errors: 400 not_runnable (with
+  "why"), 412 missing_key (with "key"), 409 not_test_mode (the page said test mode but the studio is not in it),
+  429 too_many_jobs, and the /api/fal/model errors. The job's model is "fal:<endpoint>", its mode the fal category,
+  and its request {"playground":{"id","input"},"name","price"} (kept when 16 KB or less, as for /api/generate).
+  Up to 24 files in fal's result are saved under /outputs when they are a picture, video, audio or 3D model (never SVG
+  or HTML); other files, and links that are not https, are skipped. Result files on fal's own hosts are fetched like
+  other provider files; any other host must resolve to a public address. Test mode answers voice and sound models with
+  a short tone.
 
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture
@@ -184,7 +197,8 @@ that says TEST OUTPUT and names the step, and an ffmpeg clip of it for video), w
 Elements, edit and keys file). `AGAVE_FAKE_FAIL=video,3d,image` makes the first job of each listed kind fail once, to try
 Run again. GET /api/health reports `fake_providers` and the studio shows a banner. The Playground reads seven real fal
 models captured in `gateway/playground-sample.json` instead of the network. `AGAVE_TEST_PORT=4171` runs a test-mode
-gateway on another local port, beside a real one (it is ignored outside test mode).
+gateway on another local port, beside a real one: a port from 1024 up (anything else stops startup), ignored outside
+test mode.
 
 ## Prompt craft (C++)
 `engine/promptcraft` (C++17) exposes extern "C" `const char* pc_compose(const char* prompt, const char* camera_id, const char* style_id)`

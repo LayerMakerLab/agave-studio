@@ -25,16 +25,16 @@ show their credit cost). Keys are stored only on your computer, and the app has 
 ## What it does
 
 - **Generate:** text to image, image to image, text to video, image to video, voice, and image to 3D, from one
-  queue. `gateway/models.toml` lists every model.
+  queue. `gateway/models.toml` lists the composer's models.
 - **Direct:** 20 camera moves, 10 looks, a prompt library, and Elements: saved characters or products you call
   with `@tag`.
 - **Pipelines:** Library flows that run several steps in a row (product photo to hero still, video and 3D model;
   character sheet to two joined clips). The full price shows first and every paid step waits for your click.
 - **Edit:** trim and join clips, auto captions, remove pauses, reframe to 9:16, clean up voice, and set loudness
   to -14 LUFS.
-- **Playground:** any of fal's models (about 1,500) with its own controls, built from fal's own description of each
-  model. It opens with a working example, shows fal's price before you press Run, and keeps every run with Tweak,
-  Get code and Download. Open it from the studio's rail or at `/app/playground.html`.
+- **Playground:** fal's models that make pictures, video, audio or 3D, each with its own controls built from fal's own
+  description of the model. It opens with a working example, shows fal's price before you press Run, and keeps every
+  run with Tweak, Get code and Download. Open it from the studio's rail or at `/app/playground.html`.
 
 ## Run it
 
@@ -61,10 +61,11 @@ then download the speech model for captions (a one-time, free download). You can
 
 To try the studio without a key or spending anything, start it with `AGAVE_FAKE_PROVIDERS=1 cargo run --release`:
 every model answers locally with a placeholder that says TEST OUTPUT, and its data stays in `data/fake-providers`
-([docs/API.md](docs/API.md)). The Playground then offers seven real fal models, saved in the repository, and reaches
-no network.
+([docs/API.md](docs/API.md)). The Playground then offers seven real fal models saved in the repository; the engine
+reaches no network, though fal's example pictures still load in your browser from fal's servers.
 
-The gateway only listens on 127.0.0.1:4170. It has no sign-in, so do not expose it to a network. It reads `web/`,
+The gateway only listens on 127.0.0.1 (port 4170; test mode can move it with `AGAVE_TEST_PORT`). It has no sign-in,
+so do not expose it to a network. It reads `web/`,
 `config/` and `data/` from the checkout it was built in, so run it from there.
 
 ## Providers and keys
@@ -103,7 +104,8 @@ These need macOS 14 or later and Xcode's Swift tools.
 - Prompts and files go only to the provider you pick, using your key.
 - Captions and transcripts run locally.
 - The Playground reads fal's model list, each model's form and its price from api.fal.ai, sending your fal key with
-  those reads when one is set (fal allows more of them with a key). The list's model pictures load from fal's servers.
+  those reads when one is set (fal allows more of them with a key). The model pictures in the list load in your browser
+  from the addresses fal gives for them (fal's servers and Google Cloud Storage), with no referrer.
 - No analytics, no telemetry, no account. The studio's fonts ship with it; the homepage
   (`web/index.html`, not the studio) loads its headline font from Google Fonts. The studio's page policy lets it call
   only itself, so the 3D viewer cannot fetch Draco or KTX2 decoders: a compressed model does not display

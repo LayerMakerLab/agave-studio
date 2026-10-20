@@ -43,7 +43,8 @@ pub(crate) fn fail(status: StatusCode, code: impl AsRef<str>) -> Response {
 
 
 /// Rejects requests that did not come from the gateway's own pages:
-/// - Host must be 127.0.0.1:4170 or localhost:4170 (blocks DNS rebinding), on every route.
+/// - Host must be 127.0.0.1:4170 or localhost:4170 (blocks DNS rebinding), on every route. (A test-mode gateway on
+///   AGAVE_TEST_PORT answers to its own port instead; see AppState::use_port.)
 /// - Origin, when present, must be the gateway's own origin (blocks cross-site POSTs).
 /// - Sec-Fetch-Site, when present on an /api/ request, must be "same-origin" or "none": another website
 ///   (even one on another local port) cannot make the gateway call a provider with the user's key through a

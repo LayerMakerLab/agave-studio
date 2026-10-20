@@ -1,7 +1,7 @@
 # Security
 
-Agave Studio runs on your own computer. The gateway binds to 127.0.0.1:4170, has no sign-in, and checks the Host,
-Origin and content type of every request so other websites cannot drive it.
+Agave Studio runs on your own computer. The gateway binds to 127.0.0.1:4170 (test mode can use another local port),
+has no sign-in, and checks the Host, Origin and content type of every request so other websites cannot drive it.
 
 ## Reporting a problem
 

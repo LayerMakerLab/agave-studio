@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="/app/playground.css">
 </head>
 <body>
+<a class="pg-skip" href="#pgModelBtn">Skip to the model and its settings</a>
+<p id="pgLive" class="sr" aria-live="polite"></p>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
@@ -64,7 +66,7 @@
       </div>
     </header>
 
-    <div id="pgTest" class="banner test" role="status" hidden><b>TEST MODE</b> Seven real fal models with fake results. Nothing is sent to fal and nothing is paid.</div>
+    <div id="pgTest" class="banner test" role="status" hidden><b>TEST MODE</b> Seven real fal models with fake results. Nothing is sent to fal and nothing is paid; fal's example pictures still load from fal's servers.</div>
     <div id="pgOffline" class="banner" role="status" hidden>The engine is not answering. Start Agave Studio, then reload this page.</div>
 
     <section id="pgKey" class="pg-key glass" aria-labelledby="pgKeyTitle" hidden>
@@ -89,6 +91,7 @@
           <span class="pg-change">Change<svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></span>
         </button>
         <p id="pgModelDesc" class="pg-desc"></p>
+        <p id="pgModelLinks" class="pg-model-links"></p>
         <p id="pgWhyNot" class="pg-why" role="status" hidden></p>
 
         <div class="pg-toolbar">
@@ -96,7 +99,10 @@
             <button type="button" role="tab" id="pgTabForm" aria-selected="true" aria-controls="pgForm">Form</button>
             <button type="button" role="tab" id="pgTabJson" aria-selected="false" aria-controls="pgJsonWrap">JSON</button>
           </div>
-          <button type="button" id="pgReset" class="pg-link-btn">Reset</button>
+          <span class="pg-toolbar-links">
+            <button type="button" id="pgShowTemplates" class="pg-link-btn">Templates</button>
+            <button type="button" id="pgReset" class="pg-link-btn">Reset</button>
+          </span>
         </div>
 
         <form id="pgForm" class="pg-form" role="tabpanel" aria-labelledby="pgTabForm" novalidate autocomplete="off">
@@ -123,10 +129,11 @@
       </section>
 
       <section class="pg-right" aria-label="Result">
-        <div id="pgCanvas" class="pg-canvas" aria-live="polite">
+        <div id="pgCanvas" class="pg-canvas">
           <div class="pg-canvas-empty" id="pgCanvasEmpty">
             <p class="eyebrow">Your result shows here</p>
-            <p>Every model opens with a working example, so you can press Run right away, or change anything first.</p>
+            <p>Every model opens with a working example, so you can press Run right away, or start from one of these.</p>
+            <div id="pgTemplates" class="pg-templates" role="list" aria-label="Templates"></div>
             <ul class="pg-keys">
               <li><kbd>/</kbd> choose a model</li>
               <li><kbd>⌘</kbd><kbd>↵</kbd> run</li>

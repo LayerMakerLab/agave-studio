@@ -1,4 +1,4 @@
-//! Agave Studio gateway. Serves the web app and the JSON API on 127.0.0.1:4170.
+//! Agave Studio gateway. Serves the web app and the JSON API on 127.0.0.1:4170 (test mode: AGAVE_TEST_PORT).
 
 mod api;
 mod assemble;

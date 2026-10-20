@@ -21,9 +21,10 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
+use crate::api::fail;
 use crate::jobs::{self, now_unix, Job};
 use crate::media::{self, Ctx, Output};
-use crate::providers::{Handle, PResult, Polled, Provider, ProviderError, SubmitReq, Submitted};
+use crate::providers::{self, Handle, PResult, Polled, Provider, ProviderError, SubmitReq, Submitted};
 use crate::state::AppState;
 
 const FAL_API: &str = "https://api.fal.ai/v1";
@@ -37,10 +38,16 @@ const PAGE_SIZE: u32 = 40;
 /// Largest local file sent inline to fal (as a data: URI), and the most for one run.
 pub const MAX_INLINE_FILE: u64 = 20 << 20;
 const MAX_INLINE_TOTAL: u64 = 40 << 20;
+/// Text fields take up to the schema's own maxLength, or this when it gives none; never more than MAX_TEXT_HARD.
 const MAX_TEXT_CHARS: usize = 20_000;
+const MAX_TEXT_HARD: usize = 200_000;
 const MAX_JSON_FIELD_BYTES: usize = 64 << 10;
 const MAX_LIST_ITEMS: usize = 16;
 const MAX_OUTPUT_FILES: usize = 24;
+/// Most bytes one run may save; files past it are skipped.
+const MAX_RUN_BYTES: usize = 2 << 30;
+/// Result files from these hosts are fetched like other provider files; any other host must resolve to a public address.
+const FAL_FILE_HOSTS: &[&str] = &["fal.media", "fal.run", "fal.ai", "storage.googleapis.com"];
 const MAX_SAVED_REQUEST_BYTES: usize = 16 << 10;
 /// Fields never shown or sent: sync_mode makes fal answer with inline data instead of file URLs.
 const HIDDEN: &[&str] = &["sync_mode"];
@@ -110,6 +117,8 @@ pub struct Field {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Spec {
     pub id: String,
+    /// Where runs are sent on queue.fal.run: the POST path in fal's schema (it can differ from the catalog id).
+    pub submit_path: String,
     pub name: String,
     pub category: String,
     pub description: String,
@@ -227,10 +236,12 @@ fn number_bounds(p: &Value) -> (Option<f64>, Option<f64>, bool, bool) {
 fn compile_field(name: &str, raw: &Value, root: &Value, required: bool) -> Field {
     let outer = resolve(raw, root);
     let (alts, nullable) = alternatives(raw, root);
-    let title = outer.get("title").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| name.replace('_', " "));
-    let description = outer.get("description").and_then(Value::as_str).map(|d| clean_text(d, 600)).unwrap_or_default();
-    let default = outer.get("default").cloned().filter(|v| !v.is_null());
-    let example = outer.get("examples").and_then(Value::as_array).and_then(|e| e.first()).cloned();
+    // A $ref may carry its own title, description, default and examples beside it; those win over the target's.
+    let key = |k: &str| raw.get(k).or_else(|| outer.get(k));
+    let title = key("title").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| name.replace('_', " "));
+    let description = key("description").and_then(Value::as_str).map(|d| clean_text(d, 600)).unwrap_or_default();
+    let default = key("default").cloned().filter(|v| !v.is_null());
+    let example = key("examples").and_then(Value::as_array).and_then(|e| e.first()).cloned();
     let mut f = Field {
         name: name.to_string(),
         title,
@@ -250,10 +261,19 @@ fn compile_field(name: &str, raw: &Value, root: &Value, required: bool) -> Field
         advanced: false,
         limits: None,
     };
-    // An enum among the alternatives makes a choice; an object beside it may still be sent as JSON.
+    // An enum among the alternatives makes a choice; an object beside it may still be sent as JSON. A free string or
+    // number beside it keeps the field free, with the enum as suggestions.
     if let Some(e) = alts.iter().find_map(|a| a.get("enum").and_then(Value::as_array)) {
+        let choices: Vec<Value> = e.iter().filter(|v| !v.is_null()).cloned().collect();
+        let free = alts.iter().find(|a| a.get("enum").is_none() && matches!(a.get("type").and_then(Value::as_str), Some("string" | "integer" | "number")));
+        if let Some(free) = free {
+            let mut g = compile_field(name, free, root, required);
+            (g.title, g.description, g.default, g.example, g.required) = (f.title, f.description, f.default, f.example, f.required);
+            g.choices = choices;
+            return g;
+        }
         f.kind = Kind::Choice;
-        f.choices = e.iter().filter(|v| !v.is_null()).cloned().collect();
+        f.choices = choices;
         f.custom_json = alts.iter().any(|a| a.get("type").and_then(Value::as_str) == Some("object") || a.get("properties").is_some());
         return f;
     }
@@ -301,11 +321,14 @@ fn compile_field(name: &str, raw: &Value, root: &Value, required: bool) -> Field
     f
 }
 
-/// The POST operation's input schema and the result's output schema, from a fal queue OpenAPI document.
-fn io_schemas<'a>(openapi: &'a Value, id: &str) -> (Option<&'a Value>, Option<&'a Value>) {
+/// The POST operation's input schema, the result's output schema, and the POST path, from a fal queue OpenAPI
+/// document. The path is where runs go; for a few models it is not the catalog id (google/nano-banana-2.1/edit posts to
+/// fal-ai/nano-banana-2.1/edit).
+fn io_schemas<'a>(openapi: &'a Value, id: &str) -> (Option<&'a Value>, Option<&'a Value>, Option<String>) {
     let paths = openapi.get("paths").and_then(Value::as_object);
     let mut input = None;
     let mut output = None;
+    let mut post_path = None;
     for (path, ops) in paths.into_iter().flatten() {
         if path.contains("/requests/") {
             if path.ends_with("{request_id}") {
@@ -314,10 +337,11 @@ fn io_schemas<'a>(openapi: &'a Value, id: &str) -> (Option<&'a Value>, Option<&'
         } else if path.trim_start_matches('/') == id || input.is_none() {
             if let Some(s) = ops.pointer("/post/requestBody/content/application~1json/schema") {
                 input = Some(s);
+                post_path = Some(path.trim_start_matches('/').to_string());
             }
         }
     }
-    (input.map(|s| resolve(s, openapi)), output.map(|s| resolve(s, openapi)))
+    (input.map(|s| resolve(s, openapi)), output.map(|s| resolve(s, openapi)), post_path)
 }
 
 /// File kinds an output schema can contain: properties that are fal File objects (or lists of them).
@@ -364,14 +388,15 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
     }
     let md = model.get("metadata").cloned().unwrap_or(Value::Null);
     let s = |k: &str| md.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let thumb = if test_mode { None } else { md.get("thumbnail_url").and_then(Value::as_str).filter(|u| media::parse_https_url(u).is_some()).map(str::to_string) };
+    let (name, thumb) = name_and_thumb(&id, &md, test_mode);
     let mut spec = Spec {
-        name: if s("display_name").is_empty() { id.clone() } else { clean_text(&s("display_name"), 120) },
+        name,
         category: s("category"),
         description: clean_text(&s("description"), 600),
         status: s("status"),
         thumb,
         page: format!("https://fal.ai/models/{id}"),
+        submit_path: id.clone(),
         fields: Vec::new(),
         outputs: Vec::new(),
         runnable: false,
@@ -383,7 +408,10 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
         spec.why_not = Some("fal did not publish an input form for this model.".into());
         return Some(spec);
     };
-    let (input, output) = io_schemas(openapi, &spec.id);
+    let (input, output, path) = io_schemas(openapi, &spec.id);
+    if let Some(p) = path.filter(|p| valid_endpoint(p)) {
+        spec.submit_path = p;
+    }
     let Some(input) = input else {
         spec.why_not = Some("fal did not publish an input form for this model.".into());
         return Some(spec);
@@ -499,10 +527,7 @@ pub fn check_input(spec: &Spec, input: &Map<String, Value>) -> Result<(Map<Strin
             continue;
         }
         let ok = match f.kind {
-            Kind::Text | Kind::LongText => v.as_str().is_some_and(|s| {
-                let n = s.chars().count();
-                n <= MAX_TEXT_CHARS && f.max_len.is_none_or(|m| n <= m)
-            }),
+            Kind::Text | Kind::LongText => v.as_str().is_some_and(|s| s.chars().count() <= f.max_len.unwrap_or(MAX_TEXT_CHARS).min(MAX_TEXT_HARD)),
             Kind::Integer | Kind::Number => {
                 let n = if f.kind == Kind::Integer { v.as_i64().map(|i| i as f64) } else { v.as_f64() };
                 n.is_some_and(|n| {
@@ -512,7 +537,10 @@ pub fn check_input(spec: &Spec, input: &Map<String, Value>) -> Result<(Map<Strin
                 })
             }
             Kind::Boolean => v.is_boolean(),
-            Kind::Choice => f.choices.iter().any(|c| num_eq(c, v)) || (f.custom_json && v.is_object()),
+            Kind::Choice => {
+                f.choices.iter().any(|c| num_eq(c, v))
+                    || (f.custom_json && v.is_object() && serde_json::to_vec(v).map(|b| b.len() <= MAX_JSON_FIELD_BYTES).unwrap_or(false))
+            }
             Kind::Media => valid_media_value(v, &mut locals),
             Kind::MediaList => v.as_array().is_some_and(|a| {
                 a.len() <= f.max_len.unwrap_or(MAX_LIST_ITEMS).min(MAX_LIST_ITEMS) && a.iter().all(|x| valid_media_value(x, &mut locals))
@@ -588,6 +616,17 @@ impl Cache {
 
 // ---------------------------------------------------------------- fal reads
 
+/// A catalog entry's display name (or its id) and its https thumbnail. Test mode shows no thumbnails: it reaches no network.
+fn name_and_thumb(id: &str, md: &Value, test_mode: bool) -> (String, Option<String>) {
+    let name = md.get("display_name").and_then(Value::as_str).filter(|n| !n.trim().is_empty()).map(|n| clean_text(n, 120)).unwrap_or_else(|| id.to_string());
+    let thumb = md
+        .get("thumbnail_url")
+        .and_then(Value::as_str)
+        .filter(|u| !test_mode && media::parse_https_url(u).is_some())
+        .map(str::to_string);
+    (name, thumb)
+}
+
 enum Fetch {
     Ok(Value),
     NotFound,
@@ -613,19 +652,15 @@ async fn fal_get(ctx: &Ctx, key: Option<&str>, path: &str, query: &[(&str, Strin
     }
 }
 
-fn fail(status: StatusCode, code: &str) -> Response {
-    (status, Json(json!({"error": code}))).into_response()
-}
-
 fn catalog_entry(m: &Value, test_mode: bool) -> Option<Value> {
     let id = m.get("endpoint_id").and_then(Value::as_str).filter(|i| valid_endpoint(i))?;
     let md = m.get("metadata").cloned().unwrap_or(Value::Null);
     let s = |k: &str| md.get(k).and_then(Value::as_str).unwrap_or("");
     let category = s("category");
-    let thumb = if test_mode { None } else { md.get("thumbnail_url").and_then(Value::as_str).filter(|u| media::parse_https_url(u).is_some()) };
+    let (name, thumb) = name_and_thumb(id, &md, test_mode);
     Some(json!({
         "id": id,
-        "name": if s("display_name").is_empty() { id.to_string() } else { clean_text(s("display_name"), 120) },
+        "name": name,
         "category": category,
         "description": clean_text(s("description"), 240),
         "thumb": thumb,
@@ -810,7 +845,7 @@ pub async fn price(State(st): State<AppState>, Query(q): Query<IdQuery>) -> Resp
         return fail(StatusCode::BAD_REQUEST, "bad_model_id");
     }
     if st.playground.sample.is_none() && st.keys.get("FAL_KEY").is_none() {
-        return fail(StatusCode::PRECONDITION_FAILED, "missing_key");
+        return (StatusCode::PRECONDITION_FAILED, Json(json!({"error": "missing_key", "key": "FAL_KEY"}))).into_response();
     }
     match price_for(&st, &q.id).await {
         Some(p) => Json(json!({"price": p})).into_response(),
@@ -824,6 +859,10 @@ pub async fn price(State(st): State<AppState>, Query(q): Query<IdQuery>) -> Resp
 pub struct RunReq {
     id: String,
     input: Map<String, Value>,
+    /// The page's belief that this is test mode. A page left open while the studio restarted for real is refused
+    /// rather than spending money it called free.
+    #[serde(default)]
+    test: Option<bool>,
 }
 
 fn fake_mode(category: &str) -> &'static str {
@@ -831,11 +870,21 @@ fn fake_mode(category: &str) -> &'static str {
         "t2v"
     } else if category.ends_with("-to-3d") {
         "i23d"
-    } else if category.ends_with("-to-audio") || category.ends_with("-to-speech") {
-        "tts"
     } else {
         "t2i"
     }
+}
+
+fn makes_audio(category: &str) -> bool {
+    category.ends_with("-to-audio") || category.ends_with("-to-speech")
+}
+
+/// fal's price for a run from the cache only (the page asked for it already), so Run never waits on fal's pricing.
+fn cached_price(st: &AppState, id: &str) -> Option<Price> {
+    if st.playground.sample.is_some() {
+        return None;
+    }
+    get_fresh(&st.playground.prices, id, PRICE_TTL)
 }
 
 /// POST /api/fal/run {id, input} : checks the input against the model's form and queues the job.
@@ -843,6 +892,9 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
     let Ok(Json(req)) = body else {
         return fail(StatusCode::BAD_REQUEST, "bad_request");
     };
+    if req.test == Some(true) && st.fake.is_none() {
+        return fail(StatusCode::CONFLICT, "not_test_mode");
+    }
     let spec = match spec_for(&st, &req.id).await {
         Ok(s) => s,
         Err(e) => return e.into_response(),
@@ -868,16 +920,21 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
     if total > MAX_INLINE_TOTAL {
         return (StatusCode::PAYLOAD_TOO_LARGE, Json(json!({"error": "files_too_large", "max_mb": MAX_INLINE_TOTAL >> 20}))).into_response();
     }
-    let (adapter, key): (Arc<dyn Provider>, String) = if let Some(fake) = &st.fake {
-        (fake.clone() as Arc<dyn Provider>, String::new())
-    } else {
-        let Some(key) = st.keys.get("FAL_KEY") else {
-            return (StatusCode::PRECONDITION_FAILED, Json(json!({"error": "missing_key", "key": "FAL_KEY"}))).into_response();
-        };
-        (Arc::new(FalRun { input: Value::Object(input.clone()) }) as Arc<dyn Provider>, key)
+    let (adapter, key): (Arc<dyn Provider>, String) = match &st.fake {
+        // Test mode: the fake provider draws pictures and clips; voice and sound get a short test tone.
+        Some(_) if makes_audio(&spec.category) => (Arc::new(FakeTone) as Arc<dyn Provider>, String::new()),
+        Some(fake) => (fake.clone() as Arc<dyn Provider>, String::new()),
+        None => {
+            let Some(key) = st.keys.get("FAL_KEY") else {
+                return (StatusCode::PRECONDITION_FAILED, Json(json!({"error": "missing_key", "key": "FAL_KEY"}))).into_response();
+            };
+            // Only file and JSON fields may name local files to send inline; a /outputs/ path in a text field stays text.
+            let inline = spec.fields.iter().filter(|f| matches!(f.kind, Kind::Media | Kind::MediaList | Kind::Json)).map(|f| f.name.clone()).collect();
+            (Arc::new(FalRun { input: Value::Object(input.clone()), inline }) as Arc<dyn Provider>, key)
+        }
     };
     let prompt = ["prompt", "text"].iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(|p| clean_text(p, 2000)).unwrap_or_else(|| spec.name.clone());
-    let price = price_for(&st, &spec.id).await;
+    let price = cached_price(&st, &spec.id);
     let request = json!({"playground": {"id": spec.id, "input": input}, "name": spec.name, "price": price});
     let job = Job {
         id: format!("j_{}", media::random_hex(8)),
@@ -893,7 +950,7 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
     };
     let aspect = input.get("aspect_ratio").and_then(Value::as_str).filter(|a| matches!(*a, "16:9" | "9:16" | "1:1")).map(str::to_string);
     let sub = SubmitReq {
-        endpoint: spec.id.clone(),
+        endpoint: spec.submit_path.clone(),
         mode: fake_mode(&spec.category).into(),
         prompt,
         aspect,
@@ -919,14 +976,16 @@ pub async fn run(State(st): State<AppState>, body: Result<Json<RunReq>, axum::ex
 /// The adapter for a Playground job picked up again after a restart (it is only polled).
 pub fn adapter_for_job(model: &str) -> Option<Arc<dyn Provider>> {
     let id = model.strip_prefix(JOB_PREFIX)?;
-    valid_endpoint(id).then(|| Arc::new(FalRun { input: Value::Null }) as Arc<dyn Provider>)
+    valid_endpoint(id).then(|| Arc::new(FalRun { input: Value::Null, inline: Vec::new() }) as Arc<dyn Provider>)
 }
 
 // ---------------------------------------------------------------- fal adapter for Playground runs
 
-/// Sends the checked input to fal's queue as it is, and saves every file in the result.
+/// Sends the checked input to fal's queue as it is, and saves every picture, video, audio and 3D file in the result.
 pub struct FalRun {
     input: Value,
+    /// The fields whose values may name local files to send inline (file and JSON fields).
+    inline: Vec<String>,
 }
 
 fn mime_for(name: &str) -> Option<&'static str> {
@@ -948,16 +1007,18 @@ fn mime_for(name: &str) -> Option<&'static str> {
     })
 }
 
-/// Replaces /outputs/<name> strings anywhere in the input with data: URIs (fal cannot read the studio's files).
-async fn inline_locals(ctx: &Ctx, v: &mut Value) -> PResult<()> {
+/// Replaces /outputs/<name> strings inside one field's value with data: URIs (fal cannot read the studio's files).
+/// `total` counts every byte inlined for the run, so no input can make it go past MAX_INLINE_TOTAL.
+async fn inline_locals(ctx: &Ctx, v: &mut Value, total: &mut u64) -> PResult<()> {
     match v {
         Value::String(s) => {
             if let Some(name) = local_name(s).map(str::to_string) {
                 let mime = mime_for(&name).ok_or_else(|| ProviderError::Failed("That file type cannot be sent to fal.".into()))?;
                 let path = ctx.outputs_dir.join(&name);
                 let size = tokio::fs::metadata(&path).await.map_err(|_| ProviderError::Failed("A picked file is gone. Pick it again.".into()))?.len();
-                if size > MAX_INLINE_FILE {
-                    return Err(ProviderError::Failed(format!("A picked file is over {} MB.", MAX_INLINE_FILE >> 20)));
+                *total += size;
+                if size > MAX_INLINE_FILE || *total > MAX_INLINE_TOTAL {
+                    return Err(ProviderError::Failed(format!("The picked files are over {} MB in all.", MAX_INLINE_TOTAL >> 20)));
                 }
                 let bytes = tokio::fs::read(&path).await.map_err(|_| ProviderError::Failed("A picked file could not be read.".into()))?;
                 *s = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
@@ -965,12 +1026,12 @@ async fn inline_locals(ctx: &Ctx, v: &mut Value) -> PResult<()> {
         }
         Value::Array(a) => {
             for x in a {
-                Box::pin(inline_locals(ctx, x)).await?;
+                Box::pin(inline_locals(ctx, x, total)).await?;
             }
         }
         Value::Object(o) => {
             for x in o.values_mut() {
-                Box::pin(inline_locals(ctx, x)).await?;
+                Box::pin(inline_locals(ctx, x, total)).await?;
             }
         }
         _ => {}
@@ -1000,6 +1061,8 @@ fn fal_detail(body: &str) -> String {
     clean_text(&line.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>(), 300)
 }
 
+/// A fal JSON answer, or its HTTP status and one plain line from its body. Errors read "provider HTTP <status>: ..."
+/// like the other adapters', so the studio explains 401, 402 and 429 in plain words.
 async fn fal_json(resp: reqwest::Response) -> Result<Value, (u16, String)> {
     let status = resp.status().as_u16();
     let body = media::read_capped(resp, media::MAX_JSON_BYTES).await.map_err(|_| (status, "response too large".to_string()))?;
@@ -1009,13 +1072,8 @@ async fn fal_json(resp: reqwest::Response) -> Result<Value, (u16, String)> {
     serde_json::from_slice(&body).map_err(|_| (status, "fal answered with something other than JSON".into()))
 }
 
-fn queue_url(s: &str) -> PResult<String> {
-    let u = media::parse_https_url(s).ok_or_else(|| ProviderError::Failed("fal sent a bad URL".into()))?;
-    if u.host_str() == Some("queue.fal.run") {
-        Ok(s.to_string())
-    } else {
-        Err(ProviderError::Failed("refusing a fal URL outside queue.fal.run".into()))
-    }
+fn http_error((status, msg): (u16, String)) -> ProviderError {
+    ProviderError::Failed(format!("provider HTTP {status}: {msg}"))
 }
 
 /// Every file in a fal result: objects with a url (fal File), with their content type when given.
@@ -1036,46 +1094,96 @@ fn result_files(v: &Value, depth: usize, out: &mut Vec<(String, Option<String>)>
     }
 }
 
-/// The kind and file extension to save a result file as, or None for files the studio does not keep.
+/// The extension of a URL's last path segment, when it is short and plain.
+fn url_ext(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    path.rsplit('/')
+        .next()
+        .and_then(|seg| seg.rsplit_once('.'))
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .filter(|e| e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_default()
+}
+
+/// The kind and file extension to save a result file as, or None for files the studio does not keep. Pictures, video,
+/// audio and 3D only: never SVG, HTML or anything else that could act as a page.
 fn kind_and_ext(url: &str, content_type: Option<&str>) -> Option<(&'static str, String)> {
-    let ct = content_type.unwrap_or("").to_ascii_lowercase();
-    let ext = media::ext_from_url(url, "");
+    let ct = content_type.unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let ext = url_ext(url);
     let by_ext = match ext.as_str() {
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "avif" | "heic" => Some("image"),
         "mp4" | "m4v" | "webm" | "mov" => Some("video"),
         "mp3" | "wav" | "m4a" | "aac" | "ogg" | "opus" | "flac" => Some("audio"),
-        "glb" | "usdz" | "stl" | "3mf" | "obj" | "fbx" => Some("model"),
+        "glb" | "usdz" | "stl" | "3mf" | "obj" | "fbx" | "ply" => Some("model"),
         _ => None,
     };
-    let by_ct = if ct.starts_with("image/") && !ct.contains("svg") {
-        Some(("image", match ct.as_str() {
-            "image/jpeg" | "image/jpg" => "jpg",
-            "image/webp" => "webp",
-            "image/gif" => "gif",
-            "image/avif" => "avif",
-            _ => "png",
-        }))
-    } else if ct.starts_with("video/") {
-        Some(("video", "mp4"))
-    } else if ct.starts_with("audio/") {
-        Some(("audio", if ct.contains("wav") { "wav" } else { "mp3" }))
-    } else if ct == "model/gltf-binary" {
-        Some(("model", "glb"))
-    } else {
-        None
-    };
-    match (by_ext, by_ct) {
-        (Some(k), _) => Some((k, ext)),
-        (None, Some((k, e))) => Some((k, e.to_string())),
-        _ => None,
+    if let Some(k) = by_ext {
+        return Some((k, ext));
     }
+    let (kind, ext) = match ct.as_str() {
+        "image/png" => ("image", "png"),
+        "image/jpeg" | "image/jpg" => ("image", "jpg"),
+        "image/webp" => ("image", "webp"),
+        "image/gif" => ("image", "gif"),
+        "image/avif" => ("image", "avif"),
+        "video/mp4" => ("video", "mp4"),
+        "video/quicktime" => ("video", "mov"),
+        "video/webm" => ("video", "webm"),
+        "audio/mpeg" | "audio/mp3" => ("audio", "mp3"),
+        "audio/wav" | "audio/x-wav" | "audio/wave" => ("audio", "wav"),
+        "audio/mp4" | "audio/aac" | "audio/x-m4a" => ("audio", "m4a"),
+        "audio/ogg" | "audio/opus" => ("audio", "ogg"),
+        "audio/flac" => ("audio", "flac"),
+        "model/gltf-binary" => ("model", "glb"),
+        _ => return None,
+    };
+    Some((kind, ext.to_string()))
+}
+
+/// A result file from a fal host is fetched like any provider file; from anywhere else, only from a public address.
+async fn fetch_result(ctx: &Ctx, url: &str) -> PResult<Vec<u8>> {
+    let host = media::parse_https_url(url).and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default();
+    let fal = FAL_FILE_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")));
+    if fal {
+        Ok(media::fetch(&ctx.http, url, &[]).await?.0)
+    } else {
+        Ok(media::fetch_public(url, media::MAX_DOWNLOAD_BYTES, "result").await?.0)
+    }
+}
+
+/// One result file's bytes and how to save them, or None to skip it (not https, not a kept type, bad data: URI).
+async fn result_bytes(ctx: &Ctx, url: &str, content_type: Option<&str>) -> PResult<Option<(Vec<u8>, &'static str, String)>> {
+    if let Some(rest) = url.strip_prefix("data:") {
+        let Some((meta, data)) = rest.split_once(',') else { return Ok(None) };
+        let Some(mime) = meta.strip_suffix(";base64") else { return Ok(None) };
+        let Some((kind, ext)) = kind_and_ext("", Some(mime)) else { return Ok(None) };
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else { return Ok(None) };
+        return Ok(Some((bytes, kind, ext)));
+    }
+    if media::parse_https_url(url).is_none() {
+        return Ok(None);
+    }
+    let Some((kind, ext)) = kind_and_ext(url, content_type) else { return Ok(None) };
+    // One retry: a single dropped connection should not lose a file.
+    let bytes = match fetch_result(ctx, url).await {
+        Ok(b) => b,
+        Err(_) => fetch_result(ctx, url).await?,
+    };
+    Ok(Some((bytes, kind, ext)))
 }
 
 #[async_trait]
 impl Provider for FalRun {
     async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
         let mut input = self.input.clone();
-        inline_locals(ctx, &mut input).await?;
+        let mut total = 0u64;
+        if let Value::Object(fields) = &mut input {
+            for (name, v) in fields.iter_mut() {
+                if self.inline.contains(name) {
+                    inline_locals(ctx, v, &mut total).await?;
+                }
+            }
+        }
         let resp = ctx
             .http
             .post(format!("https://queue.fal.run/{}", req.endpoint).as_str())
@@ -1084,19 +1192,18 @@ impl Provider for FalRun {
             .send()
             .await
             .map_err(media::net)?;
-        let v = fal_json(resp).await.map_err(|(s, msg)| ProviderError::Failed(format!("fal refused the run (HTTP {s}): {msg}")))?;
-        let get = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| ProviderError::Failed(format!("fal response missing {k}")));
-        Ok(Submitted::Queued(Handle {
-            request_id: get("request_id")?,
-            status_url: queue_url(&get("status_url")?)?,
-            result_url: Some(queue_url(&get("response_url")?)?),
-        }))
+        let v = fal_json(resp).await.map_err(http_error)?;
+        let status_url = providers::str_at(&v, "status_url")?;
+        let response_url = providers::str_at(&v, "response_url")?;
+        providers::ensure_host(&status_url, "queue.fal.run")?;
+        providers::ensure_host(&response_url, "queue.fal.run")?;
+        Ok(Submitted::Queued(Handle { request_id: providers::str_at(&v, "request_id")?, status_url, result_url: Some(response_url) }))
     }
 
     async fn poll(&self, ctx: &Ctx, key: &str, h: &Handle) -> PResult<Polled> {
         let auth = format!("Key {key}");
         let resp = ctx.http.get(h.status_url.as_str()).header("Authorization", auth.as_str()).send().await.map_err(media::net)?;
-        let v = fal_json(resp).await.map_err(|(s, msg)| ProviderError::Failed(format!("fal status HTTP {s}: {msg}")))?;
+        let v = fal_json(resp).await.map_err(http_error)?;
         match v.get("status").and_then(Value::as_str).unwrap_or("") {
             "IN_QUEUE" | "IN_PROGRESS" => return Ok(Polled::Running(None)),
             "COMPLETED" => {}
@@ -1111,24 +1218,37 @@ impl Provider for FalRun {
         let result = match fal_json(resp).await {
             Ok(r) => r,
             // fal turned the input down (422 and the like): final, with fal's own words.
-            Err((s, msg)) if (400..500).contains(&s) && s != 429 => return Ok(Polled::Failed(format!("fal: {msg}"))),
-            Err((s, msg)) => return Err(ProviderError::Failed(format!("fal result HTTP {s}: {msg}"))),
+            Err((s, msg)) if (400..500).contains(&s) && s != 429 => return Ok(Polled::Failed(format!("provider HTTP {s}: {msg}"))),
+            Err(e) => return Err(http_error(e)),
         };
         let mut files = Vec::new();
         result_files(&result, 0, &mut files);
+        // Each file is fetched once more on failure, then skipped: one bad file never loses the others, and nothing
+        // saved here is left without a job (a failed poll saves nothing).
         let mut outs: Vec<Output> = Vec::new();
+        let mut bytes_kept = 0usize;
+        let mut failed: Option<ProviderError> = None;
         for (url, ct) in files {
-            let Some((kind, ext)) = kind_and_ext(&url, ct.as_deref()) else { continue };
-            let bytes = if let Some(rest) = url.strip_prefix("data:") {
-                let Some((_, data)) = rest.split_once(";base64,") else { continue };
-                let Ok(b) = base64::engine::general_purpose::STANDARD.decode(data) else { continue };
-                b
-            } else {
-                media::fetch(&ctx.http, &url, &[]).await?.0
-            };
-            outs.push(media::save(ctx, &bytes, &ext, kind).await?);
+            match result_bytes(ctx, &url, ct.as_deref()).await {
+                Ok(Some((bytes, kind, ext))) => {
+                    if bytes_kept + bytes.len() > MAX_RUN_BYTES {
+                        continue;
+                    }
+                    bytes_kept += bytes.len();
+                    match media::save(ctx, &bytes, &ext, kind).await {
+                        Ok(o) => outs.push(o),
+                        Err(e) => failed = Some(e),
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => failed = Some(e),
+            }
         }
         if outs.is_empty() {
+            // A download that failed is worth another poll; a result with no keepable file is final.
+            if let Some(e) = failed {
+                return Err(e);
+            }
             return Ok(Polled::Failed(
                 "fal finished, but returned no picture, video, audio or 3D file (other files, such as model weights, are not kept here).".into(),
             ));
@@ -1142,6 +1262,22 @@ impl Provider for FalRun {
             _ => 4,
         });
         Ok(Polled::Done(outs))
+    }
+}
+
+/// Test mode's stand-in for voice, music and sound models: a two-second tone made with ffmpeg, no network.
+pub struct FakeTone;
+
+#[async_trait]
+impl Provider for FakeTone {
+    async fn submit(&self, ctx: &Ctx, _key: &str, _req: &SubmitReq) -> PResult<Submitted> {
+        crate::fsutil::ensure_private_dir(&ctx.outputs_dir).map_err(|e| ProviderError::Failed(format!("file error: {e}")))?;
+        let name = format!("{}.mp3", media::random_hex(12));
+        let mut cmd = tokio::process::Command::new("ffmpeg");
+        cmd.args(["-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "libmp3lame", "-q:a", "6"])
+            .arg(ctx.outputs_dir.join(&name));
+        crate::assemble::run(&mut cmd).await?;
+        Ok(Submitted::Done(vec![Output { url: format!("/outputs/{name}"), kind: "audio".into() }]))
     }
 }
 
@@ -1307,10 +1443,55 @@ mod tests {
     }
 
     #[test]
-    fn queue_urls_stay_on_fal() {
-        assert!(queue_url("https://queue.fal.run/fal-ai/flux/requests/1/status").is_ok());
-        assert!(queue_url("https://evil.test/fal-ai/flux/requests/1").is_err());
-        assert!(queue_url("http://queue.fal.run/x").is_err());
+    fn runs_go_to_the_path_in_fals_schema() {
+        assert_eq!(sample_spec("google/nano-banana-2.1/edit").submit_path, "fal-ai/nano-banana-2.1/edit");
+        assert_eq!(sample_spec("fal-ai/flux/schnell").submit_path, "fal-ai/flux/schnell");
+    }
+
+    #[test]
+    fn ref_siblings_and_free_choices() {
+        let root = json!({"components": {"schemas": {"Dur": {"type": "string", "enum": ["5", "10"], "title": "Target"}}}});
+        let f = compile_field("duration", &json!({"$ref": "#/components/schemas/Dur", "default": "10", "title": "Duration"}), &root, false);
+        assert_eq!(f.kind, Kind::Choice);
+        assert_eq!(f.default, Some(json!("10")), "the default beside the $ref is kept");
+        assert_eq!(f.title, "Duration");
+        let f = compile_field("voice", &json!({"anyOf": [{"type": "string", "enum": ["Wise_Woman", "Calm_Man"]}, {"type": "string"}], "default": "Calm_Man"}), &root, false);
+        assert_eq!(f.kind, Kind::Text, "a free string beside the enum keeps the field free");
+        assert_eq!(f.choices.len(), 2);
+        assert_eq!(f.default, Some(json!("Calm_Man")));
+    }
+
+    #[tokio::test]
+    async fn inlining_stops_at_the_run_total() {
+        let st = AppState::for_tests("pg_inline_total");
+        crate::fsutil::ensure_private_dir(&st.ctx.outputs_dir).unwrap();
+        for n in ["a.png", "b.png", "c.png"] {
+            std::fs::File::create(st.ctx.outputs_dir.join(n)).unwrap().set_len(15 << 20).unwrap();
+        }
+        let mut total = 0;
+        let mut two = json!(["/outputs/a.png", "/outputs/b.png"]);
+        inline_locals(&st.ctx, &mut two, &mut total).await.expect("30 MB fits");
+        assert!(two[0].as_str().unwrap().starts_with("data:image/png;base64,"));
+        let mut third = json!("/outputs/c.png");
+        assert!(inline_locals(&st.ctx, &mut third, &mut total).await.is_err(), "45 MB in all is refused");
+        let mut text = json!("see /outputs/a.png");
+        let mut t2 = 0;
+        inline_locals(&st.ctx, &mut text, &mut t2).await.unwrap();
+        assert_eq!(text, json!("see /outputs/a.png"), "only a whole value is a local file");
+    }
+
+    #[tokio::test]
+    async fn result_files_skip_what_is_not_kept() {
+        let st = AppState::for_tests("pg_result_bytes");
+        let ogg = format!("data:audio/ogg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b"OggS-fake"));
+        let (bytes, kind, ext) = result_bytes(&st.ctx, &ogg, None).await.unwrap().expect("kept");
+        assert_eq!((kind, ext.as_str(), bytes.len()), ("audio", "ogg", 9));
+        assert!(result_bytes(&st.ctx, "http://v3.fal.media/a.png", None).await.unwrap().is_none(), "plain http is skipped");
+        assert!(result_bytes(&st.ctx, "data:text/html;base64,PGI+", None).await.unwrap().is_none(), "never a page");
+        assert!(result_bytes(&st.ctx, "https://v3.fal.media/w.safetensors", None).await.unwrap().is_none());
+        assert_eq!(kind_and_ext("https://x.test/a.ply", None), Some(("model", "ply".to_string())));
+        assert_eq!(kind_and_ext("https://x.test/a", Some("audio/mp4")), Some(("audio", "m4a".to_string())));
+        assert_eq!(kind_and_ext("https://x.test/a", Some("video/webm; codecs=vp9")), Some(("video", "webm".to_string())));
     }
 
     // ------------------------------------------------------------ routes (test mode: the sample, no network)
@@ -1432,7 +1613,36 @@ mod tests {
         let app = crate::api::router(test_state("pg_key", false));
         let (s, v) = call(&app, post_req("/api/fal/run", &json!({"id": "fal-ai/flux/schnell", "input": {"prompt": "x"}}))).await;
         assert_eq!(s, StatusCode::PRECONDITION_FAILED);
-        assert_eq!(v["error"], "missing_key");
+        assert_eq!(v, json!({"error": "missing_key", "key": "FAL_KEY"}));
+    }
+
+    #[tokio::test]
+    async fn a_page_that_thinks_it_is_in_test_mode_cannot_spend() {
+        let app = crate::api::router(test_state("pg_not_test", false));
+        let body = json!({"id": "fal-ai/flux/schnell", "input": {"prompt": "x"}, "test": true});
+        let (s, v) = call(&app, post_req("/api/fal/run", &body)).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["error"], "not_test_mode");
+    }
+
+    #[tokio::test]
+    async fn test_mode_voice_gets_a_tone() {
+        let st = test_state("pg_tone", true);
+        let app = crate::api::router(st.clone());
+        let body = json!({"id": "fal-ai/minimax/speech-2.8-hd", "input": {"prompt": "hello"}, "test": true});
+        let (s, v) = call(&app, post_req("/api/fal/run", &body)).await;
+        assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+        let id = v["job"]["id"].as_str().unwrap().to_string();
+        for _ in 0..200 {
+            let job = st.jobs.get(&id).unwrap();
+            if job.status == "done" {
+                assert_eq!(job.outputs[0].kind, "audio");
+                return;
+            }
+            assert_ne!(job.status, "failed", "{:?}", job.error);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the tone was not made");
     }
 
     #[tokio::test]
@@ -1499,15 +1709,16 @@ mod live {
             ("fal-ai/flux/schnell", json!({"prompt": "a small brass lamp on a wooden desk, soft morning light", "image_size": "square"})),
             ("fal-ai/minimax/speech-2.8-hd", json!({"prompt": "Hello from the Playground."})),
         ] {
-            let spec = spec_for(&st, id).await.ok().expect("spec");
+            let Ok(spec) = spec_for(&st, id).await else { panic!("no spec for {id}") };
             let (checked, _) = check_input(&spec, input.as_object().unwrap()).expect("input accepted");
-            let adapter = FalRun { input: Value::Object(checked) };
+            let inline = spec.fields.iter().filter(|f| matches!(f.kind, Kind::Media | Kind::MediaList | Kind::Json)).map(|f| f.name.clone()).collect();
+            let adapter = FalRun { input: Value::Object(checked), inline };
             let sub = SubmitReq {
-                endpoint: id.into(), mode: String::new(), prompt: String::new(), aspect: None, duration: None, resolution: None,
+                endpoint: spec.submit_path.clone(), mode: String::new(), prompt: String::new(), aspect: None, duration: None, resolution: None,
                 seed: None, image_url: None, image_urls: Vec::new(), voice_id: None, label: None, audio: None,
                 elements: Vec::new(), keyframe: None, end_image_url: None,
             };
-            let Submitted::Queued(h) = adapter.submit(&st.ctx, &key, &sub).await.ok().expect("submitted") else { panic!("not queued") };
+            let Ok(Submitted::Queued(h)) = adapter.submit(&st.ctx, &key, &sub).await else { panic!("{id} was not queued") };
             let mut done = None;
             for _ in 0..90 {
                 tokio::time::sleep(Duration::from_secs(2)).await;

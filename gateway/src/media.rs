@@ -208,7 +208,13 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
 /// Fetches a user-supplied https image. The host must resolve only to public addresses, the
 /// connection is pinned to the checked address (no DNS rebinding), and redirects are refused.
 async fn fetch_user_image(src: &str) -> PResult<(Vec<u8>, Option<String>)> {
-    let url = parse_https_url(src).ok_or_else(|| ProviderError::Failed("image URL must be https".into()))?;
+    fetch_public(src, MAX_INPUT_IMAGE_BYTES, "image").await
+}
+
+/// GET an https URL whose host must resolve only to public addresses; the connection is pinned to the checked
+/// address (no DNS rebinding) and redirects are refused. `what` names the file in errors ("image URL must be https").
+pub async fn fetch_public(src: &str, limit: usize, what: &str) -> PResult<(Vec<u8>, Option<String>)> {
+    let url = parse_https_url(src).ok_or_else(|| ProviderError::Failed(format!("{what} URL must be https")))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let mut builder = reqwest::Client::builder()
         .user_agent("agave-studio/0.1")
@@ -220,15 +226,15 @@ async fn fetch_user_image(src: &str) -> PResult<(Vec<u8>, Option<String>)> {
     let bare = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = bare.parse::<IpAddr>() {
         if !is_public_ip(ip) {
-            return Err(ProviderError::Failed("image URL host is not public".into()));
+            return Err(ProviderError::Failed(format!("{what} URL host is not public")));
         }
     } else {
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host((bare, port))
             .await
-            .map_err(|_| ProviderError::Failed("image URL host did not resolve".into()))?
+            .map_err(|_| ProviderError::Failed(format!("{what} URL host did not resolve")))?
             .collect();
         if addrs.is_empty() || !addrs.iter().all(|a| is_public_ip(a.ip())) {
-            return Err(ProviderError::Failed("image URL host is not public".into()));
+            return Err(ProviderError::Failed(format!("{what} URL host is not public")));
         }
         builder = builder.resolve(bare, addrs[0]);
     }
@@ -236,14 +242,14 @@ async fn fetch_user_image(src: &str) -> PResult<(Vec<u8>, Option<String>)> {
     let resp = client.get(url).send().await.map_err(net)?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(ProviderError::Failed(format!("image download HTTP {}", status.as_u16())));
+        return Err(ProviderError::Failed(format!("{what} download HTTP {}", status.as_u16())));
     }
     let ct = resp
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let bytes = read_capped(resp, MAX_INPUT_IMAGE_BYTES).await?;
+    let bytes = read_capped(resp, limit).await?;
     Ok((bytes, ct))
 }
 

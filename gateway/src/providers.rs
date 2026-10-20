@@ -166,7 +166,7 @@ async fn bytes_body(resp: reqwest::Response) -> PResult<Vec<u8>> {
     media::read_capped(resp, media::MAX_DOWNLOAD_BYTES).await
 }
 
-fn str_at(v: &Value, key: &str) -> PResult<String> {
+pub(crate) fn str_at(v: &Value, key: &str) -> PResult<String> {
     v.get(key)
         .and_then(Value::as_str)
         .map(String::from)
@@ -174,7 +174,7 @@ fn str_at(v: &Value, key: &str) -> PResult<String> {
 }
 
 /// Refuses to send a key to a URL outside the provider's own domain.
-fn ensure_host(url: &str, suffix: &str) -> PResult<()> {
+pub(crate) fn ensure_host(url: &str, suffix: &str) -> PResult<()> {
     let u = reqwest::Url::parse(url).map_err(|_| ProviderError::Failed("provider sent a bad URL".into()))?;
     let host = u.host_str().unwrap_or("");
     let ok = u.scheme() == "https" && (host == suffix || host.ends_with(&format!(".{suffix}")));

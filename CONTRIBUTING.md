@@ -5,7 +5,8 @@ Thanks for helping. Agave Studio is small on purpose, so keep changes focused. E
 
 ## Before you open a pull request
 
-- `cd gateway && cargo test --release` passes. Tests must not call the network.
+- `cd gateway && cargo test --release` passes. Tests must not call the network. A hand-run live check must be
+  `#[ignore]` and refuse to run without an explicit opt-in (like the Playground's `PG_LIVE=1`).
 - `cargo clippy --all-targets` shows no warnings.
 - Web changes work in the studio (`/app/`) at desktop and phone width, with no console errors.
 - New models go in `gateway/models.toml`. Mark a model `verified = true` only once its endpoint id and request fields
