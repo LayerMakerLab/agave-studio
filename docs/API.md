@@ -47,11 +47,12 @@ a browser gets the cookie like any page. GETs need no cookie.
 `data/spend.jsonl` (test mode: `data/fake-providers/spend.jsonl`, every line `"test":true`): one line per job a
 provider took (it gave the job a handle, or answered it at once), written when the job ends, done or failed:
 `{"at":unix,"job":"j_...","model":"fal:fal-ai/flux/schnell","status":"done"|"failed","cost":Cost}`.
-A job refused before the provider took it (a missing file, a refusal at submit) adds no line. A job the studio was
-waiting on when it closed adds its failed line on the next start when it can't be picked up again (too old, or its
-model gone), since the provider had it. A provider that answers at once (OpenAI and Gemini images, ElevenLabs) is
-counted when its answer is saved: if the answer can't be read or saved (a full disk), the job fails with no line,
-though the provider may have charged for it. Owner-only (0600), appended, never rewritten, and never written through
+A job refused before the provider took it (a missing file, a refusal at submit) adds no line. A job the provider had
+given a handle when the studio closed adds its failed line on the next start when it can't be picked up again (too
+old, or its model gone). A job whose submit was still in flight when the studio closed adds no line, though the
+provider may have charged for it. A provider that answers at once (OpenAI and Gemini images, ElevenLabs) is counted
+when its answer is saved: if the answer can't be read or saved (a full disk), the job fails with no line, though the
+provider may have charged for it too. Owner-only (0600), appended, never rewritten, and never written through
 a symlink, into a hard link to another file, or into a FIFO. The amounts are estimates from list prices; the
 provider's own bill is what was charged (a failed job may or may not have been). A keyframed camera move pays for its
 picture edit before the video is sent: if the video is then refused, that edit is not in the log. A crash between a

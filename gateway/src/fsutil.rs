@@ -129,10 +129,12 @@ mod tests {
         assert_eq!(fs::read(&outside).unwrap(), b"keep\n");
         assert_eq!(fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o755);
         fs::remove_file(&log).unwrap();
-        // A FIFO fails at once rather than blocking the caller.
+        // A FIFO fails at once rather than blocking the caller (on a thread, so a regression fails instead of hanging).
         let path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(log.as_os_str())).unwrap();
         assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
-        assert!(append_private_line(&log, "{}").is_err(), "a FIFO at the log is refused");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(append_private_line(&log, "{}").is_err()));
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(true), "a FIFO at the log is refused at once");
     }
 
     #[test]
