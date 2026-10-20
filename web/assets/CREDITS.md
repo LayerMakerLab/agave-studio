@@ -16,7 +16,7 @@ it. Nothing on the page comes from anywhere else.
   from those stills with **Kling 3.0** (image to video) on fal. That commit's page footer says so: "Pictures on
   this page were made with Meshy and animated with Kling 3.0 on fal."
 - **dd2465f** (Agave Studio 0.1.0) has the same Meshy stills, byte for byte, and the play-leaf mark.
-- **Encoding.** Clips were re-encoded with ffmpeg for the web (H.264, no sound, 1600 or 720 px wide). Each poster
+- **Encoding.** Clips were re-encoded with ffmpeg for the web (H.264, no sound, 1600, 720 or 480 px wide). Each poster
   is the first frame of its clip, and `lastframe-card-character.webp` is the last frame of its clip, saved as WebP
   with nothing added or changed. Stills were resized and saved as WebP.
 
