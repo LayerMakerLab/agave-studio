@@ -110,6 +110,7 @@
     refHint: $('#refHint'),
     seed: $('#seed'),
     camera: $('#camera'),
+    cameraHint: $('#cameraHint'),
     cameraWrap: $('#cameraWrap'),
     style: $('#style'),
     styleWrap: $('#styleWrap'),
@@ -378,6 +379,35 @@
     }
   }
 
+  // On a model that takes an end picture (Kling 3.0 image to video), the picked move is keyframed (the engine sends
+  // where the move ends, so it happens) or words only. Null when there is no move or the model takes no end picture.
+  function cameraPlan() {
+    const m = selectedModel();
+    const id = els.camera.value;
+    if (!id || els.cameraWrap.hidden || !m || !m.end_frame || effectiveMode() !== 'i2v') return null;
+    const p = state.presets.camera.find((c) => c.id === id);
+    return p ? (p.keyframe || { kind: 'words' }) : null;
+  }
+  // A view move's end picture is an image edit on the same key, priced from its model.
+  function keyframeCents(plan) {
+    const em = plan && plan.kind === 'view' ? state.models.find((x) => x.id === plan.model) : null;
+    return em && em.price ? Math.max(1, Math.ceil(Math.round(em.price.usd * 1e6) / 1e4)) : 0;
+  }
+  function renderCameraHint() {
+    const plan = cameraPlan();
+    els.cameraHint.hidden = !plan;
+    if (!plan) return;
+    const name = (els.camera.selectedOptions[0] || {}).textContent || 'This move';
+    if (plan.kind === 'crop') {
+      els.cameraHint.textContent = `${name} is keyframed: Agave sends where the move ends, so the camera makes it.`;
+    } else if (plan.kind === 'view') {
+      const em = state.models.find((x) => x.id === plan.model);
+      els.cameraHint.textContent = `${name} is keyframed: ${em ? em.name : 'an image edit'} first makes where the move ends (${keyframeCents(plan)}¢, in the price), then the video moves to it.`;
+    } else {
+      els.cameraHint.textContent = `${name} goes as words only. This model often ignores camera words, so the move may not happen.`;
+    }
+  }
+
   // US cents for one job with the current model and options, from the provider list price (rounded up).
   function jobCents() {
     const m = selectedModel();
@@ -388,11 +418,12 @@
     const units = p.per === 'second' ? state.chips.duration : 1;
     if (!units) return null;
     const micro = Math.round(rate * units * 1e6);
-    return Math.max(1, Math.ceil(micro / 1e4));
+    return Math.max(1, Math.ceil(micro / 1e4)) + keyframeCents(cameraPlan());
   }
 
   // Cost before every paid step: the provider list price on your own key.
   function renderCost() {
+    renderCameraHint();
     const n = Number(els.countSel.value) || 1;
     const one = jobCents();
     const c = one === null ? null : one * n;
@@ -3549,6 +3580,7 @@
     els.prompt.addEventListener('input', syncRefMode);
     els.countSel.addEventListener('change', renderCost);
     els.style.addEventListener('change', () => { els.lookAsk.hidden = true; });
+    els.camera.addEventListener('change', renderCost);
     els.ref.addEventListener('input', () => { els.lookAsk.hidden = true; });
     els.recipe.addEventListener('change', () => {
       if (els.recipe.value && els.recipe.value !== 'sheet' && !refActive()) setStatus('This recipe works from a reference image: add one.', 'warn');

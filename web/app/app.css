@@ -241,6 +241,9 @@ a:hover { color: var(--silver-1); }
 .composer-status:empty { display: none; }
 .composer-status.warn { color: var(--warn); }
 .composer-status.err { color: var(--err); }
+/* Camera moves on a model that takes an end picture: keyframed or words only */
+.camera-hint { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
+.camera-hint[hidden] { display: none; }
 /* Looks on image to video: the offer to put the look on the start picture first */
 .look-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; font-size: 13px; color: var(--ink-2); }
 .look-ask[hidden] { display: none; }

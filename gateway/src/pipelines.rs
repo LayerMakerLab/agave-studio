@@ -698,7 +698,7 @@ fn start_last_frame(st: &AppState, run: &mut Run, i: usize, from: usize) {
         label: None,
         audio: None,
         elements: Vec::new(),
-        push_in: false,
+        keyframe: None,
         end_image_url: None,
     };
     crate::jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), req);
@@ -1014,18 +1014,27 @@ mod tests {
         let (s, v) = call(&st, "POST", "/api/generate", Some(body("dolly_in"))).await;
         assert_eq!(s, StatusCode::ACCEPTED, "{v}");
         let r = nth_seen(&st, 1).await;
-        assert_eq!((r.audio, r.duration, r.push_in), (Some(false), Some(3), true));
+        assert_eq!((r.audio, r.duration, r.keyframe.clone()), (Some(false), Some(3), Some(crate::providers::KeyframePlan::Crop(0.65))));
         assert_eq!((r.image_url.as_deref(), r.elements.clone()), (Some(start.as_str()), vec![vec![start.clone()]]));
         assert!(r.prompt.starts_with("@Element1 walks the pier"), "{}", r.prompt);
-        // Other moves keep the words only; Kling 2.5 Turbo takes no end picture.
+        // A view move makes its end picture with an image edit on the same key; words-only moves send none.
         let (s, _) = call(&st, "POST", "/api/generate", Some(body("orbit_left"))).await;
         assert_eq!(s, StatusCode::ACCEPTED);
-        assert!(!nth_seen(&st, 2).await.push_in);
+        match nth_seen(&st, 2).await.keyframe {
+            Some(crate::providers::KeyframePlan::View { endpoint, prompt }) => {
+                assert_eq!(endpoint, "fal-ai/bytedance/seedream/v4/edit");
+                assert!(prompt.contains("35 degrees to the left") && prompt.ends_with("Only the camera position changes."), "{prompt}");
+            }
+            other => panic!("orbit left should be a view keyframe, got {other:?}"),
+        }
+        let (s, _) = call(&st, "POST", "/api/generate", Some(body("crane_up"))).await;
+        assert_eq!(s, StatusCode::ACCEPTED);
+        assert!(nth_seen(&st, 3).await.keyframe.is_none(), "crane up stays words");
         let turbo = json!({"model": "fal/kling-2.5-turbo-i2v", "mode": "i2v", "prompt": "walks the pier", "camera": "dolly_in", "image_url": start});
         let (s, _) = call(&st, "POST", "/api/generate", Some(turbo)).await;
         assert_eq!(s, StatusCode::ACCEPTED);
-        let r = nth_seen(&st, 3).await;
-        assert!(!r.push_in && r.audio.is_none() && r.elements.is_empty());
+        let r = nth_seen(&st, 4).await;
+        assert!(r.keyframe.is_none() && r.audio.is_none() && r.elements.is_empty());
     }
 
     #[tokio::test]

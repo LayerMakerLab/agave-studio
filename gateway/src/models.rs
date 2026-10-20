@@ -95,6 +95,7 @@ impl ModelDef {
             "price": price,
             "max_refs": self.max_refs,
             "max_elements": self.max_elements,
+            "end_frame": self.end_frame,
             "provider_credits": self.provider_credits,
         })
     }

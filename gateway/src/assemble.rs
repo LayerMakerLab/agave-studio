@@ -217,24 +217,24 @@ pub fn span(clip: &Clip, source_len: Option<f64>) -> Result<(f64, f64), &'static
     Ok(if source_len.is_some() { (from, len) } else { (0.0, len) })
 }
 
-/// How far Dolly in moves on a model that takes an end picture: the end picture is the middle 65% of the start
-/// picture, scaled back to its size (about a 1.5x push).
-const PUSH_IN_CROP: f64 = 0.65;
-
-/// The start and end pictures for Dolly in, as JPEG data URIs made from one upright decode of the start picture
-/// (ffmpeg applies a photo's EXIF rotation where it supports it, and both pictures come from that same frame, so
-/// they always match): the start as decoded, and the end cropped to its middle at exactly the same size.
+/// The start and end pictures for a zoom move (moves.rs: Dolly in, Push through, Crash zoom), as JPEG data URIs made
+/// from one upright decode of the start picture (ffmpeg applies a photo's EXIF rotation where it supports it, and
+/// both pictures come from that same frame, so they always match): the start as decoded, and the end cropped to the
+/// middle `crop` fraction of it at exactly the same size.
 /// Only a real PNG, JPEG or WebP (read from its bytes) reaches ffmpeg, with that demuxer forced and files as the
 /// only protocol; the size is read from the PNG ffmpeg wrote, never guessed by a prober. Errors say what failed
 /// without ffmpeg's text, which can name local paths.
-pub(crate) async fn push_in_frames(ctx: &Ctx, start: &str) -> PResult<(String, String)> {
-    let failed = || ProviderError::Failed("Dolly in could not make its end picture from the start picture".into());
+pub(crate) async fn keyframe_crop_frames(ctx: &Ctx, start: &str, crop: f64) -> PResult<(String, String)> {
+    let failed = || ProviderError::Failed("The camera move could not make its end picture from the start picture".into());
+    if !(0.2..1.0).contains(&crop) {
+        return Err(failed());
+    }
     let (bytes, _) = media::load_image(ctx, start).await?;
     let (ext, demuxer) = match crate::studio::sniff(&bytes) {
         Some(("png", _)) => ("png", "png_pipe"),
         Some(("jpg", _)) => ("jpg", "jpeg_pipe"),
         Some(("webp", _)) => ("webp", "webp_pipe"),
-        _ => return Err(ProviderError::Failed("Dolly in needs a PNG, JPEG or WebP start picture".into())),
+        _ => return Err(ProviderError::Failed("A keyframed camera move needs a PNG, JPEG or WebP start picture".into())),
     };
     let dir = std::env::temp_dir();
     let tag = media::random_hex(8);
@@ -253,7 +253,7 @@ pub(crate) async fn push_in_frames(ctx: &Ctx, start: &str) -> PResult<(String, S
         run(&mut ff(&src, demuxer, "format=rgb24".into(), &upright)).await.map_err(|_| failed())?;
         let png = tokio::fs::read(&upright).await.map_err(|_| failed())?;
         let (w, h) = png_size(&png).ok_or_else(failed)?;
-        let c = PUSH_IN_CROP;
+        let c = crop;
         // Full-chroma JPEG keeps odd sizes exact on every ffmpeg (4:2:0 rounds them to even on some).
         run(&mut ff(&upright, "png_pipe", "format=yuvj444p".into(), &first)).await.map_err(|_| failed())?;
         let vf = format!("crop=iw*{c}:ih*{c},scale={w}:{h}:flags=lanczos,format=yuvj444p");
@@ -591,7 +591,7 @@ mod tests {
         // A 400x200 picture: blue, with a red 100x50 block in the middle. Cropped in, the red block fills more.
         gen(&["-f", "lavfi", "-i", "color=c=blue:s=400x200", "-f", "lavfi", "-i", "color=c=red:s=100x50",
             "-filter_complex", "[0:v][1:v]overlay=150:75", "-frames:v", "1"], "start.png");
-        let (first, last) = push_in_frames(&ctx, "/outputs/start.png").await.unwrap();
+        let (first, last) = keyframe_crop_frames(&ctx, "/outputs/start.png", 0.65).await.unwrap();
         let (first, last) = (decode(&first, "first.jpg"), decode(&last, "last.jpg"));
         for f in [&first, &last] {
             let (w, h, _, _) = probe_any(f).await.unwrap();
@@ -601,11 +601,11 @@ mod tests {
         assert!(px(&last, 200, 100).0 > 200, "the middle stays red");
         assert!(px(&last, 70, 100).1 > 200 && px(&last, 70, 100).0 < 60, "the edge is still blue: a push, not a fill");
         assert!(px(&last, 140, 100).0 > 200, "the red block grew past its old edge at x=150");
-        assert!(push_in_frames(&ctx, "/outputs/nope.png").await.is_err(), "no start picture, no job");
+        assert!(keyframe_crop_frames(&ctx, "/outputs/nope.png", 0.65).await.is_err(), "no start picture, no job");
 
         // Odd sizes come back exact (fal refuses pictures under 300 px).
         gen(&["-f", "lavfi", "-i", "color=c=gray:s=320x320", "-vf", "format=rgb24,crop=301:301", "-frames:v", "1"], "odd.png");
-        let (_, last) = push_in_frames(&ctx, "/outputs/odd.png").await.unwrap();
+        let (_, last) = keyframe_crop_frames(&ctx, "/outputs/odd.png", 0.65).await.unwrap();
         let (w, h, _, _) = probe_any(&decode(&last, "odd-last.jpg")).await.unwrap();
         assert_eq!((w, h), (301, 301));
 
@@ -622,7 +622,7 @@ mod tests {
         rotated.extend_from_slice(&app1);
         rotated.extend_from_slice(&jpg[2..]);
         std::fs::write(dir.join("rotated.jpg"), rotated).unwrap();
-        let (first, last) = push_in_frames(&ctx, "/outputs/rotated.jpg").await.unwrap();
+        let (first, last) = keyframe_crop_frames(&ctx, "/outputs/rotated.jpg", 0.65).await.unwrap();
         let a = probe_any(&decode(&first, "rot-first.jpg")).await.unwrap();
         let b = probe_any(&decode(&last, "rot-last.jpg")).await.unwrap();
         assert_eq!((a.0, a.1), (b.0, b.1), "start and end match in shape");
@@ -630,7 +630,7 @@ mod tests {
 
         // Only real pictures reach ffmpeg: a playlist named .png is refused before ffmpeg runs.
         std::fs::write(dir.join("list.png"), "ffconcat version 1.0\nfile start.png\n").unwrap();
-        let err = push_in_frames(&ctx, "/outputs/list.png").await.unwrap_err();
+        let err = keyframe_crop_frames(&ctx, "/outputs/list.png", 0.65).await.unwrap_err();
         assert!(format!("{err:?}").contains("PNG, JPEG or WebP"), "{err:?}");
     }
 
@@ -676,7 +676,7 @@ mod tests {
             label: None,
             audio: None,
             elements: Vec::new(),
-            push_in: false,
+            keyframe: None,
             end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
@@ -726,7 +726,7 @@ mod tests {
             label: None,
             audio: None,
             elements: Vec::new(),
-            push_in: false,
+            keyframe: None,
             end_image_url: None,
         }
     }
@@ -885,7 +885,7 @@ mod tests {
             label: None,
             audio: None,
             elements: Vec::new(),
-            push_in: false,
+            keyframe: None,
             end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("render failed") };
@@ -938,7 +938,7 @@ mod tests {
             label: None,
             audio: None,
             elements: Vec::new(),
-            push_in: false,
+            keyframe: None,
             end_image_url: None,
         };
         let Ok(Submitted::Done(outs)) = Assemble(plan).submit(&ctx, "", &req).await else { panic!("assemble failed") };

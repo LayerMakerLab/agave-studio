@@ -49,10 +49,19 @@ pub struct SubmitReq {
     pub audio: Option<bool>,
     /// Kling 3.0 Elements: the pictures of each @tagged Element (main view first), called @Element1, @Element2...
     pub elements: Vec<Vec<String>>,
-    /// Dolly in on a model that takes an end picture: the start picture, cropped in, is sent as the end picture.
-    pub push_in: bool,
-    /// The end picture (fal `end_image_url`), made from the start picture when push_in is set.
+    /// A keyframed camera move (moves.rs) on a model that takes an end picture: how the end picture is made.
+    pub keyframe: Option<KeyframePlan>,
+    /// The end picture (fal `end_image_url`), made from the start picture when keyframe is set.
     pub end_image_url: Option<String>,
+}
+
+/// How Fal::submit makes the end picture of a keyframed camera move.
+#[derive(Clone, Debug, PartialEq)]
+pub enum KeyframePlan {
+    /// The middle of the start picture at this fraction, scaled back (assemble::keyframe_crop_frames).
+    Crop(f64),
+    /// An image edit of the start picture on fal: the edit model's endpoint and the full prompt.
+    View { endpoint: String, prompt: String },
 }
 
 pub enum Submitted {
@@ -287,11 +296,18 @@ fn fal_outputs(v: &Value) -> Vec<(String, &'static str)> {
 impl Provider for Fal {
     async fn submit(&self, ctx: &Ctx, key: &str, req: &SubmitReq) -> PResult<Submitted> {
         let mut r = req.clone();
-        if r.push_in {
-            if let Some(start) = r.image_url.clone() {
-                let (first, last) = crate::assemble::push_in_frames(ctx, &start).await?;
-                r.image_url = Some(first);
-                r.end_image_url = Some(last);
+        // A keyframed camera move (moves.rs): the end picture carries the move, because Kling ignores the words.
+        if let (Some(plan), Some(start)) = (r.keyframe.clone(), r.image_url.clone()) {
+            match plan {
+                KeyframePlan::Crop(c) => {
+                    let (first, last) = crate::assemble::keyframe_crop_frames(ctx, &start, c).await?;
+                    r.image_url = Some(first);
+                    r.end_image_url = Some(last);
+                }
+                KeyframePlan::View { endpoint, prompt } => {
+                    let end = fal_view_end(ctx, key, &endpoint, &prompt, &start).await?;
+                    r.end_image_url = Some(media::as_data_uri(ctx, &end).await?);
+                }
             }
         }
         // fal cannot read our local /outputs paths, so inline them.
@@ -366,6 +382,44 @@ impl Provider for Fal {
                 Ok(Polled::Done(outs))
             }
             other => Ok(Polled::Failed(format!("fal status {other}"))),
+        }
+    }
+}
+
+/// The end picture of a view move (moves.rs): an image edit of the start picture on fal, on the same key, waited for
+/// here (up to 3 minutes) before the video is sent. Returns the edited picture, saved under /outputs.
+async fn fal_view_end(ctx: &Ctx, key: &str, endpoint: &str, prompt: &str, start: &str) -> PResult<String> {
+    let failed = |why: &str| ProviderError::Failed(format!("The camera move could not make its end picture: {why}"));
+    let edit = SubmitReq {
+        endpoint: endpoint.to_string(),
+        mode: "i2i".into(),
+        prompt: prompt.to_string(),
+        aspect: None,
+        duration: None,
+        resolution: None,
+        seed: None,
+        image_url: None,
+        image_urls: vec![start.to_string()],
+        voice_id: None,
+        label: None,
+        audio: None,
+        elements: Vec::new(),
+        keyframe: None,
+        end_image_url: None,
+    };
+    let Submitted::Queued(handle) = Fal.submit(ctx, key, &edit).await? else {
+        return Err(failed("the edit was not queued"));
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+    loop {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        match Fal.poll(ctx, key, &handle).await? {
+            Polled::Running(_) if tokio::time::Instant::now() < deadline => continue,
+            Polled::Running(_) => return Err(failed("the edit took too long")),
+            Polled::Failed(e) => return Err(failed(&e)),
+            Polled::Done(outs) => {
+                return outs.into_iter().find(|o| o.kind == "image").map(|o| o.url).ok_or_else(|| failed("no picture came back"))
+            }
         }
     }
 }
@@ -940,7 +994,7 @@ mod tests {
             label: None,
             audio: None,
             elements: Vec::new(),
-            push_in: false,
+            keyframe: None,
             end_image_url: None,
         }
     }

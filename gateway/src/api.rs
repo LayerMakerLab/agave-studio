@@ -17,6 +17,7 @@ use crate::assemble::{self, Assemble};
 use crate::jobs::{self, now_unix, Job};
 use crate::keys::{self, SLOTS};
 use crate::media;
+use crate::moves;
 use crate::pipelines;
 use crate::promptcraft;
 use crate::providers::{self, SubmitReq};
@@ -167,8 +168,21 @@ async fn models(State(st): State<AppState>) -> Json<Value> {
     Json(json!({"models": models}))
 }
 
+/// The preset catalog, with each camera move's keyframe plan (moves.rs) for models that take an end picture:
+/// {"kind":"crop"} or {"kind":"view","model":"<edit model id>"}, null when the move stays words.
 async fn presets(State(st): State<AppState>) -> Json<Value> {
-    Json(st.presets.json.clone())
+    let mut v = st.presets.json.clone();
+    if let Some(cams) = v.get_mut("camera").and_then(Value::as_array_mut) {
+        for c in cams {
+            let plan = c.get("id").and_then(Value::as_str).and_then(moves::keyframe);
+            c["keyframe"] = match plan {
+                Some(moves::Keyframe::Crop(_)) => json!({"kind": "crop"}),
+                Some(moves::Keyframe::View { model, .. }) => json!({"kind": "view", "model": model}),
+                None => Value::Null,
+            };
+        }
+    }
+    Json(v)
 }
 
 async fn list_keys(State(st): State<AppState>) -> Response {
@@ -488,6 +502,18 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         created_at: now_unix(),
         request,
     };
+    // Kling 3.0 often ignores camera words: a keyframed move (moves.rs) sends where the move ends as the end picture.
+    // A view move's edit runs on the same key as the video, or the move stays words.
+    let keyframe = match req.camera.as_deref().and_then(moves::keyframe) {
+        Some(_) if !(model.end_frame && req.mode == "i2v" && image_url.is_some()) => None,
+        Some(moves::Keyframe::Crop(c)) => Some(providers::KeyframePlan::Crop(c)),
+        Some(moves::Keyframe::View { model: edit, prompt }) => st
+            .registry
+            .get(edit)
+            .filter(|m| m.key == model.key && m.provider == "fal")
+            .map(|m| providers::KeyframePlan::View { endpoint: m.endpoint.clone(), prompt: moves::view_prompt(prompt) }),
+        None => None,
+    };
     let sub = SubmitReq {
         endpoint: model.endpoint.clone(),
         mode: req.mode.clone(),
@@ -502,8 +528,7 @@ pub(crate) fn submit_generate(st: &AppState, req: GenerateReq) -> Result<Job, Re
         label: req.label.clone(),
         audio,
         elements,
-        // Kling 3.0 ignores "dolly in" in the words, so the end picture carries the move.
-        push_in: model.end_frame && req.mode == "i2v" && req.camera.as_deref() == Some("dolly_in"),
+        keyframe,
         end_image_url: None,
     };
     if !st.jobs.insert(job.clone(), adapter.clone(), model.key.clone()) {
@@ -1042,7 +1067,7 @@ async fn assemble_clips(State(st): State<AppState>, body: Result<Json<AssembleRe
         label: None,
         audio: None,
         elements: Vec::new(),
-        push_in: false,
+        keyframe: None,
         end_image_url: None,
     };
     jobs::spawn_submit(st.clone(), job.id.clone(), adapter, String::new(), sub);
@@ -1439,6 +1464,25 @@ mod tests {
         assert_eq!(s, StatusCode::OK);
         let resp = app.clone().oneshot(get_req("/api/elements")).await.unwrap();
         assert_eq!(body_json(resp).await["elements"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn presets_say_which_camera_moves_are_keyframed() {
+        let app = router(AppState::for_tests("api_presets_keyframes"));
+        let resp = app.clone().oneshot(get_req("/api/presets")).await.unwrap();
+        let v = body_json(resp).await;
+        let cam = |id: &str| v["camera"].as_array().unwrap().iter().find(|c| c["id"] == id).cloned().unwrap();
+        assert_eq!(cam("dolly_in")["keyframe"], json!({"kind": "crop"}));
+        assert_eq!(cam("dolly_out")["keyframe"], json!({"kind": "view", "model": "fal/nano-banana-edit"}));
+        assert_eq!(cam("orbit_left")["keyframe"]["model"], "fal/seedream-4-edit");
+        assert!(cam("crane_up")["keyframe"].is_null(), "crane up stays words");
+        for c in v["camera"].as_array().unwrap() {
+            if let Some(m) = c["keyframe"]["model"].as_str() {
+                let (s, models) = (StatusCode::OK, body_json(app.clone().oneshot(get_req("/api/models")).await.unwrap()).await);
+                assert_eq!(s, StatusCode::OK);
+                assert!(models["models"].as_array().unwrap().iter().any(|x| x["id"] == m && x["price"]["usd"].is_number()), "{m} must be a priced model");
+            }
+        }
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@ mod jobs;
 mod keys;
 mod media;
 mod models;
+mod moves;
 mod pipelines;
 mod placeholder;
 mod promptcraft;
