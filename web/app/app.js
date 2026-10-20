@@ -19,6 +19,7 @@
 
   // Plain words for the gateway's error codes.
   const ERRORS = {
+    launch_token: 'The studio restarted since this page opened. Reload the page, then try again.',
     adapter_not_implemented: 'This provider is not connected yet.',
     invalid_image_url: 'That link is not a usable https image link.',
     image_url_required: 'This model needs a picture to start from.',
