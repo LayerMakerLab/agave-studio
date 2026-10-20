@@ -17,7 +17,7 @@ Open http://127.0.0.1:4170/ (home) and http://127.0.0.1:4170/app/ (workspace).
 
 - Slot names and docs links: `../config/keys.example.env`. Only these names are accepted.
 - Put values in `../config/keys.env` (gitignored, written 0600), or export the same names as environment variables. Env vars win.
-- Or POST from this machine: `POST /api/keys {"env":"FAL_KEY","value":"..."}`. Localhost only. Values are 8 to 512 characters with no whitespace.
+- Or paste them in the studio's Settings (`POST /api/keys` from the studio's page; values are 8 to 512 characters with no whitespace).
 - Keys are never returned or logged. `GET /api/keys` shows only whether each slot is set.
 - A generate call with no key returns 412 `{"error":"missing_key","key":"FAL_KEY"}`.
 

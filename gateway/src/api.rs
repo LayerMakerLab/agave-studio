@@ -48,20 +48,22 @@ fn is_page_load(headers: &HeaderMap) -> bool {
     is("sec-fetch-mode", "navigate") && is("sec-fetch-dest", "document")
 }
 
-/// The request carries this launch's cookie (compared in constant time).
+/// The request carries this launch's cookie (compared in constant time). Read as bytes: cookies are shared by every
+/// local port, so another local app's cookie with a non-ASCII value may sit in the same header and must not hide ours.
 fn has_launch_cookie(headers: &HeaderMap, st: &AppState) -> bool {
     let want = st.launch_token.as_bytes();
+    let name = st.launch_cookie.as_bytes();
     headers
         .get_all(header::COOKIE)
         .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(';'))
-        .filter_map(|pair| pair.trim().split_once('='))
-        .filter(|(name, _)| *name == st.launch_cookie.as_str())
-        .any(|(_, value)| {
-            let got = value.as_bytes();
-            got.len() == want.len() && got.iter().zip(want).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+        .flat_map(|v| v.as_bytes().split(|&b| b == b';'))
+        .filter_map(|pair| {
+            let pair = pair.trim_ascii();
+            let at = pair.iter().position(|&b| b == b'=')?;
+            Some((&pair[..at], &pair[at + 1..]))
         })
+        .filter(|(n, _)| *n == name)
+        .any(|(_, got)| got.len() == want.len() && got.iter().zip(want).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0)
 }
 
 
@@ -143,7 +145,8 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     let navigation = page && is_page_load(req.headers());
     let mut resp = next.run(req).await;
     if navigation {
-        // HttpOnly: the page's scripts never see it; SameSite=Strict: no other site's request carries it.
+        // HttpOnly: the page's scripts never see it. SameSite=Strict keeps other websites' requests from carrying it,
+        // but every port on 127.0.0.1 is the same site: the browser also sends it to other local servers.
         let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Strict", st.launch_cookie, st.launch_token);
         if let Ok(v) = header::HeaderValue::from_str(&cookie) {
             resp.headers_mut().append(header::SET_COOKIE, v);
@@ -1493,6 +1496,14 @@ mod tests {
         // The right cookie, among others as a browser sends them, passes.
         let resp = app.clone().oneshot(with(Some("theme=dark; agave_launch_4170=test-launch-token; x=y"), "/api/keys", key)).await.expect("response");
         assert_eq!(resp.status(), StatusCode::OK);
+        // Another local app's cookie with a non-ASCII value in the same header does not hide ours.
+        let mut req = with(None, "/api/keys", key);
+        req.headers_mut().insert(
+            header::COOKIE,
+            header::HeaderValue::from_bytes("greeting=caf\u{e9}; agave_launch_4170=test-launch-token".as_bytes()).unwrap(),
+        );
+        let resp = app.clone().oneshot(req).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK, "a non-ASCII neighbour");
         assert!(st.keys.is_set("FAL_KEY"));
     }
 

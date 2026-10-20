@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- Only the studio's pages can start a paid job or change a key: every POST to the API needs a cookie made fresh at
-  each start and given only to a browser loading a page. Another program on the computer (an agent's curl included)
-  is refused; a page opened before a restart shows "Reload the page".
+- A paid job or a key change needs the studio's page: every request that changes something needs a cookie made fresh
+  at each start and given to a browser when it loads a page. A script or agent that only calls the API (a plain curl)
+  is refused; a page opened before a restart, or a browser that keeps no cookies, shows "Reload the page". It is a
+  speed bump, not a sign-in: a program that drives a browser gets the cookie too.
 - Playground, from a first-time-user test: the code window names the run or form it is for, remembers its language
   and says how to install the client; each run in Your runs shows its words, and opening one brings its result into
   view (and focus, from the keyboard); Compare's picker marks models already in it; fal's help reads plainer ("The

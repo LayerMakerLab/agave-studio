@@ -63,9 +63,10 @@ pub struct AppState {
     /// Host headers and Origins the gateway answers to (its own local addresses only).
     pub allowed_hosts: Arc<Vec<String>>,
     pub allowed_origins: Arc<Vec<String>>,
-    /// A random value made at every start. Only a browser page load gets it (an HttpOnly cookie, `launch_cookie`),
-    /// and every /api/ call that changes something must carry it: another program on this computer, an agent's
-    /// curl included, cannot start a paid job or change a key by calling the API directly.
+    /// A random value made at every start. A browser page load gets it (an HttpOnly cookie, `launch_cookie`), and
+    /// every /api/ call that changes something must carry it. A program that only sends requests to the API (an
+    /// agent's plain curl) cannot start a paid job or change a key. It is a speed bump, not a sign-in: a program that
+    /// loads a page as a browser does, or drives one, gets the cookie too.
     pub launch_token: Arc<String>,
     /// The cookie's name. It carries the port: cookies ignore ports, so a test gateway must not replace the
     /// studio's own.

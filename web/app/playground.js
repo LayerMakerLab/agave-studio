@@ -134,7 +134,7 @@
     not_runnable: 'This model cannot run in the Playground yet.',
     price_unavailable: 'fal did not give a price for this model.',
     bad_request: 'The request was not understood. Reload the page and try again.',
-    launch_token: 'The studio restarted since this page opened. Reload the page, then try again.',
+    launch_token: 'This page lost its link to the studio. Reload the page, then try again.',
   };
   const say = (code) => ERRORS[code] || 'Something went wrong. Try again.';
 
@@ -2089,6 +2089,9 @@
             S.keySet = false;
             $('#pgKey').hidden = false;
             stop = ERRORS.missing_key;
+          } else if (code === 'launch_token') {
+            // Every other model would be refused the same way.
+            stop = ERRORS.launch_token;
           }
           if (stop) {
             cmpNote(stop);
