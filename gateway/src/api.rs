@@ -318,7 +318,7 @@ pub(crate) struct GenerateReq {
     #[serde(skip)]
     pub(crate) label: Option<String>,
     /// What the page showed this job costs, for the spend log (never sent to a provider).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "jobs::lenient_estimate")]
     pub(crate) estimate: Option<jobs::PageEstimate>,
 }
 
@@ -1749,6 +1749,13 @@ mod tests {
         assert_eq!(cost["unit"], "second");
         assert_eq!(cost["estimate_usd"], 0.56);
         assert_eq!(cost["test"], true);
+        // An estimate of the wrong shape is ignored, never a reason to refuse the run.
+        for bad in [json!({"usd": "0.5", "kind": "about"}), json!({"usd": null}), json!("cheap"), json!({"kind": "about"})] {
+            let body = json!({"model": "fal/kling-3-pro-t2v", "mode": "t2v", "prompt": "a lighthouse", "estimate": bad});
+            let (s, v) = post(&app, "/api/generate", body).await;
+            assert_eq!(s, StatusCode::ACCEPTED, "{bad}: {v}");
+            assert!(v["job"]["cost"].get("estimate_usd").is_none(), "{bad}");
+        }
         // A free local job (an edit) has no cost and adds no spend line.
         let img = upload_png(&app).await;
         let (s, v) = post(&app, "/api/assemble", json!({"clips": [{"url": img, "to": 2.0}], "frame": "9:16"})).await;

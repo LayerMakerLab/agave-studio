@@ -266,6 +266,18 @@ pub fn step_price(st: &AppState, step: &Step) -> Price {
     Price { credits: m.provider_credits.map(|c| (c, m.vendor.clone())), ..Price::default() }
 }
 
+/// The estimate the pipeline page shows for a step (its list price, rounded up to the cent), for the spend log.
+fn step_estimate(st: &AppState, step: &Step) -> Option<crate::jobs::PageEstimate> {
+    let cents = step_price(st, step).cents?;
+    let Kind::Generate { model, duration, .. } = &step.kind else { return None };
+    let m = st.registry.get(model)?;
+    let how = match m.price.as_ref().map(|p| p.per.as_str()) {
+        Some("second") => format!("{} s", duration.or_else(|| m.params.duration.first().copied()).unwrap_or(0)),
+        _ => "1 image".to_string(),
+    };
+    Some(crate::jobs::PageEstimate { usd: cents as f64 / 100.0, kind: "about".into(), how })
+}
+
 fn price_json(p: &Price) -> Value {
     json!({"cents": p.cents, "credits": p.credits.as_ref().map(|c| c.0), "credits_vendor": p.credits.as_ref().map(|c| c.1.clone())})
 }
@@ -737,6 +749,7 @@ async fn start(st: &AppState, p: &Pipeline, run: &mut Run, i: usize) {
         image_url,
         recipe: recipe.map(String::from),
         label: Some(format!("Step {} · {}", i + 1, p.steps[i].title)),
+        estimate: step_estimate(st, &p.steps[i]),
         ..Default::default()
     };
     match submit_generate(st, req) {
@@ -1110,6 +1123,11 @@ mod tests {
         assert_eq!(seen[2].image_urls, vec![hero]);
         assert_eq!(seen[2].prompt, "a blue ceramic bowl");
         assert_eq!(run["status"], "done");
+        // Each paid step's job carries the price the pipeline page showed (rounded up to the cent), for the spend log.
+        let cost = |i: usize| st.jobs.get(run["steps"][i]["job"].as_str().unwrap()).unwrap().cost.unwrap();
+        assert_eq!((cost(0).estimate_usd, cost(0).how.as_deref()), (Some(0.04), Some("1 image")));
+        assert_eq!((cost(2).estimate_usd, cost(2).estimate.as_deref(), cost(2).how.as_deref()), (Some(0.35), Some("about"), Some("5 s")));
+        assert_eq!((cost(3).estimate_usd, cost(3).credits), (None, Some(30)), "Meshy prices in its own credits");
     }
 
     #[tokio::test]

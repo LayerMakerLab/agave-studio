@@ -84,6 +84,13 @@ pub struct PageEstimate {
     pub how: String,
 }
 
+/// Reads a request's `estimate` without ever refusing the request over it: anything that is not a well-formed
+/// estimate counts as none (the log is bookkeeping; the run was already confirmed on the page).
+pub fn lenient_estimate<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<PageEstimate>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 impl Cost {
     /// Takes the page's estimate when it is a plausible one; a bad one is left out rather than refusing the run
     /// (the log is bookkeeping, and the run was already confirmed on the page).
@@ -92,7 +99,9 @@ impl Cost {
         if e.usd.is_finite() && (0.0..=MAX_ESTIMATE_USD).contains(&e.usd) && matches!(e.kind.as_str(), "exact" | "about" | "up to") {
             self.estimate_usd = Some(e.usd);
             self.estimate = Some(e.kind.clone());
-            let how: String = e.how.chars().filter(|c| !c.is_control()).take(120).collect();
+            // Plain words only ("5 s", "1 image at 0.8 megapixels"): no control, separator or direction characters,
+            // nothing a reader could split a line on or a shell could expand.
+            let how: String = e.how.chars().filter(|c| c.is_alphanumeric() || " .,:;()+-/%×'".contains(*c)).take(120).collect();
             self.how = Some(how).filter(|h| !h.trim().is_empty());
         }
         self
@@ -124,6 +133,9 @@ struct Entry {
     failures: u32,
     /// Already copied into the saved list.
     saved: bool,
+    /// The provider took the job: it gave a handle for it, or answered it at once. Only such a job can have cost
+    /// anything, so only it adds a spend line.
+    sent: bool,
 }
 
 /// A finished job as kept in data/jobs.json.
@@ -272,12 +284,12 @@ impl JobStore {
                     job.finished_at = Some(now_unix());
                     job.error = Some(if too_old { "timed out".into() } else { "The studio closed before this job finished. Run it again.".into() });
                     let adapter: Arc<dyn Provider> = Arc::new(crate::providers::Stopped);
-                    m.insert(job.id.clone(), Entry { job, handle: None, adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false });
+                    m.insert(job.id.clone(), Entry { job, handle: None, adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false, sent: false });
                     continue;
                 };
                 let mut job = a.job;
                 job.status = "running".into();
-                m.insert(job.id.clone(), Entry { job, handle: Some(handle), adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false });
+                m.insert(job.id.clone(), Entry { job, handle: Some(handle), adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false, sent: true });
             }
         });
         self.save_finished();
@@ -316,12 +328,12 @@ impl JobStore {
     fn save_finished(&self) {
         let Some(path) = &self.path else { return };
         self.save_active();
-        let fresh: Vec<Saved> = self.with(|m| {
+        let fresh: Vec<(Saved, bool)> = self.with(|m| {
             m.values_mut()
                 .filter(|e| !e.saved && !is_active(&e.job))
                 .map(|e| {
                     e.saved = true;
-                    Saved { job: e.job.clone() }
+                    (Saved { job: e.job.clone() }, e.sent)
                 })
                 .collect()
         });
@@ -329,10 +341,11 @@ impl JobStore {
             return;
         }
         // Each finished job is new here exactly once per run of the studio, so it adds its spend line once. (A crash
-        // between this line and jobs.json can repeat it after a restart; readers keep the last line per job.)
+        // between this line and jobs.json can repeat it after a restart; readers keep the last line per job.) A job the
+        // provider never took (refused before it was sent, or by the provider at submit) costs nothing and adds none.
         let spend = spend_path(path);
-        for s in &fresh {
-            let Some(cost) = s.job.cost.clone() else { continue };
+        for (s, sent) in &fresh {
+            let (Some(cost), true) = (s.job.cost.clone(), *sent) else { continue };
             let line = SpendLine {
                 at: s.job.finished_at.unwrap_or_else(now_unix),
                 job: s.job.id.clone(),
@@ -349,6 +362,7 @@ impl JobStore {
                 Err(e) => eprintln!("jobs: encode spend: {e}"),
             }
         }
+        let fresh: Vec<Saved> = fresh.into_iter().map(|(s, _)| s).collect();
         let mut saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
         for s in fresh {
             saved.retain(|x| x.job.id != s.job.id);
@@ -411,6 +425,7 @@ impl JobStore {
                     last_poll: None,
                     failures: 0,
                     saved: false,
+                    sent: false,
                 },
             );
             true
@@ -444,6 +459,7 @@ impl JobStore {
         self.with(|m| {
             if let Some(e) = m.get_mut(id) {
                 e.handle = Some(handle);
+                e.sent = true;
                 e.job.status = "running".into();
             }
         });
@@ -456,6 +472,15 @@ impl JobStore {
                 e.job.status = "running".into();
                 e.job.progress = progress;
                 e.failures = 0;
+            }
+        });
+    }
+
+    /// The provider answered the submit at once: it took the job.
+    pub fn mark_sent(&self, id: &str) {
+        self.with(|m| {
+            if let Some(e) = m.get_mut(id) {
+                e.sent = true;
             }
         });
     }
@@ -537,7 +562,10 @@ pub fn spawn_submit(state: AppState, job_id: String, adapter: Arc<dyn Provider>,
     tokio::spawn(async move {
         match adapter.submit(&state.ctx, &key, &req).await {
             Ok(Submitted::Queued(handle)) => state.jobs.set_handle(&job_id, handle),
-            Ok(Submitted::Done(outputs)) => state.jobs.set_done(&job_id, outputs),
+            Ok(Submitted::Done(outputs)) => {
+                state.jobs.mark_sent(&job_id);
+                state.jobs.set_done(&job_id, outputs)
+            }
             Err(ProviderError::NotImplemented) => state.jobs.set_failed(&job_id, "adapter_not_implemented"),
             Err(ProviderError::Failed(msg)) => state.jobs.set_failed(&job_id, scrub(msg, &key)),
         }
@@ -688,10 +716,17 @@ mod tests {
         assert!(store.insert(paid("p2", None), Arc::new(Never), "FAL_KEY".into()));
         assert!(store.insert(job("local1"), Arc::new(Never), String::new()), "a free local job has no cost");
         assert!(store.insert(paid("p3", None), Arc::new(Never), "FAL_KEY".into()));
+        assert!(store.insert(paid("refused", None), Arc::new(Never), "FAL_KEY".into()));
+        let handle = |id: &str| Handle { request_id: id.into(), status_url: format!("https://queue.fal.run/x/{id}"), result_url: None };
+        store.mark_sent("p1"); // answered at once
+        store.set_handle("p2", handle("p2"));
+        store.set_handle("p3", handle("p3"));
         store.set_done("p1", vec![Output { url: "/outputs/x.png".into(), kind: "image".into() }]);
         store.set_failed("p2", "boom");
         store.set_done("local1", Vec::new());
         store.set_failed("p2", "again");
+        // Refused before the provider took it (a missing file, a 4xx at submit): it cost nothing and adds no line.
+        store.set_failed("refused", "file_missing");
         let read = || -> Vec<SpendLine> {
             std::fs::read_to_string(spend_path(&dir.join("jobs.json"))).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
         };
@@ -726,6 +761,11 @@ mod tests {
         let long = Cost::default().with_estimate(Some(&PageEstimate { usd: 1.0, kind: "exact".into(), how: format!("{}\n{}", "a".repeat(200), "b") }));
         assert_eq!(long.how.as_ref().map(|h| h.chars().count()), Some(120));
         assert!(!long.how.unwrap().contains('\n'));
+        // Only plain words: no line or paragraph separators, direction marks, or shell syntax.
+        let odd = Cost::default().with_estimate(Some(&PageEstimate { usd: 1.0, kind: "about".into(), how: "5 s\u{2028}x\u{202E}y $(rm -rf ~) `id`".into() }));
+        assert_eq!(odd.how.as_deref(), Some("5 sxy (rm -rf ) id"));
+        let plain = Cost::default().with_estimate(Some(&PageEstimate { usd: 1.0, kind: "about".into(), how: "fal's average run, 1 image at 0.8 megapixels".into() }));
+        assert_eq!(plain.how.as_deref(), Some("fal's average run, 1 image at 0.8 megapixels"));
     }
 
     #[test]

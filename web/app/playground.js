@@ -896,8 +896,12 @@
   /** The word before an estimate: none when exact, "up to" for a ceiling, else "about". */
   const approx = (est) => (est.exact ? '' : est.upTo ? 'up to ' : 'about ');
 
-  /** What a run sends for Agave's spend log: the estimate shown before Run, or nothing when there was none. */
-  const spendNote = (est) => (est && num(est.total) ? { usd: est.total, kind: est.exact ? 'exact' : est.upTo ? 'up to' : 'about', how: est.how || '' } : undefined);
+  /** What a run sends for Agave's spend log: the estimate shown before Run (fal's average when that is what showed),
+   *  or nothing when there was none. */
+  const spendNote = (est, avg) => {
+    if (est && num(est.total)) return { usd: est.total, kind: est.exact ? 'exact' : est.upTo ? 'up to' : 'about', how: est.how || '' };
+    return num(avg) ? { usd: avg, kind: 'about', how: "fal's average run" } : undefined;
+  };
 
   /** True while a run of the model on screen is still going (the button then says Run another). */
   const runningHere = () => !!S.spec && S.jobs.some((j) => isActive(j) && j.model === `fal:${S.spec.id}`);
@@ -1029,8 +1033,8 @@
     btn.disabled = true;
     $('#pgRunLabel').textContent = 'Sending…';
     $('#pgRunNote').textContent = '';
-    const shown = S.spec && S.spec.id === id ? estimate() : null;
-    const r = await call('/api/fal/run', { method: 'POST', body: { id, input, test: S.test, estimate: spendNote(shown) } });
+    const shown = S.spec && S.spec.id === id ? priceSummary() : {};
+    const r = await call('/api/fal/run', { method: 'POST', body: { id, input, test: S.test, estimate: spendNote(shown.est, shown.avg) } });
     S.sending = false;
     btn.disabled = !(S.spec && S.spec.runnable) || S.offline;
     renderPrice();
@@ -1647,6 +1651,13 @@
     return { text: 'fal did not give a price for this model.', total: null, known: false };
   }
 
+  /** A column's run for Agave's spend log: what its price line showed (fal's average when that is what showed). */
+  function spend(spec, input) {
+    if (!spec) return undefined;
+    const p = C.prices.get(spec.id);
+    return spendNote(cmpEstimate(spec, input), p && p.average);
+  }
+
   /** The word before a total: none when every price is exact, "up to" when every inexact one is a ceiling, else "about". */
   function totalWord(prices, unknown) {
     if (unknown > 0) return 'about ';
@@ -2072,7 +2083,7 @@
         const id = ids[i];
         if (!C.ids.includes(id)) continue;
         const spec = C.specs.get(id);
-        const r = await call('/api/fal/run', { method: 'POST', body: { id, input: inputs[i], test: S.test, estimate: spendNote(spec && cmpEstimate(spec, inputs[i])) } });
+        const r = await call('/api/fal/run', { method: 'POST', body: { id, input: inputs[i], test: S.test, estimate: spend(spec, inputs[i]) } });
         if (!r.ok) {
           const code = r.data && r.data.error;
           let stop = null;

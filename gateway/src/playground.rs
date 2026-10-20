@@ -871,7 +871,7 @@ pub struct RunReq {
     #[serde(default)]
     test: Option<bool>,
     /// What the page showed this run costs, for the spend log.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "jobs::lenient_estimate")]
     estimate: Option<jobs::PageEstimate>,
 }
 

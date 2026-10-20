@@ -39,16 +39,19 @@ a browser gets the cookie like any page. GETs need no cookie.
   jobs: edits, frames). `estimate_*` and `how` are what the page showed before Run; `unit_price`/`unit` are the
   provider's list price for the job's options (`average`: fal's own average per call; `credits`: a provider that
   prices in its own credits). Fields with no value are left out. POST /api/generate and POST /api/fal/run take an
-  optional `"estimate":{"usd":0.56,"kind":"about","how":"5 s"}`; one the page could not have shown (negative, over
-  $1000, another kind) is left out, never refused.
+  optional `"estimate":{"usd":0.56,"kind":"about","how":"5 s"}`; one the page could not have shown (the wrong shape,
+  negative, over $1000, another kind) is left out, never refused, and `how` keeps only plain words. Pipeline steps carry
+  the price their page shows.
 
 ## Spend log
-`data/spend.jsonl` (test mode: `data/fake-providers/spend.jsonl`, every line `"test":true`): one line per job that went
-to a provider, written when it ends, done or failed:
+`data/spend.jsonl` (test mode: `data/fake-providers/spend.jsonl`, every line `"test":true`): one line per job a
+provider took (it gave the job a handle, or answered it at once), written when the job ends, done or failed:
 `{"at":unix,"job":"j_...","model":"fal:fal-ai/flux/schnell","status":"done"|"failed","cost":Cost}`.
-Owner-only (0600), appended, never rewritten. The amounts are estimates from list prices; the provider's own bill is
-what was charged. A crash between a job's line and data/jobs.json can repeat its line after a restart, so a reader
-keeps the last line per `job`.
+A job refused before the provider took it (a missing file, a refusal at submit) adds no line. Owner-only (0600),
+appended, never rewritten, and never written through a symlink. The amounts are estimates from list prices; the
+provider's own bill is what was charged (a failed job may or may not have been). A keyframed camera move pays for its
+picture edit before the video is sent: if the video is then refused, that edit is not in the log. A crash between a
+job's line and data/jobs.json can repeat its line after a restart, so a reader keeps the last line per `job`.
 
 ## Building blocks
 - POST /api/uploads {"data":"data:<any>;base64,..."} -> 201 {"url":"/outputs/<hex>.<ext>","kind":"image"|"video"|"audio"}
