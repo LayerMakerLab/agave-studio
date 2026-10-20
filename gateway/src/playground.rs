@@ -1312,14 +1312,22 @@ impl Provider for FalRun {
         // fail, after removing what it saved, so the poller tries again; RESULT_TRIES polls in, or when no try will
         // bring it, a more central file that is still missing fails the job with the reason, and an equal one is let
         // go. Nothing saved here is ever left without a job.
+        // Most central first, so the file and size caps never leave out the video for its previews.
+        let mut files: Vec<(u8, String, Option<String>)> =
+            files.into_iter().map(|(url, ct)| (kind_and_ext(&url, ct.as_deref()).map_or(4, |(k, _)| rank(k)), url, ct)).collect();
+        files.sort_by_key(|f| f.0);
         let mut outs: Vec<Output> = Vec::new();
         let mut bytes_kept = 0usize;
         let mut missed: Option<(u8, bool, String)> = None;
-        for (url, ct) in files {
+        let retry_left = self.result_tries.load(Ordering::Relaxed) + 1 < RESULT_TRIES;
+        for (r, url, ct) in files {
             if outs.len() >= MAX_OUTPUT_FILES {
                 break;
             }
-            let r = kind_and_ext(&url, ct.as_deref()).map_or(3, |(k, _)| rank(k));
+            // A passing miss with nothing more central saved means another poll: no need to fetch the rest now.
+            if retry_left && missed.as_ref().is_some_and(|(m, passing, _)| *passing && outs.iter().all(|o| rank(&o.kind) >= *m)) {
+                break;
+            }
             match result_bytes(&url, ct.as_deref()).await {
                 Ok(Some((bytes, kind, ext))) => {
                     if bytes_kept + bytes.len() > MAX_RUN_BYTES {

@@ -456,7 +456,8 @@
     box.addEventListener('input', () => {
       const raw = box.value.trim();
       if (words.includes(raw)) { setValue(f.name, raw); markTouched(wrap.closest('.pg-field')); return; }
-      if (/^[-+]?\.?$/.test(raw) && raw !== '') return; // a number still being typed
+      // A number still being typed ("-", ".", "1e"): nothing is set until it is one.
+      if (raw !== '' && /^[-+]?\.?$|^[-+]?\d*\.?\d*[eE][-+]?$/.test(raw)) { put('', box); return; }
       const n = Number(raw);
       if (raw !== '' && !isFinite(n)) { showFieldError(f.name, words.length ? `Use a number or ${words.map((w) => `"${w}"`).join(' or ')}.` : 'Use a number.'); return; }
       const out = raw !== '' && ((num(f.min) && (f.min_strict ? n <= f.min : n < f.min)) || (num(f.max) && (f.max_strict ? n >= f.max : n > f.max)));
