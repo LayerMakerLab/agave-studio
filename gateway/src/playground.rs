@@ -43,11 +43,13 @@ const MAX_TEXT_CHARS: usize = 20_000;
 const MAX_TEXT_HARD: usize = 200_000;
 const MAX_JSON_FIELD_BYTES: usize = 64 << 10;
 const MAX_LIST_ITEMS: usize = 16;
+/// Most files one run saves, and most file links read from one result (most are kept types, but not all).
 const MAX_OUTPUT_FILES: usize = 24;
+const MAX_RESULT_LINKS: usize = 200;
 /// Most bytes one run may save; files past it are skipped.
 const MAX_RUN_BYTES: usize = 2 << 30;
-/// Result files from these hosts are fetched like other provider files; any other host must resolve to a public address.
-const FAL_FILE_HOSTS: &[&str] = &["fal.media", "fal.run", "fal.ai", "storage.googleapis.com"];
+/// Longest a single result file download may take.
+const RESULT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_SAVED_REQUEST_BYTES: usize = 16 << 10;
 /// Fields never shown or sent: sync_mode makes fal answer with inline data instead of file URLs.
 const HIDDEN: &[&str] = &["sync_mode"];
@@ -526,7 +528,8 @@ pub fn check_input(spec: &Spec, input: &Map<String, Value>) -> Result<(Map<Strin
         if v.is_null() {
             continue;
         }
-        let ok = match f.kind {
+        // A free field's own choices (an enum beside a free string or number) are always accepted.
+        let ok = (f.kind != Kind::Choice && f.choices.iter().any(|c| num_eq(c, v))) || match f.kind {
             Kind::Text | Kind::LongText => v.as_str().is_some_and(|s| s.chars().count() <= f.max_len.unwrap_or(MAX_TEXT_CHARS).min(MAX_TEXT_HARD)),
             Kind::Integer | Kind::Number => {
                 let n = if f.kind == Kind::Integer { v.as_i64().map(|i| i as f64) } else { v.as_f64() };
@@ -1017,7 +1020,10 @@ async fn inline_locals(ctx: &Ctx, v: &mut Value, total: &mut u64) -> PResult<()>
                 let path = ctx.outputs_dir.join(&name);
                 let size = tokio::fs::metadata(&path).await.map_err(|_| ProviderError::Failed("A picked file is gone. Pick it again.".into()))?.len();
                 *total += size;
-                if size > MAX_INLINE_FILE || *total > MAX_INLINE_TOTAL {
+                if size > MAX_INLINE_FILE {
+                    return Err(ProviderError::Failed(format!("A picked file is over {} MB.", MAX_INLINE_FILE >> 20)));
+                }
+                if *total > MAX_INLINE_TOTAL {
                     return Err(ProviderError::Failed(format!("The picked files are over {} MB in all.", MAX_INLINE_TOTAL >> 20)));
                 }
                 let bytes = tokio::fs::read(&path).await.map_err(|_| ProviderError::Failed("A picked file could not be read.".into()))?;
@@ -1078,7 +1084,7 @@ fn http_error((status, msg): (u16, String)) -> ProviderError {
 
 /// Every file in a fal result: objects with a url (fal File), with their content type when given.
 fn result_files(v: &Value, depth: usize, out: &mut Vec<(String, Option<String>)>) {
-    if depth > 8 || out.len() >= MAX_OUTPUT_FILES {
+    if depth > 8 || out.len() >= MAX_RESULT_LINKS {
         return;
     }
     match v {
@@ -1140,19 +1146,26 @@ fn kind_and_ext(url: &str, content_type: Option<&str>) -> Option<(&'static str, 
     Some((kind, ext.to_string()))
 }
 
-/// A result file from a fal host is fetched like any provider file; from anywhere else, only from a public address.
-async fn fetch_result(ctx: &Ctx, url: &str) -> PResult<Vec<u8>> {
-    let host = media::parse_https_url(url).and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default();
-    let fal = FAL_FILE_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")));
-    if fal {
-        Ok(media::fetch(&ctx.http, url, &[]).await?.0)
-    } else {
-        Ok(media::fetch_public(url, media::MAX_DOWNLOAD_BYTES, "result").await?.0)
+/// A result file, from any host, only from a public address: the host is resolved and checked, the connection pinned
+/// to that address, and redirects refused (fal's file hosts answer directly). A model on fal can return any URL.
+async fn fetch_result(url: &str) -> PResult<Vec<u8>> {
+    Ok(media::fetch_public(url, media::MAX_DOWNLOAD_BYTES, RESULT_TIMEOUT, "result").await?.0)
+}
+
+/// A download failure another try will not fix: not https, not a public host, refused redirect, too large, or an
+/// HTTP 4xx other than 408 and 429. Network errors, 5xx and file errors may pass.
+fn lasting(e: &ProviderError) -> bool {
+    let ProviderError::Failed(m) = e else { return true };
+    if ["must be https", "not public", "too large"].iter().any(|s| m.contains(s)) {
+        return true;
     }
+    m.split_once("download HTTP ")
+        .and_then(|(_, code)| code.trim().parse::<u16>().ok())
+        .is_some_and(|c| (300..500).contains(&c) && c != 408 && c != 429)
 }
 
 /// One result file's bytes and how to save them, or None to skip it (not https, not a kept type, bad data: URI).
-async fn result_bytes(ctx: &Ctx, url: &str, content_type: Option<&str>) -> PResult<Option<(Vec<u8>, &'static str, String)>> {
+async fn result_bytes(url: &str, content_type: Option<&str>) -> PResult<Option<(Vec<u8>, &'static str, String)>> {
     if let Some(rest) = url.strip_prefix("data:") {
         let Some((meta, data)) = rest.split_once(',') else { return Ok(None) };
         let Some(mime) = meta.strip_suffix(";base64") else { return Ok(None) };
@@ -1164,10 +1177,11 @@ async fn result_bytes(ctx: &Ctx, url: &str, content_type: Option<&str>) -> PResu
         return Ok(None);
     }
     let Some((kind, ext)) = kind_and_ext(url, content_type) else { return Ok(None) };
-    // One retry: a single dropped connection should not lose a file.
-    let bytes = match fetch_result(ctx, url).await {
+    // One retry: a single dropped connection should not cost a whole poll.
+    let bytes = match fetch_result(url).await {
         Ok(b) => b,
-        Err(_) => fetch_result(ctx, url).await?,
+        Err(e) if lasting(&e) => return Err(e),
+        Err(_) => fetch_result(url).await?,
     };
     Ok(Some((bytes, kind, ext)))
 }
@@ -1223,31 +1237,53 @@ impl Provider for FalRun {
         };
         let mut files = Vec::new();
         result_files(&result, 0, &mut files);
-        // Each file is fetched once more on failure, then skipped: one bad file never loses the others, and nothing
-        // saved here is left without a job (a failed poll saves nothing).
+        // A file that may come with another try fails the whole poll, and the files this poll saved are removed, so
+        // the main file is never dropped silently and nothing is left without a job; the poller tries again. A file
+        // that never will (see `lasting`) is skipped.
         let mut outs: Vec<Output> = Vec::new();
         let mut bytes_kept = 0usize;
-        let mut failed: Option<ProviderError> = None;
+        let mut passing: Option<ProviderError> = None;
+        let mut skipped: Option<ProviderError> = None;
         for (url, ct) in files {
-            match result_bytes(ctx, &url, ct.as_deref()).await {
+            if outs.len() >= MAX_OUTPUT_FILES {
+                break;
+            }
+            match result_bytes(&url, ct.as_deref()).await {
                 Ok(Some((bytes, kind, ext))) => {
                     if bytes_kept + bytes.len() > MAX_RUN_BYTES {
+                        skipped = Some(ProviderError::Failed("the run's files are too large in all".into()));
                         continue;
                     }
-                    bytes_kept += bytes.len();
                     match media::save(ctx, &bytes, &ext, kind).await {
-                        Ok(o) => outs.push(o),
-                        Err(e) => failed = Some(e),
+                        Ok(o) => {
+                            bytes_kept += bytes.len();
+                            outs.push(o);
+                        }
+                        Err(e) => {
+                            passing = Some(e);
+                            break;
+                        }
                     }
                 }
                 Ok(None) => {}
-                Err(e) => failed = Some(e),
+                Err(e) if lasting(&e) => skipped = Some(e),
+                Err(e) => {
+                    passing = Some(e);
+                    break;
+                }
             }
         }
+        if let Some(e) = passing {
+            for o in &outs {
+                if let Some(name) = o.url.strip_prefix("/outputs/").filter(|n| media::valid_output_name(n)) {
+                    let _ = tokio::fs::remove_file(ctx.outputs_dir.join(name)).await;
+                }
+            }
+            return Err(e);
+        }
         if outs.is_empty() {
-            // A download that failed is worth another poll; a result with no keepable file is final.
-            if let Some(e) = failed {
-                return Err(e);
+            if let Some(ProviderError::Failed(why)) = skipped {
+                return Ok(Polled::Failed(format!("fal finished, but its files could not be kept: {why}.")));
             }
             return Ok(Polled::Failed(
                 "fal finished, but returned no picture, video, audio or 3D file (other files, such as model weights, are not kept here).".into(),
@@ -1459,6 +1495,26 @@ mod tests {
         assert_eq!(f.kind, Kind::Text, "a free string beside the enum keeps the field free");
         assert_eq!(f.choices.len(), 2);
         assert_eq!(f.default, Some(json!("Calm_Man")));
+        let seed = compile_field("seed", &json!({"anyOf": [{"type": "string", "enum": ["auto"]}, {"type": "integer"}]}), &root, false);
+        assert_eq!(seed.kind, Kind::Integer);
+        let mut spec = sample_spec("fal-ai/flux/schnell");
+        spec.fields = vec![f, seed];
+        let ok = |k: &str, v: Value| check_input(&spec, &Map::from_iter([(k.to_string(), v)])).is_ok();
+        assert!(ok("seed", json!("auto")), "the enum's own value is accepted in a free number field");
+        assert!(ok("seed", json!(7)));
+        assert!(!ok("seed", json!("other")));
+        assert!(ok("voice", json!("Someone_Else")), "a free text field takes any text");
+    }
+
+    #[test]
+    fn only_passing_download_errors_are_tried_again() {
+        let l = |m: &str| lasting(&ProviderError::Failed(m.into()));
+        for m in ["result URL must be https", "result URL host is not public", "response too large", "result download HTTP 404", "result download HTTP 302"] {
+            assert!(l(m), "{m}");
+        }
+        for m in ["result download HTTP 503", "result download HTTP 429", "result download HTTP 408", "network error: connection reset", "result URL host did not resolve", "file error: no space left"] {
+            assert!(!l(m), "{m}");
+        }
     }
 
     #[tokio::test]
@@ -1482,13 +1538,12 @@ mod tests {
 
     #[tokio::test]
     async fn result_files_skip_what_is_not_kept() {
-        let st = AppState::for_tests("pg_result_bytes");
         let ogg = format!("data:audio/ogg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b"OggS-fake"));
-        let (bytes, kind, ext) = result_bytes(&st.ctx, &ogg, None).await.unwrap().expect("kept");
+        let (bytes, kind, ext) = result_bytes(&ogg, None).await.unwrap().expect("kept");
         assert_eq!((kind, ext.as_str(), bytes.len()), ("audio", "ogg", 9));
-        assert!(result_bytes(&st.ctx, "http://v3.fal.media/a.png", None).await.unwrap().is_none(), "plain http is skipped");
-        assert!(result_bytes(&st.ctx, "data:text/html;base64,PGI+", None).await.unwrap().is_none(), "never a page");
-        assert!(result_bytes(&st.ctx, "https://v3.fal.media/w.safetensors", None).await.unwrap().is_none());
+        assert!(result_bytes("http://v3.fal.media/a.png", None).await.unwrap().is_none(), "plain http is skipped");
+        assert!(result_bytes("data:text/html;base64,PGI+", None).await.unwrap().is_none(), "never a page");
+        assert!(result_bytes("https://v3.fal.media/w.safetensors", None).await.unwrap().is_none());
         assert_eq!(kind_and_ext("https://x.test/a.ply", None), Some(("model", "ply".to_string())));
         assert_eq!(kind_and_ext("https://x.test/a", Some("audio/mp4")), Some(("audio", "m4a".to_string())));
         assert_eq!(kind_and_ext("https://x.test/a", Some("video/webm; codecs=vp9")), Some(("video", "webm".to_string())));

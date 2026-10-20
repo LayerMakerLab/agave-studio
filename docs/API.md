@@ -179,7 +179,8 @@ shown in the gallery like other jobs), so a restart in the middle fails that ste
   The input is checked against the Spec: unknown fields, wrong types, values outside the schema's range or choices,
   and missing required fields are refused with 400 {"error":"unknown_field"|"invalid_value"|"field_required","field":"..."}.
   Nulls are dropped (fal's default applies). Text takes up to the field's maxLength (20,000 characters when the schema
-  gives none), a JSON field up to 64 KB, a file list up to 16 items. The request body is capped at 2 MB (400
+  gives none, never more than 200,000), a JSON field up to 64 KB, a file list up to 16 items. A free text or number
+  field also takes the values of an enum fal lists beside it. The request body is capped at 2 MB (400
   bad_request), so send bigger files through POST /api/uploads. File fields take https URLs, data: URIs, or
   /outputs/<file>; local files in file and JSON fields go to fal inline, up to 20 MB each and 40 MB a run
   (413 {"error":"file_too_large"|"files_too_large","max_mb":n}; 400 file_missing). Other errors: 400 not_runnable (with
@@ -187,9 +188,11 @@ shown in the gallery like other jobs), so a restart in the middle fails that ste
   429 too_many_jobs, and the /api/fal/model errors. The job's model is "fal:<endpoint>", its mode the fal category,
   and its request {"playground":{"id","input"},"name","price"} (kept when 16 KB or less, as for /api/generate).
   Up to 24 files in fal's result are saved under /outputs when they are a picture, video, audio or 3D model (never SVG
-  or HTML); other files, and links that are not https, are skipped. Result files on fal's own hosts are fetched like
-  other provider files; any other host must resolve to a public address. Test mode answers voice and sound models with
-  a short tone.
+  or HTML), up to 512 MB each and 2 GB a run; other files, and links that are not https, are skipped. Every result
+  file is fetched only from a host that resolves to public addresses, pinned to the checked address, with redirects
+  refused. A file that fails for a reason another try will not fix (not public, too large, refused, HTTP 4xx) is
+  skipped; any other failure removes the files that poll saved and the poll is tried again, so a job never ends with
+  its main file silently missing. Test mode answers voice and sound models with a short tone.
 
 ## Test mode
 `AGAVE_FAKE_PROVIDERS=1` at startup (off by default): every model is answered by a local fake (a placeholder picture

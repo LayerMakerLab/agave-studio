@@ -208,12 +208,13 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
 /// Fetches a user-supplied https image. The host must resolve only to public addresses, the
 /// connection is pinned to the checked address (no DNS rebinding), and redirects are refused.
 async fn fetch_user_image(src: &str) -> PResult<(Vec<u8>, Option<String>)> {
-    fetch_public(src, MAX_INPUT_IMAGE_BYTES, "image").await
+    fetch_public(src, MAX_INPUT_IMAGE_BYTES, Duration::from_secs(60), "image").await
 }
 
 /// GET an https URL whose host must resolve only to public addresses; the connection is pinned to the checked
-/// address (no DNS rebinding) and redirects are refused. `what` names the file in errors ("image URL must be https").
-pub async fn fetch_public(src: &str, limit: usize, what: &str) -> PResult<(Vec<u8>, Option<String>)> {
+/// address (no DNS rebinding) and redirects are refused. `timeout` bounds the whole download; `what` names the file
+/// in errors ("image URL must be https").
+pub async fn fetch_public(src: &str, limit: usize, timeout: Duration, what: &str) -> PResult<(Vec<u8>, Option<String>)> {
     let url = parse_https_url(src).ok_or_else(|| ProviderError::Failed(format!("{what} URL must be https")))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let mut builder = reqwest::Client::builder()
@@ -221,7 +222,7 @@ pub async fn fetch_public(src: &str, limit: usize, what: &str) -> PResult<(Vec<u
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60));
+        .timeout(timeout);
     let host = url.host_str().unwrap_or("");
     let bare = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = bare.parse::<IpAddr>() {

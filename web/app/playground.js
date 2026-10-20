@@ -91,7 +91,7 @@
     if (!num(v) || v < 0) return '';
     if (v >= 0.1) return `$${v.toFixed(2)}`;
     if (v === 0) return '$0';
-    if (v < 0.001) return `$${Number(v.toPrecision(2))}`;
+    if (v < 0.001) return `$${v.toLocaleString('en-US', { maximumSignificantDigits: 2, useGrouping: false })}`;
     const digits = v >= 0.01 ? 3 : 4;
     return `$${v.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')}`;
   }
@@ -146,7 +146,8 @@
     let x = String(t || '').trim();
     if (/^[A-Z][a-z]+(?:[A-Z][a-z]+)+$/.test(x)) x = x.replace(/([a-z])([A-Z])/g, '$1 $2');
     x = x.replace(/\s+Urls$/i, 's').replace(/\s+Url$/i, '').replace(/^Num\s+/i, 'Number of ');
-    x = x.toLowerCase().replace(/\b(cfg|fps|hd|lora|id|url|json|3d|sfx)\b/g, (m) => ({ lora: 'LoRA', '3d': '3D' }[m] || m.toUpperCase()));
+    x = x.split(/\s+/).map((w) => (/^[A-Z0-9]{2,}$/.test(w) && /[A-Z]/.test(w) ? w : w.toLowerCase())).join(' ');
+    x = x.replace(/\b(cfg|fps|hd|lora|id|url|json|3d|sfx)\b/g, (m) => ({ lora: 'LoRA', '3d': '3D' }[m] || m.toUpperCase()));
     return x.charAt(0).toUpperCase() + x.slice(1);
   }
 
@@ -334,7 +335,7 @@
     $('#pgMore').hidden = !adv.length;
     $('#pgMoreLabel').textContent = `More settings (${adv.length})`;
     if (!main.children.length) main.append(el('p', { class: 'pg-note' }, ['This model has no main settings. Open More settings, or press Run.']));
-    $('#pgRun').disabled = !S.spec.runnable || S.offline;
+    $('#pgRun').disabled = !S.spec.runnable || S.offline || S.sending;
   }
 
   function helpText(f) {
@@ -384,12 +385,29 @@
     t.style.height = `${Math.min(t.scrollHeight + 2, 420)}px`;
   }
 
+  /** fal's enum beside a free text or number field, offered as suggestions (any other value still goes). */
+  function suggestions(f, id) {
+    const list = (f.choices || []).filter((c) => typeof c === 'string' || typeof c === 'number');
+    return list.length ? el('datalist', { id: `${id}_list` }, list.map((c) => el('option', { value: String(c) }))) : null;
+  }
+
+  /** The control plus its suggestion list, when it has one. */
+  function withList(n, list) {
+    if (!list) return n;
+    const frag = document.createDocumentFragment();
+    frag.append(n, list);
+    return frag;
+  }
+
   function textControl(f, id) {
-    const long = f.kind === 'longtext';
+    const list = suggestions(f, id);
+    const long = f.kind === 'longtext' && !list;
     const v = S.touched.has(f.name) ? S.values[f.name] : '';
     const attrs = { id, 'aria-describedby': `${id}_h ${id}_e`, maxlength: f.max_len || null, spellcheck: long ? 'true' : 'false' };
     if (!S.touched.has(f.name) && has(f.default) && f.default !== '') attrs.placeholder = String(f.default);
-    const n = long ? el('textarea', { ...attrs, rows: f.name === 'prompt' || f.name === 'text' ? 4 : 2 }) : el('input', { ...attrs, type: 'text' });
+    const n = long
+      ? el('textarea', { ...attrs, rows: f.name === 'prompt' || f.name === 'text' ? 4 : 2 })
+      : el('input', { ...attrs, type: 'text', list: list ? list.id : null, autocomplete: list ? 'off' : null });
     n.value = typeof v === 'string' ? v : '';
     n.addEventListener('input', () => {
       setValue(f.name, n.value);
@@ -397,7 +415,7 @@
       if (long) autosize(n);
     });
     if (long) requestAnimationFrame(() => autosize(n));
-    return n;
+    return withList(n, list);
   }
 
   function numberStep(f) {
@@ -411,7 +429,12 @@
   function numberControl(f, id) {
     const wrap = el('div', { class: 'pg-num' });
     const step = numberStep(f);
-    const box = el('input', { id, type: 'number', inputmode: f.kind === 'integer' ? 'numeric' : 'decimal', step, min: f.min, max: f.max, 'aria-describedby': `${id}_h ${id}_e` });
+    const list = suggestions(f, id);
+    // A word among fal's choices ("auto") cannot go in a number box, so such a field takes text.
+    const words = (f.choices || []).filter((c) => typeof c === 'string');
+    const box = words.length
+      ? el('input', { id, type: 'text', inputmode: 'decimal', list: list.id, autocomplete: 'off', 'aria-describedby': `${id}_h ${id}_e` })
+      : el('input', { id, type: 'number', inputmode: f.kind === 'integer' ? 'numeric' : 'decimal', step, min: f.min, max: f.max, list: list ? list.id : null, 'aria-describedby': `${id}_h ${id}_e` });
     const v = current(f);
     if (S.touched.has(f.name)) box.value = String(S.values[f.name]);
     else if (v !== null) box.placeholder = String(v);
@@ -431,16 +454,20 @@
       if (slider && from !== slider) slider.value = String(n);
     };
     box.addEventListener('input', () => {
-      const n = Number(box.value);
-      const out = box.value !== '' && ((num(f.min) && (f.min_strict ? n <= f.min : n < f.min)) || (num(f.max) && (f.max_strict ? n >= f.max : n > f.max)));
+      const raw = box.value.trim();
+      if (words.includes(raw)) { setValue(f.name, raw); markTouched(wrap.closest('.pg-field')); return; }
+      const n = Number(raw);
+      if (raw !== '' && !isFinite(n)) { showFieldError(f.name, words.length ? `Use a number or ${words.map((w) => `"${w}"`).join(' or ')}.` : 'Use a number.'); return; }
+      const out = raw !== '' && ((num(f.min) && (f.min_strict ? n <= f.min : n < f.min)) || (num(f.max) && (f.max_strict ? n >= f.max : n > f.max)));
       if (out) { showFieldError(f.name, rangeText(f)); return; }
-      put(box.value, box);
+      put(raw, box);
     });
     if (slider) {
       slider.addEventListener('input', () => put(slider.value, slider));
       wrap.append(slider);
     }
     wrap.append(box);
+    if (list) wrap.append(list);
     return wrap;
   }
 
@@ -690,9 +717,10 @@
     return true;
   }
 
-  function setTab(tab) {
+  /** `discard` leaves the JSON box behind without applying it (a template replaces everything anyway). */
+  function setTab(tab, discard = false) {
     if (tab === S.tab || !S.spec) return;
-    if (tab === 'form' && !applyJson()) return;
+    if (tab === 'form' && !discard && !applyJson()) return;
     S.tab = tab;
     $('#pgTabForm').setAttribute('aria-selected', String(tab === 'form'));
     $('#pgTabJson').setAttribute('aria-selected', String(tab === 'json'));
@@ -744,6 +772,8 @@
     const r = await call(`/api/fal/price?id=${encodeURIComponent(id)}`);
     if (!S.spec || S.spec.id !== id) return;
     if (r.ok && r.data && r.data.price) { S.price = r.data.price; S.priceState = 'ok'; } else { S.price = null; S.priceState = 'none'; }
+    const note = $('#pgRunNote');
+    if (note.textContent.startsWith("fal's price is still loading")) note.textContent = '';
     renderPrice();
   }
 
@@ -847,7 +877,8 @@
   }
 
   async function run() {
-    if (!S.spec || !S.spec.runnable) return;
+    // Every way to Run (the button, Cmd+Enter, a form re-rendered mid-send) stops here while a run is being sent.
+    if (!S.spec || !S.spec.runnable || S.sending) return;
     if (S.tab === 'json' && !applyJson()) return;
     const input = collect();
     const wrong = S.tab === 'form' && document.querySelector('#pgForm .pg-field.bad');
@@ -873,6 +904,11 @@
       return;
     }
     if (!S.test && !S.confirmed.has(S.spec.id)) {
+      // The price question is asked once per model, so never before fal's price has had its chance to arrive.
+      if (S.priceState === 'loading') {
+        $('#pgRunNote').textContent = "fal's price is still loading. Press Run again in a moment.";
+        return;
+      }
       const box = $('#pgConfirmText');
       box.textContent = '';
       box.append(...confirmText(priceSummary()));
@@ -910,6 +946,7 @@
         // The studio restarted for real while this page thought it was in test mode: from now on runs cost money.
         await loadStatus();
         S.confirmed.clear();
+        renderTemplates();
         loadPrice();
         $('#pgRunNote').textContent = 'The studio is no longer in test mode, so runs now cost money. Check the price, then press Run again.';
         return;
@@ -1109,7 +1146,7 @@
   $('#pgTweak').addEventListener('click', () => {
     const p = S.shown && jobInput(S.shown);
     if (!p) return;
-    if (S.tab === 'json') setTab('form');
+    if (S.tab === 'json') setTab('form', true);
     loadModel(p.id, p.input || {}).then(() => {
       $('#pgRunNote').textContent = 'Loaded the settings of that run. Change anything, then Run.';
       const first = document.querySelector('#pgFields textarea, #pgFields input, #pgFields button, #pgFields select');
@@ -1133,7 +1170,8 @@
   const shownTemplates = () => S.templates.filter((t) => !S.test || (S.sampleIds && S.sampleIds.has(t.model)));
 
   function renderTemplates() {
-    const box = $('#pgTemplates');
+    // The grid sits in the empty canvas, which is out of the page while a result is shown.
+    const box = EMPTY_CANVAS.querySelector('#pgTemplates');
     box.textContent = '';
     for (const t of shownTemplates()) {
       const b = el('button', { type: 'button', class: 'pg-tpl' }, [
@@ -1148,7 +1186,7 @@
 
   /** Loads the template's model with its words, and fal's example for any file it needs, so Run works at once. */
   async function useTemplate(t) {
-    if (S.tab === 'json') setTab('form');
+    if (S.tab === 'json') setTab('form', true);
     await loadModel(t.model);
     if (!S.spec || S.spec.id !== t.model) return;
     const words = typeof t.prompt === 'string' ? ['prompt', t.prompt] : typeof t.text === 'string' ? ['text', t.text] : null;
@@ -1157,8 +1195,9 @@
       S.touched.add(words[0]);
       S.exampled.delete(words[0]);
     }
+    // Only files the model needs: an optional one (an end frame, a mask) would change the result and the price.
     for (const f of S.spec.fields) {
-      if ((f.kind === 'media' || f.kind === 'medialist') && !S.touched.has(f.name) && has(f.example)) {
+      if (f.required && (f.kind === 'media' || f.kind === 'medialist') && !S.touched.has(f.name) && has(f.example)) {
         S.values[f.name] = f.example;
         S.touched.add(f.name);
         S.exampled.add(f.name);
@@ -1166,6 +1205,7 @@
     }
     renderForm();
     renderPrice();
+    if (S.tab === 'json') showJson();
     $('#pgRunNote').textContent = `${t.title}: ready to run. Change the words or replace fal's example with your own file.`;
     const first = document.querySelector('#pgFields textarea, #pgFields .pg-drop');
     if (first) first.focus();
