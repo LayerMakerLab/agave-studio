@@ -3,9 +3,10 @@
 ## Unreleased
 
 - Playground Compare: one prompt (and one picture, for models that need one) to up to four fal models side by side.
-  Each column shows the model's price before Run all and its result, time and price after; one price question covers
-  every model not asked about yet; Open takes a column to its own page with its settings. Jobs now say when they ended
-  (`finished_at`).
+  Each column shows the model's price and what it sends before Run all, and its result, time and price after; when a
+  model has not been asked about yet, one price question lists every model and the total; Open takes a column to its
+  own page with its settings. Run waits for files still uploading and adds a link typed but not added. Jobs now say
+  when they ended (`finished_at`).
 - Playground: fal's image, video, audio and 3D models, each with its own controls from fal's schema. Search and filter
   fal's catalog, fill the form (or edit the JSON), see fal's list price and average before Run, and keep every run with
   Tweak, Get code and Download. Opens with fal's example, so Run works at once. Test mode offers seven real models and

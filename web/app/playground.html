@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="/app/playground.css">
 </head>
 <body>
-<a class="pg-skip" href="#pgModelBtn">Skip to the model and its settings</a>
+<a class="pg-skip" id="pgSkip" href="#pgModelBtn">Skip to the model and its settings</a>
 <p id="pgLive" class="sr" aria-live="polite"></p>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -63,7 +63,7 @@
     <header class="topbar">
       <div class="titles">
         <h1>Playground</h1>
-        <p class="sub">Any of fal's models, with its own controls. Pick one, fill in its form and press Run. The price shows before you press.</p>
+        <p class="sub" id="pgSub">Any of fal's models, with its own controls. Pick one, fill in its form and press Run. The price shows before you press.</p>
       </div>
       <div class="pg-seg pg-modes" role="tablist" aria-label="Playground">
         <button type="button" role="tab" id="pgModeOne" aria-selected="true" aria-controls="pgOne">One model</button>
@@ -167,7 +167,7 @@
           <div class="pg-field">
             <div class="pg-field-head"><label for="pgCmpPrompt">Prompt</label><span class="pg-tag">for every model</span></div>
             <textarea id="pgCmpPrompt" rows="3" spellcheck="true" maxlength="20000" aria-describedby="pgCmpPrompt_h"></textarea>
-            <p class="pg-help" id="pgCmpPrompt_h">Each model gets these words. Left empty, each uses fal's own example. Every other setting is the model's default; open a column to change it.</p>
+            <p class="pg-help" id="pgCmpPrompt_h">Each model gets these words. Left empty, each uses fal's own example. Every other setting is the model's default; to change one, press Open on that column and run it alone.</p>
           </div>
           <div class="pg-field" id="pgCmpImageRow" data-name="__cmp_image" hidden>
             <div class="pg-field-head"><span class="pg-label" id="pgCmpImage_l">Picture</span><span class="pg-tag">for models that need one</span></div>
@@ -222,7 +222,7 @@
   <div id="pgConfirmText" class="pg-confirm-text"></div>
   <div class="pg-sheet-foot">
     <button type="button" class="ghost" data-close>Not now</button>
-    <button type="button" class="pill sm" id="pgConfirmRun"><span class="dot" aria-hidden="true"></span>Run it</button>
+    <button type="button" class="pill sm" id="pgConfirmRun"><span class="dot" aria-hidden="true"></span><span id="pgConfirmRunLabel">Run it</span></button>
   </div>
 </dialog>
 
