@@ -6,8 +6,9 @@
   and says how to install the client; each run in Your runs shows its words, and opening one brings its result into
   view (and focus, from the keyboard); Compare's picker marks models already in it; fal's help reads plainer ("The
   image to be used…", option labels for a choice's default, code shown as code); a template's note says what there is
-  to change (words, fal's example file, your photo), and words typed over the old prompt while it loads are kept; a
-  price per 1000 characters says "up to", in Compare too, since fal states no rule for shorter texts; a picture that
+  to change (words, fal's example file, your photo), and words typed into an empty prompt or over all of it while it
+  loads are kept; a price per 1000 characters says "up to" (when no option can change the rate), in Compare too,
+  since fal states no rule for shorter texts; a picture that
   can't be shown says "No preview"; the kinds of model wrap on wide screens and scroll with a fade on a phone; one run
   in Compare is announced as "The run is done".
 - Playground Compare: one prompt (and one picture, for models that need one) to up to four fal models side by side.

@@ -1304,22 +1304,36 @@
   /** Loads the template's model with its words, and fal's example for any file it needs, so Run works at once. */
   async function useTemplate(t) {
     if (S.tab === 'json') setTab('form', true);
-    // Words typed while the model loads are the person's: they win over the template's, but only when they replaced
-    // the old words (a keystroke in the old model's example is not a new prompt).
-    const box = document.querySelector('#pgFields [data-name="prompt"] textarea, #pgFields [data-name="text"] textarea');
-    const before = box ? box.value.trim() : '';
+    // Words typed while the model loads are the person's and win over the template's, but only when they replaced
+    // the old words: typed into an empty field or over all of it (select all, then type or paste). A keystroke in the
+    // old model's example is not a new prompt.
     let typed = null;
-    const onType = (e) => { if (e.target.closest && e.target.closest('[data-name="prompt"], [data-name="text"]')) typed = e.target.value; };
-    $('#pgFields').addEventListener('input', onType);
-    try { await loadModel(t.model); } finally { $('#pgFields').removeEventListener('input', onType); }
+    let replaced = false;
+    const words = (e) => e.target.closest && e.target.closest('[data-name="prompt"], [data-name="text"]');
+    const onBefore = (e) => {
+      if (!words(e)) return;
+      const f = e.target;
+      if (f.value === '' || (f.selectionStart === 0 && f.selectionEnd === f.value.length)) replaced = true;
+    };
+    const onType = (e) => {
+      if (!words(e)) return;
+      typed = e.target.value;
+      if (typed === '') replaced = true;
+    };
+    const fields = $('#pgFields');
+    fields.addEventListener('beforeinput', onBefore);
+    fields.addEventListener('input', onType);
+    try { await loadModel(t.model); } finally {
+      fields.removeEventListener('beforeinput', onBefore);
+      fields.removeEventListener('input', onType);
+    }
     if (!S.spec || S.spec.id !== t.model) return;
-    const edited = before && typeof typed === 'string' && (typed.includes(before.slice(0, 12)) || typed.includes(before.slice(-12)));
-    const own = typeof typed === 'string' && typed.trim() && !edited ? typed : null;
-    const words = typeof t.prompt === 'string' ? ['prompt', own || t.prompt] : typeof t.text === 'string' ? ['text', own || t.text] : null;
-    if (words && S.spec.fields.some((f) => f.name === words[0])) {
-      S.values[words[0]] = words[1];
-      S.touched.add(words[0]);
-      S.exampled.delete(words[0]);
+    const own = replaced && typeof typed === 'string' && typed.trim() ? typed : null;
+    const wordsField = typeof t.prompt === 'string' ? ['prompt', own || t.prompt] : typeof t.text === 'string' ? ['text', own || t.text] : null;
+    if (wordsField && S.spec.fields.some((f) => f.name === wordsField[0])) {
+      S.values[wordsField[0]] = wordsField[1];
+      S.touched.add(wordsField[0]);
+      S.exampled.delete(wordsField[0]);
     }
     // Only files the model needs: an optional one (an end frame, a mask) would change the result and the price.
     for (const f of S.spec.fields) {
