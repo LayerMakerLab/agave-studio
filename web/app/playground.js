@@ -786,6 +786,8 @@
       const next = end >= 0 ? tabs[end] : tabs[(at + d + tabs.length) % tabs.length];
       next.focus();
       next.click();
+      const sel = tabs.find((t) => t.getAttribute('aria-selected') === 'true');
+      if (sel && sel !== next) sel.focus();
     });
   }
   arrowTabs($('.pg-toolbar .pg-seg'));
@@ -1425,7 +1427,7 @@
       more.hidden = true;
       return;
     }
-    if (r.data.categories && !S.cats.length) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); }
+    if (r.data.categories && !S.cats.length) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); renderCompare(); }
     const models = r.data.models || [];
     models.forEach((m) => list.append(modelCard(m)));
     S.cursor = r.data.next_cursor || null;
@@ -1479,9 +1481,9 @@
   const C = {
     ids: [], specs: new Map(), prices: new Map(), pstate: new Map(), pseq: new Map(), errs: new Map(),
     jobs: new Map(), // model id -> the job of its last Run all
-    notes: new Map(), // model id -> why its run did not start
+    notes: new Map(), // model id -> why its run did not start: text, or {head, text} when it may have started
     sent: new Map(), // model id -> its price at the moment it was sent
-    batch: [], // the jobs of the last Run all, for one summary when they all end
+    batch: [], told: false, // the jobs of the last Run all, for one summary when they all end
     image: null, sending: false, tick: null, cols: new Map(), started: false, addWrap: null,
   };
   S.mode = 'one';
@@ -1620,6 +1622,8 @@
     const target = next ? next.node.querySelector('.pg-cmp-open') || next.node : $('#pgCmpCols .pg-cmp-add');
     (target || $('#pgCmpPrompt')).focus();
     announce(`Removed ${name}. ${C.ids.length} of ${MAX_CMP} models.`);
+    // If it was the last one still running, the others' summary is due now.
+    if (C.batch.length && !C.told) setTimeout(() => cmpFinished(null), 1200);
   }
 
   /** The first time Compare opens: the models from last time, else the one on screen. */
@@ -1736,7 +1740,9 @@
     } else if (job) {
       body.append(el('p', { class: 'pg-cmp-msg' }, ['Done, but no file came back.']));
     } else if (C.notes.has(id)) {
-      body.append(el('div', { class: 'pg-cmp-msg' }, [el('p', { class: 'eyebrow err' }, ['Not sent']), el('p', {}, [C.notes.get(id)])]));
+      const note = C.notes.get(id);
+      const head = typeof note === 'object' ? note.head : 'Not sent';
+      body.append(el('div', { class: 'pg-cmp-msg' }, [el('p', { class: 'eyebrow err' }, [head]), el('p', {}, [typeof note === 'object' ? note.text : note])]));
     } else {
       const says = [];
       let state = 'Ready';
@@ -1857,7 +1863,12 @@
   function cmpFinished(job) {
     const jobs = C.batch.map((jid) => S.jobs.find((j) => j.id === jid)).filter(Boolean);
     const ended = jobs.filter((j) => !isActive(j));
-    if (ended.length < C.batch.length) { announce(`${jobName(job)} ${job.status === 'done' ? 'is done' : 'failed'}. ${ended.length} of ${C.batch.length} finished.`); return; }
+    if (ended.length < C.batch.length) {
+      if (job) announce(`${jobName(job)} ${job.status === 'done' ? 'is done' : 'failed'}. ${ended.length} of ${C.batch.length} finished.`);
+      return;
+    }
+    if (C.told || !C.batch.length) return;
+    C.told = true;
     const failed = ended.filter((j) => j.status === 'failed').length;
     announce(`All ${C.batch.length} finished: ${ended.length - failed} done${failed ? `, ${failed} failed` : ''}.`);
   }
@@ -1881,6 +1892,11 @@
     // A picture still on its way, or a link typed but not added, would leave fal's example picture in its place.
     if (S.uploads > 0) { cmpNote('The picture is still uploading. Press Run all when it shows.'); return; }
     if (!$('#pgCmpImageRow').hidden && commitLinks($('#pgCmpImageRow'))) { cmpNote('Fix the picture link first, or clear it.'); return; }
+    if (!$('#pgCmpImageRow').hidden && !C.image && $('#pgCmpImage_e').textContent) {
+      $('#pgCmpImage_e').textContent = '';
+      cmpNote("The picture did not come in. Add it again, or press Run all again to use fal's example picture.");
+      return;
+    }
     if (matchMedia('(pointer: coarse)').matches && document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const specs = C.ids.map((id) => C.specs.get(id));
     if (C.ids.some((id) => C.errs.has(id))) { cmpNote('A model here could not be loaded. Remove it first.'); return; }
@@ -1923,6 +1939,7 @@
     // Every column starts fresh, so an old result never reads as one for the new prompt.
     for (const id of C.ids) for (const m of [C.notes, C.jobs, C.sent]) m.delete(id);
     C.batch = [];
+    C.told = false;
     cmpSave();
     renderCompare();
     try {
@@ -1937,7 +1954,7 @@
           if (r.status === 0) {
             // The engine may have taken this one before the connection dropped: never call it "not sent".
             stop = 'The engine is not answering. Is Agave Studio running?';
-            C.notes.set(id, 'The engine did not answer. Check Your runs on the One model page before running it again.');
+            C.notes.set(id, { head: 'No answer', text: 'It may have started. Check Your runs on the One model page before running it again.' });
             i += 1;
           } else if (code === 'not_test_mode') {
             // The studio restarted for real while this page thought it was in test mode: from now on runs cost money.
@@ -1963,13 +1980,13 @@
           continue;
         }
         const job = r.data && r.data.job;
-        if (!job || typeof job.id !== 'string') { C.notes.set(id, 'The engine answered without a run. Check Your runs on the One model page before running it again.'); continue; }
+        if (!job || typeof job.id !== 'string') { C.notes.set(id, { head: 'No answer', text: 'The engine answered without a run; it may have started. Check Your runs on the One model page before running it again.' }); continue; }
         C.jobs.set(id, job.id);
         C.batch.push(job.id);
-        cmpSave();
         const pr = cmpPriceOf(spec, inputs[i]);
         if (S.test) C.sent.set(id, 'test, free');
         else if (pr.total !== null) C.sent.set(id, `${pr.about ? 'about ' : ''}${money(pr.total)}`);
+        cmpSave();
         upsertJob(job);
         follow(job.id);
         renderCompare();
@@ -2070,7 +2087,7 @@
     await loadStatus();
     // Category names for the model header come with the first catalog page.
     call('/api/fal/models').then((r) => {
-      if (r.ok && r.data && r.data.categories) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); }
+      if (r.ok && r.data && r.data.categories) { S.cats = r.data.categories; renderCats(); if (S.spec) renderModelHead(); renderCompare(); }
       // Test mode lists only the seven samples, so templates for other models are hidden there.
       if (r.ok && r.data && r.data.test) { S.sampleIds = new Set((r.data.models || []).map((m) => m.id)); renderTemplates(); }
     });
