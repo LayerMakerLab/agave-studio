@@ -586,6 +586,9 @@
 
   // ---------- jobs ----------
 
+  // A failed job can be sent again only while its model is still in the studio (models.toml can drop one).
+  const canRunAgain = (j) => j.status === 'failed' && !!j.request && !state.retried.has(j.id)
+    && state.models.some((m) => m.id === j.request.model);
   const sigOf = (j) => [
     j.status,
     j.error || '',
@@ -695,7 +698,7 @@
       acts.push(btn('Continue', 'Start the next clip from the last frame', (b) => continueFrom(first.url, b)));
       acts.push(btn('Add to edit', 'Add this clip to the Edit timeline', () => addToEdit(first.url, 'video')));
     }
-    if (job.status === 'failed' && job.request && !state.retried.has(job.id)) {
+    if (canRunAgain(job)) {
       const price = requestsPrice([job.request]);
       acts.push(btn(`Run again · ${price}`, `Send the same request again, on your own key (${priceNote(price)})`, (b) => runAgain(job, b)));
     }
@@ -728,7 +731,7 @@
       }
     }
     const active = jobs.filter(isActive).length;
-    const again = jobs.filter((j) => j.status === 'failed' && j.request && !state.retried.has(j.id));
+    const again = jobs.filter(canRunAgain);
     els.retryAll.hidden = !again.length;
     if (again.length) {
       const price = requestsPrice(again.map((j) => j.request));
@@ -1045,7 +1048,7 @@
   }
 
   async function runFailedAgain() {
-    const failed = state.jobs.filter((j) => j.status === 'failed' && j.request && !state.retried.has(j.id));
+    const failed = state.jobs.filter(canRunAgain);
     els.retryAll.disabled = true;
     let n = 0;
     for (const j of failed) {

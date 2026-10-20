@@ -1162,7 +1162,7 @@ mod tests {
             (r#"{"model":"fal/flux-schnell","mode":"t2i","prompt":"a","camera":"no_move"}"#, "unknown_camera"),
             (r#"{"model":"fal/flux-schnell","mode":"t2i","prompt":"a","style":"no_look"}"#, "unknown_style"),
             (r#"{"model":"fal/flux-schnell","mode":"t2i","prompt":"a","aspect":"4:3"}"#, "unsupported_aspect"),
-            (r#"{"model":"fal/veo-3.1-i2v","mode":"i2v","prompt":"a"}"#, "image_url_required"),
+            (r#"{"model":"fal/kling-2.5-turbo-i2v","mode":"i2v","prompt":"a"}"#, "image_url_required"),
             (r#"{"model":"elevenlabs/multilingual-v2","mode":"tts","prompt":"hi"}"#, "voice_id_required"),
         ];
         for (body, code) in cases {
@@ -1432,7 +1432,7 @@ mod tests {
         let app = router(AppState::for_tests("api_image_url"));
         for url in ["http://169.254.169.254/latest", "file:///etc/passwd", "ftp://x.test/a.png",
                     "/outputs/../config/keys.env", "data:image/png,notbase64", "https://user:pw@x.test/a.png"] {
-            let body = json!({"model": "fal/veo-3.1-i2v", "mode": "i2v", "prompt": "a", "image_url": url}).to_string();
+            let body = json!({"model": "fal/kling-2.5-turbo-i2v", "mode": "i2v", "prompt": "a", "image_url": url}).to_string();
             let resp = app.clone().oneshot(post_json("/api/generate", &body)).await.expect("response");
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{url}");
             assert_eq!(body_json(resp).await["error"], "invalid_image_url", "{url}");

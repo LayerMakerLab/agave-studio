@@ -338,6 +338,7 @@ params = { aspect = ["16:9", "9:16", "1:1"], duration = [], resolution = [] }
 
 # Veo on the Gemini API: Google shuts the veo-3.1 preview ids down on 2026-10-22 (deprecations page, checked
 # 2026-10-20) and points to gemini-omni-1.1-flash, which this gateway has no adapter for yet. Veo 3.1 runs via fal above.
+# A gemini video entry added here would still go to the old Veo adapter (predictLongRunning), not be refused.
 
 [[model]]
 id = "gemini/nano-banana-2.1"
