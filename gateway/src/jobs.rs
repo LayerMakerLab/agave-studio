@@ -277,14 +277,16 @@ impl JobStore {
                     .or_else(|| crate::playground::adapter_for_job(&a.job.model));
                 let too_old = age(&a.job) > MAX_JOB_AGE;
                 let started = now.checked_sub(age(&a.job)).unwrap_or(now);
-                let resumable = adapter.is_some() && a.handle.is_some() && !too_old;
+                // A job with a handle was taken by its provider: if it can't be polled again, its line is still written.
+                let sent = a.handle.is_some();
+                let resumable = adapter.is_some() && sent && !too_old;
                 let (Some(adapter), Some(handle), true) = (adapter, a.handle, resumable) else {
                     let mut job = a.job;
                     job.status = "failed".into();
                     job.finished_at = Some(now_unix());
                     job.error = Some(if too_old { "timed out".into() } else { "The studio closed before this job finished. Run it again.".into() });
                     let adapter: Arc<dyn Provider> = Arc::new(crate::providers::Stopped);
-                    m.insert(job.id.clone(), Entry { job, handle: None, adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false, sent: false });
+                    m.insert(job.id.clone(), Entry { job, handle: None, adapter, key_env: a.key_env, started, last_poll: None, failures: 0, saved: false, sent });
                     continue;
                 };
                 let mut job = a.job;
@@ -700,6 +702,31 @@ mod tests {
         let due = again.due(&HashSet::new());
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].handle.status_url, "https://queue.fal.run/x/status");
+    }
+
+    #[test]
+    fn a_restored_job_that_cannot_be_polled_again_still_adds_its_line() {
+        let dir = crate::fsutil::test_dir("jobs_restore_spend");
+        let path = dir.join("jobs.json");
+        let store = JobStore::load(path.clone()).unwrap();
+        let paid = |id: &str, model: &str| {
+            let mut j = job(id);
+            j.model = model.into();
+            j.created_at = now_unix();
+            j.cost = Some(Cost { unit_price: Some(0.112), unit: Some("second".into()), ..Default::default() });
+            j
+        };
+        assert!(store.insert(paid("gone", "fal/no-longer-listed"), Arc::new(Never), "FAL_KEY".into()));
+        assert!(store.insert(paid("unsent", "fal/kling-3-pro-t2v"), Arc::new(Never), "FAL_KEY".into()));
+        store.set_handle("gone", Handle { request_id: "r1".into(), status_url: "https://queue.fal.run/x/status".into(), result_url: None });
+        let again = JobStore::load(path.clone()).unwrap();
+        again.restore(&crate::models::Registry::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml")).unwrap());
+        assert_eq!(again.get("gone").unwrap().status, "failed");
+        assert_eq!(again.get("unsent").unwrap().status, "failed");
+        // fal had the job with a handle (it may have run and charged it); the one never sent cost nothing.
+        let lines: Vec<SpendLine> =
+            std::fs::read_to_string(spend_path(&path)).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines.iter().map(|l| (l.job.as_str(), l.status.as_str())).collect::<Vec<_>>(), [("gone", "failed")]);
     }
 
     #[test]

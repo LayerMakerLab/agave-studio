@@ -33,16 +33,19 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Appends `line` and a newline to `path`, owner-only (0600) in an owner-only folder. One `write` call per line
 /// (O_APPEND), so lines from one process never interleave. Like `write_private`, it never writes through a planted
-/// symlink (O_NOFOLLOW) or into anything but a regular file, and a file made earlier with wider permissions is
-/// tightened before it is written to.
+/// symlink (O_NOFOLLOW), into a hard link to another file (more than one link), or into anything but a regular file;
+/// a FIFO fails at once (O_NONBLOCK) instead of blocking. A file made earlier with wider permissions is tightened
+/// before it is written to.
 pub fn append_private_line(path: &Path, line: &str) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
     if let Some(dir) = path.parent() {
         ensure_private_dir(dir)?;
     }
-    let mut file = OpenOptions::new().append(true).create(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path)?;
+    let mut file =
+        OpenOptions::new().append(true).create(true).mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
     let meta = file.metadata()?;
-    if !meta.is_file() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file"));
+    if !meta.is_file() || meta.nlink() != 1 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file of its own"));
     }
     if meta.permissions().mode() & 0o777 != 0o600 {
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
@@ -118,6 +121,18 @@ mod tests {
         append_private_line(&log, "{\"a\":2}").unwrap();
         assert_eq!(fs::read_to_string(&log).unwrap(), "{\"a\":1}\n{\"a\":2}\n");
         assert_eq!(fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
+        // A hard link to another file is refused, and that file keeps its mode and its bytes.
+        fs::remove_file(&log).unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::hard_link(&outside, &log).unwrap();
+        assert!(append_private_line(&log, "{}").is_err(), "a hard link at the log is refused");
+        assert_eq!(fs::read(&outside).unwrap(), b"keep\n");
+        assert_eq!(fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o755);
+        fs::remove_file(&log).unwrap();
+        // A FIFO fails at once rather than blocking the caller.
+        let path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(log.as_os_str())).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        assert!(append_private_line(&log, "{}").is_err(), "a FIFO at the log is refused");
     }
 
     #[test]
