@@ -100,8 +100,8 @@ These need macOS 14 or later and Xcode's Swift tools.
 - Captions and transcripts run locally.
 - No analytics, no telemetry, no account. The studio's fonts ship with it; the homepage
   (`web/index.html`, not the studio) loads its headline font from Google Fonts. The studio's page policy lets it call
-  only itself, so the 3D viewer cannot fetch Draco or KTX2 decoders: compressed models do not display (Meshy's do not
-  need them; `web/vendor/README.md`).
+  only itself, so the 3D viewer cannot fetch Draco or KTX2 decoders: a compressed model does not display
+  (`web/vendor/README.md`).
 - The `data/` folder (outputs, job history) is owner-only on disk. While the gateway runs, any program on this
   computer can call it on 127.0.0.1; see [SECURITY.md](SECURITY.md).
 

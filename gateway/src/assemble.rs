@@ -335,8 +335,10 @@ async fn keyframe_work(ctx: &Ctx) -> std::io::Result<PathBuf> {
     let work = ctx.outputs_dir.join(format!(".keyframe-{}", media::random_hex(8)));
     let mut b = std::fs::DirBuilder::new();
     b.mode(0o700);
-    let path = work.clone();
-    tokio::task::spawn_blocking(move || b.create(&path)).await.map_err(std::io::Error::other)??;
+    let (path, outputs) = (work.clone(), ctx.outputs_dir.clone());
+    tokio::task::spawn_blocking(move || crate::fsutil::ensure_private_dir(&outputs).and_then(|_| b.create(&path)))
+        .await
+        .map_err(std::io::Error::other)??;
     Ok(work)
 }
 
