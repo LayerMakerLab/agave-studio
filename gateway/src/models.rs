@@ -125,8 +125,8 @@ impl Registry {
             if !ids.insert(m.id.as_str()) {
                 return Err(format!("duplicate model id {}", m.id));
             }
-            if !SLOTS.iter().any(|s| s.env == m.key) {
-                return Err(format!("{}: key {} is not a known slot", m.id, m.key));
+            if !SLOTS.iter().any(|s| s.env == m.key) || crate::keys::reads_only(&m.key) {
+                return Err(format!("{}: key {} is not a known slot for running models", m.id, m.key));
             }
             if !matches!(m.modality.as_str(), "video" | "image" | "audio" | "3d") {
                 return Err(format!("{}: bad modality {}", m.id, m.modality));

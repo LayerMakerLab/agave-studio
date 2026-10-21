@@ -23,7 +23,9 @@ your outputs and job history is owner-only (0700). Any program running as your u
 gateway runs, any program on this computer, under any account, can read from it on 127.0.0.1 (there is no sign-in).
 The launch cookie stops programs that only send requests to the API. It is not a sign-in: a program that loads a page
 the way a browser does, or drives a browser, gets it too, and browsers send it to every server on 127.0.0.1, whatever
-the port. Use Agave on a computer whose accounts you trust.
+the port. With `FAL_BILLING_KEY` set, the same goes for your fal account's spending: the Spending panel's "Check fal
+now" shows the account's last 30 days by endpoint, including use outside the studio. Use Agave on a computer whose
+accounts you trust.
 
 Use a current ffmpeg (6.0 or newer). The editor passes your own clips and provider files to ffmpeg, and older
 releases had demuxer bugs with crafted media.

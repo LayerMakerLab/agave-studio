@@ -24,7 +24,14 @@ pub const SLOTS: &[Slot] = &[
     Slot { env: "BFL_API_KEY", provider: "Black Forest Labs", docs: "https://docs.bfl.ai/quick_start/generating_images" },
     Slot { env: "ELEVENLABS_API_KEY", provider: "ElevenLabs", docs: "https://elevenlabs.io/docs/api-reference/text-to-speech/convert" },
     Slot { env: "MESHY_API_KEY", provider: "Meshy (3D)", docs: "https://docs.meshy.ai/en/api/image-to-3d" },
+    // Read-only: what fal charged for each run. A key on fal's BILLING preset can't run models.
+    Slot { env: "FAL_BILLING_KEY", provider: "fal.ai billing (read-only)", docs: "https://fal.ai/docs/platform-apis/v1/models/billing-events" },
 ];
+
+/// Slots that run nothing: a key here never counts as "a provider key is set".
+pub fn reads_only(env: &str) -> bool {
+    env == "FAL_BILLING_KEY"
+}
 
 pub fn slot(env: &str) -> Option<&'static Slot> {
     SLOTS.iter().find(|s| s.env == env)

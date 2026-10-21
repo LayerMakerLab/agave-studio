@@ -2,6 +2,7 @@
 
 mod api;
 mod assemble;
+mod billing;
 mod fsutil;
 mod jobs;
 mod keys;
@@ -88,6 +89,7 @@ async fn main() {
     state.jobs.restore(&state.registry);
     tokio::spawn(jobs::run_poller(state.clone()));
     tokio::spawn(pipelines::run_ticker(state.clone()));
+    tokio::spawn(billing::run_reconciler(state.clone()));
     fsutil::remove_leftovers(&state.ctx.outputs_dir);
     if let Some(data) = state.paths.jobs_file.parent() {
         fsutil::remove_leftovers(data);

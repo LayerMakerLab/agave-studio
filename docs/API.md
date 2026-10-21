@@ -22,7 +22,9 @@ a browser gets the cookie like any page. GETs need no cookie.
            "price":{"per":"second","usd":0.168,"by_resolution":{},"by_audio":{"on":0.168,"off":0.112}}|null}
   The first value of each params list is the model's default.
 - GET  /api/presets -> {"camera":[{"id":"dolly_in","name":"Dolly in","group":"push","keyframe":{"kind":"crop"}}], "styles":[{"id":"film_35","name":"35mm film"}]}
-- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://..."}]}
+- GET  /api/keys -> {"keys":[{"env":"FAL_KEY","provider":"fal.ai","set":true,"docs":"https://...","reads_only":false}]}
+  `reads_only`: a key that only reads an account (FAL_BILLING_KEY), never runs a model, so it doesn't count as a
+  provider key for the "add a key" hint.
 - POST /api/keys  {"env":"FAL_KEY","value":"..."} -> {"ok":true}   (localhost only; writes config/keys.env; env must be a known slot)
 - GET  /api/voices -> {"voices":[{"id":"21m00Tcm4TlvDq8ikWAM","name":"Rachel","category":"premade"}]}
   The voices on the user's ElevenLabs account (needs ELEVENLABS_API_KEY; 412 key_missing without it). Text to speech
@@ -42,6 +44,8 @@ a browser gets the cookie like any page. GETs need no cookie.
   optional `"estimate":{"usd":0.56,"kind":"about","how":"5 s"}`; one the page could not have shown (the wrong shape,
   negative, over $1000, another kind) is left out, never refused, and `how` keeps only plain words. Pipeline steps carry
   the price their page shows.
+  A fal job also keeps `request_id` (fal's id for the request), and once fal's billing reports it, `charged_usd` and
+  `charged_nano` (what fal charged, in dollars and in fal's exact nano dollars). See "What fal charged".
 
 ## Spend log
 `data/spend.jsonl` (test mode: `data/fake-providers/spend.jsonl`, every line `"test":true`): one line per job a
@@ -57,6 +61,32 @@ a symlink, into a hard link to another file, or into a FIFO. The amounts are est
 provider's own bill is what was charged (a failed job may or may not have been). A keyframed camera move pays for its
 picture edit before the video is sent: if the video is then refused, that edit is not in the log. A crash between a
 job's line and data/jobs.json can repeat its line after a restart, so a reader keeps the last line per `job`.
+
+## What fal charged
+With `FAL_BILLING_KEY` set (a fal key made with the BILLING preset: it reads usage and billing and cannot run
+models), the studio looks up what fal charged for its finished fal jobs. fal reports a request some minutes after it
+ends, so jobs that ended in the last 7 days without a charge (failed ones: the last day, since fal rarely bills them)
+are looked up again: every 10 minutes while any wait, and when the Spending panel asks. Newest first, 50 request ids
+per lookup (fal's limit), at most 500 jobs at once, every page of fal's answer read (a lookup with more than 10 pages
+records nothing; the lookups after it still run, unless fal is busy or refused the key). Each charge goes on the job's `cost` and adds a fresh spend line for the job with the charge next to
+the estimate (the last line per `job` is the one to keep). No key, no lookups; test mode never asks fal. A run fal
+hasn't billed within the 7 days keeps its estimate only. A charge is recorded once: billing rows fal adds for the
+same request later aren't. Only the request that made the job's result is looked up, so a keyframed camera move's
+picture edit (its own request, inside the page's estimate) is not in the charge.
+
+- GET  /api/spending -> {"billing_key":true,"test":false,"week":[{"model":"fal/kling","name":null,"runs":3,
+                         "estimate_usd":1.68,"unestimated":0,"charged_usd":1.12,"billable":3,"uncharged":1}]}
+  The last 7 days of the studio's own paid runs by model, from data/jobs.json (no call to fal): done runs, and failed
+  runs fal charged for. `unestimated`: runs with no estimate; `billable`: runs fal can bill (fal jobs that kept fal's
+  request id; not other providers' runs or runs from before this); `uncharged`: billable runs fal hasn't billed yet.
+  `name`: a Playground model's own name. Most charged first.
+- POST /api/spending/refresh -> {"ok":true,"found":2,"error":null,"fal":{"total_usd":4.12,"by_endpoint":[{"endpoint":
+                                 "fal-ai/kling-video/...","usd":3.36}]}}
+  Looks up waiting charges now (`found`: how many jobs got theirs, also when a later lookup failed; `ok:false` with
+  `error` "fal_busy", "key_refused" (fal refused FAL_BILLING_KEY) or "fal_billing_unavailable" when fal couldn't be
+  asked), then reads fal's own total for the last 30 days by endpoint
+  (top 20). That total is the whole fal account, not only this studio; `fal` is null when fal doesn't answer. Without
+  the key, or in test mode: {"ok":true,"found":0,"fal":null}. Needs the page's launch cookie like every change.
 
 ## Building blocks
 - POST /api/uploads {"data":"data:<any>;base64,..."} -> 201 {"url":"/outputs/<hex>.<ext>","kind":"image"|"video"|"audio"}

@@ -128,6 +128,11 @@
     settings: $('#settings'),
     scrim: $('#scrim'),
     keyList: $('#keyList'),
+    spendIntro: $('#spendIntro'),
+    spendRows: $('#spendRows'),
+    spendActions: $('#spendActions'),
+    spendRefresh: $('#spendRefresh'),
+    spendNote: $('#spendNote'),
     closeSettings: $('#closeSettings'),
     shell: $('.shell'),
     cost: $('#cost'),
@@ -831,7 +836,7 @@
   }
 
   function updateEmpty() {
-    els.emptyKey.hidden = !(state.staticLoaded && state.keys.length && !state.keys.some((k) => k.set));
+    els.emptyKey.hidden = !(state.staticLoaded && state.keys.length && !state.keys.some((k) => k.set && !k.reads_only));
   }
 
   // ---------- submit ----------
@@ -3344,7 +3349,93 @@
     openPanel(els.settings, () => {
       loadKeys(focusEnv);
       loadProject();
+      loadSpending();
     });
+  }
+
+  // ---------- spending ----------
+  // The last week of paid runs from the studio's own jobs: the estimate shown before Run, and what fal charged once
+  // its billing reports the run (only with the read-only FAL_BILLING_KEY). "Check fal now" also shows fal's own
+  // 30-day total, which counts everything on the fal account, not only this studio.
+
+  const usd = (v) => (v > 0 && v < 0.01 ? '< $0.01' : `$${v.toFixed(2)}`);
+
+  async function loadSpending(keepNote) {
+    if (!keepNote) els.spendNote.textContent = '';
+    let d = null;
+    try {
+      const r = await call('/api/spending');
+      if (r.ok) d = r.data;
+    } catch (_) {
+      setOffline(true);
+    }
+    renderSpending(d);
+  }
+
+  function renderSpending(d) {
+    els.spendRows.textContent = '';
+    els.spendActions.hidden = !(d && d.billing_key && !d.test);
+    if (!d) {
+      els.spendIntro.textContent = 'Engine offline.';
+      return;
+    }
+    els.spendIntro.textContent = d.test
+      ? 'Test mode: nothing here is charged.'
+      : d.billing_key
+        ? 'What each run was estimated at, and what fal charged once its billing shows the run (some minutes after it ends).'
+        : 'Estimates only. Save fal\u2019s read-only billing key (FAL_BILLING_KEY) below to see what fal actually charged.';
+    const week = d.week || [];
+    if (!week.length) {
+      els.spendRows.append(el('p', { class: 'muted' }, ['No paid runs this week.']));
+      return;
+    }
+    let est = 0, charged = 0, waiting = 0;
+    for (const w of week) {
+      est += w.estimate_usd; charged += w.charged_usd; waiting += w.uncharged;
+      // Only fal runs can be billed by fal; another provider's run shows its estimate alone.
+      const billed = w.billable - w.uncharged;
+      const paid = !d.billing_key || !w.billable ? ''
+        : billed ? `fal charged ${usd(w.charged_usd)}${w.uncharged ? ` for ${billed}` : ''}` : 'not billed yet';
+      const estimate = w.unestimated === w.runs ? 'no estimate' : `est. ${usd(w.estimate_usd)}${w.unestimated ? ' +' : ''}`;
+      els.spendRows.append(el('div', { class: 'spend-row' }, [
+        el('span', { class: 'spend-model' }, [w.name ? `${w.name} \u00b7 Playground` : modelName(w.model)]),
+        el('span', { class: 'spend-runs' }, [`${w.runs} ${w.runs === 1 ? 'run' : 'runs'}`]),
+        el('span', { class: 'spend-est' }, [estimate]),
+        paid ? el('span', { class: 'spend-paid' }, [paid]) : null,
+      ]));
+    }
+    const total = [`Estimated ${usd(est)}`];
+    if (d.billing_key) total.push(`fal charged ${usd(charged)}${waiting ? ` (${waiting} not billed yet)` : ''}`);
+    els.spendRows.append(el('p', { class: 'spend-total' }, [total.join(' \u00b7 ')]));
+  }
+
+  async function refreshSpending() {
+    els.spendRefresh.disabled = true;
+    els.spendNote.textContent = 'Asking fal\u2026';
+    try {
+      const r = await call('/api/spending/refresh', { method: 'POST', body: {} });
+      const d = r.data || {};
+      if (!r.ok) {
+        // A stale launch cookie already shows "Reload the page".
+        els.spendNote.textContent = d.error === 'launch_token' ? '' : `Could not ask fal (${r.status}).`;
+        return;
+      }
+      const parts = [];
+      if (d.error === 'key_refused') parts.push('fal refused the billing key: save a key made with fal\u2019s Billing preset.');
+      else if (!d.ok) parts.push(`${d.found ? `${d.found} ${d.found === 1 ? 'charge' : 'charges'} found, but ` : ''}fal\u2019s billing did not answer; try again in a minute.`);
+      else parts.push(d.found ? `${d.found} ${d.found === 1 ? 'charge' : 'charges'} found.` : 'No new charges.');
+      if (d.fal && typeof d.fal.total_usd === 'number') {
+        const top = (d.fal.by_endpoint || []).slice(0, 3).map((e) => `${e.endpoint} ${usd(e.usd)}`).join(', ');
+        parts.push(`Your whole fal account, last 30 days: ${usd(d.fal.total_usd)}${top ? ` (${top})` : ''}.`);
+      }
+      els.spendNote.textContent = parts.join(' ');
+      await loadSpending(true);
+    } catch (_) {
+      els.spendNote.textContent = 'Engine offline.';
+      setOffline(true);
+    } finally {
+      els.spendRefresh.disabled = false;
+    }
   }
 
   function closeSettings() {
@@ -3643,6 +3734,7 @@
     document.querySelectorAll('[data-open-settings]').forEach((b) =>
       b.addEventListener('click', () => openSettings()));
     els.closeSettings.addEventListener('click', closeSettings);
+    els.spendRefresh.addEventListener('click', refreshSpending);
     els.scrim.addEventListener('click', () => closePanel());
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closePanel();

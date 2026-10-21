@@ -220,6 +220,12 @@
     <label class="check"><input type="checkbox" id="stillFirst"> <span>Picture before video: video only starts from an approved still</span></label>
     <div class="panel-actions"><button type="submit" class="small-btn">Save look</button><span class="key-note" id="projectNote" role="status"></span></div>
   </form>
+  <section class="panel-box spending" aria-labelledby="spendTitle">
+    <h3 id="spendTitle">Spending, last 7 days</h3>
+    <p class="muted" id="spendIntro"></p>
+    <div id="spendRows" class="spend-rows"></div>
+    <div class="panel-actions" id="spendActions" hidden><button type="button" class="small-btn" id="spendRefresh">Check fal now</button><span class="key-note" id="spendNote" role="status"></span></div>
+  </section>
   <h3 class="keys-title">Provider keys</h3>
   <p class="muted intro">Keys are saved on this machine. A saved value is never shown again.</p>
   <div id="keyList" class="key-list"></div>

@@ -307,6 +307,12 @@ a.mode { text-decoration: none; }
 .key-form button:disabled { opacity: 0.5; cursor: progress; }
 .key-note { flex: 1 1 100%; margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
 .key-note:empty { margin: 0; }
+.spend-rows { display: grid; gap: 6px; }
+.spend-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+.spend-model { flex: 1 1 160px; min-width: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.spend-runs, .spend-est, .spend-paid { flex: none; font: 400 12px/1.4 var(--font-mono); color: var(--ink-3); }
+.spend-paid { color: var(--ok); }
+.panel-box p.spend-total { padding-top: 8px; border-top: 1px solid var(--line); color: var(--silver-1); }
 
 /* Phone width: rail becomes a top bar, composer spans the screen, no horizontal scroll */
 @media (max-width: 720px) {

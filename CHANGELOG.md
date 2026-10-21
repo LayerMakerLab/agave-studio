@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- What fal charged: with an optional read-only `FAL_BILLING_KEY` (fal's BILLING preset, which can't run models), each
+  fal job keeps fal's request id and gets what fal actually charged once fal's billing reports it, on the job and as a
+  fresh line in the spend log next to the estimate. Settings has a Spending panel: the last 7 days by model, estimate
+  and charge, and "Check fal now" with fal's own 30-day total for the account. Without the key it shows estimates only.
+  See docs/API.md, "What fal charged".
 - Spend log: every job a provider takes (from the studio, the Playground, Compare or a pipeline step) adds one line to
   `data/spend.jsonl` when it ends, with the estimate its page showed before Run and the provider's list price for its
   options. Jobs carry the same as `cost`. Test mode writes its own log, marked test. See docs/API.md, "Spend log".

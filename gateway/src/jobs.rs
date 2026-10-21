@@ -73,6 +73,27 @@ pub struct Cost {
     /// Test mode: a fake provider answered, so nothing was paid.
     #[serde(default)]
     pub test: bool,
+    /// fal's id for the request, kept so what fal charged for it can be looked up (fal jobs only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// What fal charged for this run, in US dollars and in nano dollars (fal's exact figure), once its billing reports
+    /// it. Read with a FAL_BILLING_KEY; absent until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charged_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charged_nano: Option<u64>,
+}
+
+/// What fal's billing says one request cost.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Charge {
+    pub request_id: String,
+    pub nano: u64,
+}
+
+/// A fal request id as fal gives it: letters, digits and dashes, at most 64. Anything else is not kept.
+pub fn fal_request_id(id: &str) -> Option<String> {
+    (!id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| id.to_string())
 }
 
 /// The estimate a page sends with a run: what it showed before Run.
@@ -460,12 +481,96 @@ impl JobStore {
     pub fn set_handle(&self, id: &str, handle: Handle) {
         self.with(|m| {
             if let Some(e) = m.get_mut(id) {
+                // A fal job keeps fal's request id, so its charge can be read from fal's billing later.
+                if handle.status_url.starts_with("https://queue.fal.run/") {
+                    if let Some(cost) = e.job.cost.as_mut() {
+                        cost.request_id = fal_request_id(&handle.request_id);
+                    }
+                }
                 e.handle = Some(handle);
                 e.sent = true;
                 e.job.status = "running".into();
             }
         });
         self.save_active();
+    }
+
+    /// Finished fal jobs whose charge isn't known yet, newest first: (job id, fal request id, when it ended). Done
+    /// jobs that ended at or after `since`, failed ones at or after `failed_since` (fal rarely bills a failed request,
+    /// so they aren't asked about for long). Test runs paid nothing and are never asked about.
+    pub fn uncharged(&self, since: u64, failed_since: u64, limit: usize) -> Vec<(String, String, u64)> {
+        let saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<(String, String, u64)> = saved
+            .iter()
+            .filter_map(|s| {
+                let c = s.job.cost.as_ref()?;
+                let at = s.job.finished_at?;
+                let rid = c.request_id.clone()?;
+                let from = if s.job.status == "failed" { failed_since } else { since };
+                (!c.test && c.charged_nano.is_none() && at >= from).then(|| (s.job.id.clone(), rid, at))
+            })
+            .collect();
+        out.sort_by_key(|(_, _, at)| std::cmp::Reverse(*at));
+        out.truncate(limit);
+        out
+    }
+
+    /// Records what fal charged: each matching finished job gets its charge and adds a fresh spend line with it
+    /// (readers keep the last line per job), then jobs.json is written. The lines go first, as in `save_finished`: a
+    /// crash in between repeats a line rather than losing one. Returns how many jobs were updated.
+    pub fn record_charges(&self, charges: &[Charge]) -> usize {
+        let Some(path) = &self.path else { return 0 };
+        let by_request: HashMap<&str, u64> = charges.iter().map(|c| (c.request_id.as_str(), c.nano)).collect();
+        let mut lines = Vec::new();
+        // Held until jobs.json is written, so a newer file from `save_finished` is never replaced by this older list.
+        let mut saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
+        for s in saved.iter_mut() {
+            let Some(cost) = s.job.cost.as_mut() else { continue };
+            let (Some(rid), None) = (cost.request_id.as_deref(), cost.charged_nano) else { continue };
+            let Some(&nano) = by_request.get(rid) else { continue };
+            cost.charged_nano = Some(nano);
+            cost.charged_usd = Some(nano as f64 / 1e9);
+            lines.push(SpendLine {
+                at: s.job.finished_at.unwrap_or_else(now_unix),
+                job: s.job.id.clone(),
+                model: s.job.model.clone(),
+                status: s.job.status.clone(),
+                cost: cost.clone(),
+            });
+        }
+        if lines.is_empty() {
+            return 0;
+        }
+        let spend = spend_path(path);
+        for line in &lines {
+            match serde_json::to_string(line) {
+                Ok(text) => {
+                    if let Err(e) = crate::fsutil::append_private_line(&spend, &text) {
+                        eprintln!("jobs: write {}: {e}", spend.display());
+                    }
+                }
+                Err(e) => eprintln!("jobs: encode spend: {e}"),
+            }
+        }
+        match serde_json::to_vec(&JobsFile { jobs: saved.clone() }) {
+            Ok(bytes) => {
+                if let Err(e) = crate::fsutil::write_private(path, &bytes) {
+                    eprintln!("jobs: write {}: {e}", path.display());
+                }
+            }
+            Err(e) => eprintln!("jobs: encode: {e}"),
+        }
+        drop(saved);
+        // A finished job is still in memory until it is pruned: it gets the same charge.
+        self.with(|m| {
+            for line in &lines {
+                if let Some(cost) = m.get_mut(&line.job).and_then(|e| e.job.cost.as_mut()) {
+                    cost.charged_nano = line.cost.charged_nano;
+                    cost.charged_usd = line.cost.charged_usd;
+                }
+            }
+        });
+        lines.len()
     }
 
     pub fn set_progress(&self, id: &str, progress: Option<f64>) {
@@ -727,6 +832,44 @@ mod tests {
         let lines: Vec<SpendLine> =
             std::fs::read_to_string(spend_path(&path)).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(lines.iter().map(|l| (l.job.as_str(), l.status.as_str())).collect::<Vec<_>>(), [("gone", "failed")]);
+    }
+
+    #[test]
+    fn what_fal_charged_lands_on_the_job_and_a_fresh_spend_line() {
+        let dir = crate::fsutil::test_dir("jobs_charged");
+        let store = JobStore::load(dir.join("jobs.json")).unwrap();
+        let paid = |id: &str| {
+            let mut j = job(id);
+            j.model = "fal/flux-schnell".into();
+            j.cost = Some(Cost { estimate_usd: Some(0.006), estimate: Some("exact".into()), ..Default::default() });
+            j
+        };
+        assert!(store.insert(paid("f1"), Arc::new(Never), "FAL_KEY".into()));
+        assert!(store.insert(paid("r1"), Arc::new(Never), "REPLICATE_API_TOKEN".into()));
+        let fal = Handle { request_id: "abc-123".into(), status_url: "https://queue.fal.run/fal-ai/x/requests/abc-123/status".into(), result_url: None };
+        let other = Handle { request_id: "zzz".into(), status_url: "https://api.replicate.com/v1/predictions/zzz".into(), result_url: None };
+        store.set_handle("f1", fal);
+        store.set_handle("r1", other);
+        store.set_done("f1", Vec::new());
+        store.set_done("r1", Vec::new());
+        assert_eq!(store.get("f1").unwrap().cost.unwrap().request_id.as_deref(), Some("abc-123"), "a fal job keeps fal's id");
+        assert_eq!(store.get("r1").unwrap().cost.unwrap().request_id, None, "other providers' ids aren't fal's");
+        let waiting = store.uncharged(0, 0, 50);
+        assert_eq!(waiting.iter().map(|(j, r, _)| (j.as_str(), r.as_str())).collect::<Vec<_>>(), [("f1", "abc-123")]);
+        assert_eq!(store.record_charges(&[Charge { request_id: "abc-123".into(), nano: 3_500_000 }, Charge { request_id: "nope".into(), nano: 9 }]), 1);
+        let cost = store.get("f1").unwrap().cost.unwrap();
+        assert_eq!((cost.charged_nano, cost.charged_usd), (Some(3_500_000), Some(0.0035)));
+        assert!(store.uncharged(0, 0, 50).is_empty(), "a charged job isn't asked about again");
+        assert_eq!(store.record_charges(&[Charge { request_id: "abc-123".into(), nano: 1 }]), 0, "a charge is recorded once");
+        let lines: Vec<SpendLine> =
+            std::fs::read_to_string(spend_path(&dir.join("jobs.json"))).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let last = lines.iter().rev().find(|l| l.job == "f1").unwrap();
+        assert_eq!(last.cost.charged_nano, Some(3_500_000), "the last line for the job carries the charge");
+        assert_eq!(last.cost.estimate_usd, Some(0.006), "next to the estimate");
+        // The charge survives a restart.
+        let again = JobStore::load(dir.join("jobs.json")).unwrap();
+        assert_eq!(again.get("f1").unwrap().cost.unwrap().charged_nano, Some(3_500_000));
+        assert_eq!(crate::jobs::fal_request_id("../x"), None);
     }
 
     #[test]

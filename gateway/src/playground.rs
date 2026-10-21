@@ -634,15 +634,17 @@ fn name_and_thumb(id: &str, md: &Value, test_mode: bool) -> (String, Option<Stri
     (name, thumb)
 }
 
-enum Fetch {
+pub(crate) enum Fetch {
     Ok(Value),
     NotFound,
     Busy,
+    /// fal refused the key (401/403).
+    Refused,
     Failed,
 }
 
 /// GET from fal's platform API. The key, when set, goes only to api.fal.ai (it lifts fal's rate limit).
-async fn fal_get(ctx: &Ctx, key: Option<&str>, path: &str, query: &[(&str, String)]) -> Fetch {
+pub(crate) async fn fal_get(ctx: &Ctx, key: Option<&str>, path: &str, query: &[(&str, String)]) -> Fetch {
     let mut req = ctx.http.get(format!("{FAL_API}{path}")).query(query).timeout(Duration::from_secs(30));
     if let Some(k) = key {
         req = req.header("Authorization", format!("Key {k}"));
@@ -655,6 +657,7 @@ async fn fal_get(ctx: &Ctx, key: Option<&str>, path: &str, query: &[(&str, Strin
         },
         404 => Fetch::NotFound,
         429 => Fetch::Busy,
+        401 | 403 => Fetch::Refused,
         _ => Fetch::Failed,
     }
 }
@@ -770,7 +773,7 @@ pub async fn spec_for(st: &AppState, id: &str) -> Result<Arc<Spec>, SpecErr> {
         }
         Fetch::NotFound => Err(SpecErr(StatusCode::NOT_FOUND, "unknown_fal_model")),
         Fetch::Busy => Err(SpecErr(StatusCode::SERVICE_UNAVAILABLE, "catalog_busy")),
-        Fetch::Failed => Err(SpecErr(StatusCode::BAD_GATEWAY, "catalog_unavailable")),
+        Fetch::Refused | Fetch::Failed => Err(SpecErr(StatusCode::BAD_GATEWAY, "catalog_unavailable")),
     }
 }
 

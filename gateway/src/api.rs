@@ -203,6 +203,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/fal/model", get(playground::model))
         .route("/api/fal/price", get(playground::price))
         .route("/api/fal/run", post(playground::run))
+        .route("/api/spending", get(crate::billing::spending))
+        .route("/api/spending/refresh", post(crate::billing::refresh))
         .route("/api/pipelines", get(pipelines::list))
         .route("/api/pipelines/runs", get(pipelines::runs).post(pipelines::create))
         .route("/api/pipelines/runs/{id}/step", post(pipelines::step))
@@ -244,7 +246,7 @@ async fn presets(State(st): State<AppState>) -> Json<Value> {
 async fn list_keys(State(st): State<AppState>) -> Response {
     let keys: Vec<Value> = SLOTS
         .iter()
-        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs}))
+        .map(|s| json!({"env": s.env, "provider": s.provider, "set": st.keys.is_set(s.env), "docs": s.docs, "reads_only": keys::reads_only(s.env)}))
         .collect();
     Json(json!({"keys": keys})).into_response()
 }
@@ -1189,6 +1191,24 @@ mod tests {
     async fn body_json(resp: Response) -> Value {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
         serde_json::from_slice(&bytes).expect("json")
+    }
+
+    #[tokio::test]
+    async fn spending_reads_the_week_and_refresh_takes_the_page_post() {
+        let app = router(AppState::for_tests("api_spending"));
+        let resp = app.clone().oneshot(get_req("/api/spending")).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!((v["billing_key"].as_bool(), v["week"].as_array().map(Vec::len)), (Some(false), Some(0)));
+        // The page's POST (JSON, launch cookie) goes through; without the key nothing asks fal.
+        let resp = app.clone().oneshot(post_json("/api/spending/refresh", "{}")).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!((v["ok"].as_bool(), v["found"].as_u64(), v["fal"].is_null()), (Some(true), Some(0), true));
+        // A plain POST with no cookie is refused like every other change.
+        let bare = Request::builder().method("POST").uri("/api/spending/refresh").header("host", "127.0.0.1:4170")
+            .header("content-type", "application/json").body(Body::from("{}")).unwrap();
+        assert_eq!(app.oneshot(bare).await.expect("response").status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
