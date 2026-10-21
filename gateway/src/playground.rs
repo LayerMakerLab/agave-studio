@@ -57,6 +57,9 @@ const RESULT_TRIES: u32 = 3;
 const MAX_SAVED_REQUEST_BYTES: usize = 16 << 10;
 /// Fields never shown or sent: sync_mode makes fal answer with inline data instead of file URLs.
 const HIDDEN: &[&str] = &["sync_mode"];
+/// fal's choice between a file URL and inline data ("url" or "hex"): runs always ask for the URL, since an inline
+/// answer leaves the Playground nothing to keep. The field is not offered.
+const DELIVERY: &str = "output_format";
 /// Fields that stay outside More settings even when optional.
 const MAIN: &[&str] = &[
     "prompt", "text", "image_size", "aspect_ratio", "duration", "resolution", "num_images", "generate_audio", "voice",
@@ -138,6 +141,9 @@ pub struct Spec {
     pub why_not: Option<String>,
     /// Shown above Run when the model may make files the Playground does not keep.
     pub note: Option<String>,
+    /// Fields not offered on the form and always sent with these values.
+    #[serde(skip)]
+    pub fixed: Vec<(String, Value)>,
 }
 
 /// A fal endpoint id: owner/name[/more], plain path characters only, so it is safe in a URL path.
@@ -408,6 +414,7 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
         runnable: false,
         why_not: None,
         note: None,
+        fixed: Vec::new(),
         id,
     };
     let Some(openapi) = model.get("openapi").filter(|o| o.is_object()) else {
@@ -443,6 +450,10 @@ pub fn compile(model: &Value, test_mode: bool) -> Option<Spec> {
         }
         let Some(raw) = props.and_then(|p| p.get(&name)) else { continue };
         let mut f = compile_field(&name, raw, openapi, required.contains(&name.as_str()));
+        if name == DELIVERY && f.kind == Kind::Choice && f.choices.contains(&json!("url")) {
+            spec.fixed.push((name, json!("url")));
+            continue;
+        }
         f.advanced = !(f.required || matches!(f.kind, Kind::Media | Kind::MediaList) || MAIN.contains(&name.as_str()));
         spec.fields.push(f);
     }
@@ -526,6 +537,13 @@ pub fn check_input(spec: &Spec, input: &Map<String, Value>) -> Result<(Map<Strin
     let mut out = Map::new();
     let mut locals = Vec::new();
     for (k, v) in input {
+        // A fixed field may be named only with the value the run sends anyway.
+        if let Some((_, fixed)) = spec.fixed.iter().find(|(n, _)| n == k) {
+            if !v.is_null() && v != fixed {
+                return Err(bad("invalid_value", k));
+            }
+            continue;
+        }
         let Some(f) = spec.fields.iter().find(|f| &f.name == k) else {
             return Err(bad("unknown_field", k));
         };
@@ -570,6 +588,7 @@ pub fn check_input(spec: &Spec, input: &Map<String, Value>) -> Result<(Map<Strin
             return Err(bad("field_required", &f.name));
         }
     }
+    out.extend(spec.fixed.iter().cloned());
     Ok((out, locals))
 }
 
@@ -1528,6 +1547,24 @@ mod tests {
         let mut wrong = Map::new();
         wrong.insert("prompt".into(), json!(5));
         assert_eq!(check_input(&spec, &wrong).unwrap_err(), bad("invalid_value", "prompt"));
+    }
+
+    #[test]
+    fn speech_always_asks_fal_for_a_file_url() {
+        let spec = sample_spec("fal-ai/minimax/speech-2.8-hd");
+        assert!(spec.fields.iter().all(|f| f.name != "output_format"), "fal's hex default leaves no file, so it is not offered");
+        let mut input = Map::new();
+        input.insert("prompt".into(), json!("Hello there."));
+        assert_eq!(check_input(&spec, &input).unwrap().0["output_format"], json!("url"));
+        input.insert("output_format".into(), json!("url"));
+        assert_eq!(check_input(&spec, &input).unwrap().0["output_format"], json!("url"));
+        input.insert("output_format".into(), Value::Null);
+        assert_eq!(check_input(&spec, &input).unwrap().0["output_format"], json!("url"));
+        input.insert("output_format".into(), json!("hex"));
+        assert_eq!(check_input(&spec, &input).unwrap_err(), bad("invalid_value", "output_format"));
+        // An output_format that picks a file type stays a normal choice.
+        let flux = sample_spec("fal-ai/flux/schnell");
+        assert!(flux.fixed.is_empty());
     }
 
     #[test]

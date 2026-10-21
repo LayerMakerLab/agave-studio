@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Playground: voice models such as MiniMax Speech made no file, because fal's default answer is inline hex data. An
+  `output_format` that chooses between "url" and inline data is no longer offered, and runs always ask for "url".
 - What fal charged: with an optional read-only `FAL_BILLING_KEY` (fal's BILLING preset, which can't run models), each
   fal job keeps fal's request id and gets what fal actually charged once fal's billing reports it, on the job and as a
   fresh line in the spend log next to the estimate. Settings has a Spending panel: the last 7 days by model, estimate

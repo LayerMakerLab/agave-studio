@@ -229,7 +229,9 @@ shown in the gallery like other jobs), so a restart in the middle fails that ste
   Field = {"name","title","description","kind":"text"|"longtext"|"integer"|"number"|"boolean"|"choice"|"media"|
            "medialist"|"json","media":"image"|"video"|"audio"|"file"|null,"required","default","example","choices",
            "custom_json","min","max","min_strict","max_strict","max_len","advanced","limits"}
-  Compiled from the model's OpenAPI input schema (cached 6 hours). `sync_mode` is never offered. An enum beside a free
+  Compiled from the model's OpenAPI input schema (cached 6 hours). `sync_mode` is never offered, and neither is an
+  `output_format` that chooses between "url" and inline data: runs always send "url" (naming it with any other value is
+  400 invalid_value), since an inline answer leaves no file to keep. An enum beside a free
   string or number keeps the field free, with the enum in `choices` as suggestions. A model is runnable when its result
   schema holds files; training models and retired ones are not.
 - GET  /api/fal/price?id=<endpoint> -> {"price":{"unit_price":0.07,"unit":"seconds","currency":"USD","average":0.42|null,
