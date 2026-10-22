@@ -1,0 +1,5 @@
+# Excalidraw's own public Firebase web config (excalidraw.com's live-collaboration project), which the first board
+# commit carried inside web/vendor/excalidraw/excalidraw.js. It is not an Agave or user key, and the studio never
+# used it (connect-src 'self'). vendor-src/excalidraw/build.mjs now blanks it and fails if any key is left, so only
+# this one commit in history holds it.
+7f5291375457b415e72e41d479c0046955be6b5a:web/vendor/excalidraw/excalidraw.js:gcp-api-key:8

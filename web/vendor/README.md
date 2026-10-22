@@ -26,12 +26,14 @@
     - Liberation Sans 1.05 (GPL-2.0 with a font exception) is not shipped; Excalidraw only uses it for server-side
       rendering, and the board treats it as a system font.
     - English only: the other translations are empty modules.
+    - Excalidraw's live-collaboration config (excalidraw.com's public Firebase web key) is blanked; the board never
+      collaborates. The build fails if the bundle still holds an API key.
     - Excalidraw's font fallback CDN (esm.sh) points at `/vendor/excalidraw/` instead; the build fails if the bundle
       names a CDN. The page sets `window.EXCALIDRAW_ASSET_PATH` to the same folder.
     - No font-subsetting worker: Excalidraw subsets on the main thread. The subsetter is WebAssembly, which the
       studio's page policy (`script-src 'self'`, no `wasm-unsafe-eval`) does not allow, so exporting a board as SVG
       may embed whole fonts or fail; PNG export and copying do not need it.
-  - Size: `excalidraw.js` 3,180,454 bytes (about 1.8 MB of it is Excalidraw's own WebAssembly as text),
+  - Size: `excalidraw.js` 3,180,091 bytes (about 1.8 MB of it is Excalidraw's own WebAssembly as text),
     `excalidraw.css` 144,644 bytes, fonts 13 MB (most of it the Xiaolai CJK font in 209 pieces); 236 files,
     16.5 MB in all. The board loads it the first time it opens; fonts load only when a board uses them.
   - sha256 of every file (also in `excalidraw/SHA256SUMS`):
@@ -39,7 +41,7 @@
     ```
     a4fee31081e129083c22e703051772eabf4341bf179ef1d6e7a43756ce12cb13  LICENSES.txt
     217a7cc659a8dd9f1d28313605e93a573f6c397d43dea7504e08ede1792644ce  excalidraw.css
-    4125f0ed0a383347e4fdd5a2aeb7a400c1c6524b57727cc821de4a82e395dbea  excalidraw.js
+    c7274d8aa27aeb370a2b74571555a7f670a405cf464771a9f08fc6f3e92bb1fd  excalidraw.js
     e0cdd332ce039770e93ec44336b6db65f931940f42b0342aad35a06e7f991d29  fonts/Assistant/Assistant-Bold.woff2
     81a9f280ce6a790f20ca8cd521183caa430f1f7fdc0752c36ef1cc6dc828ac57  fonts/Assistant/Assistant-Medium.woff2
     76945f09225aae65bdbd204cb4ac40d4caa4ff67150e5074bab1a04d1b778fc3  fonts/Assistant/Assistant-Regular.woff2

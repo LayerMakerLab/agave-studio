@@ -70,6 +70,11 @@ const agave = {
       if (text.includes("ASSETS_FALLBACK_URL\",`https://esm.sh/")) {
         text = replaceOnce(text, /ASSETS_FALLBACK_URL",`https:\/\/esm\.sh\/\$\{[^`]*`[^`]*`[^}]*\}\/dist\/prod\/`/, `ASSETS_FALLBACK_URL",(typeof window<"u"?window.location.origin:"")+"${ASSET_PATH}"`, "font CDN fallback");
       }
+      // Excalidraw's live-collaboration config holds excalidraw.com's public Firebase web key. The board never
+      // collaborates, and the repository's secret scan (gitleaks) refuses any key, so it goes.
+      if (text.includes("VITE_APP_FIREBASE_CONFIG:'")) {
+        text = replaceOnce(text, /VITE_APP_FIREBASE_CONFIG:'[^']*'/, "VITE_APP_FIREBASE_CONFIG:'{}'", "Firebase config");
+      }
       if (text.includes("./fonts/Liberation/LiberationSans-Regular.woff2")) {
         text = replaceOnce(text, "\"./fonts/Liberation/LiberationSans-Regular.woff2\"", "\"local:Liberation Sans\"", "Liberation font path");
       }
@@ -207,6 +212,8 @@ const js = fs.readFileSync(path.join(out, "excalidraw.js"), "utf8");
 for (const cdn of ["esm.sh", "unpkg.com", "jsdelivr.net", "cdnjs"]) {
   if (js.includes(cdn)) fail(`the bundle still names ${cdn}`);
 }
+// Nor any key: a Google API key, or an apiKey with a value.
+if (/AIza[0-9A-Za-z_-]{35}/.test(js) || /apiKey["']?\s*:\s*["'][^"']+["']/.test(js)) fail("the bundle still holds an API key");
 
 const files = walk(out).filter((f) => f !== "SHA256SUMS").sort();
 const sums = files.map((f) => `${sha256(path.join(out, f))}  ${f}`).join("\n") + "\n";
