@@ -6,7 +6,9 @@ key, no network, nothing paid). They need Node 20 or newer and Playwright, and t
 
 ```sh
 cd gateway && AGAVE_FAKE_PROVIDERS=1 AGAVE_TEST_PORT=4171 cargo run --release &   # a test gateway on 4171
+node tools/browser-checks/board.mjs
 node tools/browser-checks/hostile-board.mjs
+node tools/browser-checks/untitled-boards.mjs
 ```
 
 - `PLAYWRIGHT_DIR`: a `node_modules` folder that holds `playwright`, when it is not installed next to the checks.
@@ -18,5 +20,6 @@ step, then exits non-zero on any failure, console error or warning, HTTP error, 
 
 | Check | What it does |
 |---|---|
+| `board.mjs` | The whole Board view at 1440 px and 390 px: a frame with words, a dragged picture and a placed video, save, switching away and back, Send to Video (no job may start), rename, delete; the web-embed tool and Browse libraries stay hidden. `SCREENSHOTS=<dir>` saves screenshots. |
 | `hostile-board.mjs` | Opens, drops and pastes a board whose picture is a web address and which carries an iframe and a web embed; presses Send to Video on its shot. Nothing may load from elsewhere. |
 | `untitled-boards.mjs` | Draws on untitled boards and presses New, opens and deletes boards between them: every unsaved drawing stays in the Open list and comes back, and leaving the page still asks. |
