@@ -188,7 +188,8 @@ impl Boards {
     }
 
     /// Saves a board. `create`: only when no board has that name yet. `rev`: only when the saved board is still the
-    /// one the caller loaded. A name that differs from a saved board's only in letter case is refused (Exists).
+    /// one the caller loaded (NotFound when no board has the name any more). A name that differs from a saved board's
+    /// only in letter case is refused (Exists).
     pub fn save(&self, name: &str, board: &Value, create: bool, rev: Option<&str>) -> Result<BoardInfo, BoardError> {
         if !valid_board(board) {
             return Err(BoardError::Invalid);
@@ -209,6 +210,8 @@ impl Boards {
                     }
                 }
             }
+            // The page loaded a board under this name, which was renamed or deleted since: ask, don't recreate it.
+            None if rev.is_some() => return Err(BoardError::NotFound),
             None if self.names().len() >= MAX_BOARDS => return Err(BoardError::Full),
             None => {}
         }
@@ -391,6 +394,9 @@ mod tests {
         assert_ne!(second.rev, first.rev);
         assert_eq!(b.save("Shots", &scene("x"), false, Some(&first.rev)), Err(BoardError::Changed(second.rev.clone())));
         assert!(b.save("Shots", &scene("x"), false, None).is_ok(), "no rev: the save replaces it");
+        // A rev for a board renamed or deleted elsewhere is refused, so the page can ask instead of recreating it.
+        assert_eq!(b.save("Gone", &scene("x"), false, Some(&first.rev)), Err(BoardError::NotFound));
+        assert_eq!(b.load("Gone").err(), Some(BoardError::NotFound), "nothing was written");
         // Rename: not over another board, but a change of letter case is fine.
         b.save("Other", &scene("o"), true, None).unwrap();
         assert_eq!(b.rename("Shots", "other"), Err(BoardError::Exists));

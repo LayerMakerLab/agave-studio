@@ -220,7 +220,8 @@ function boardJson() {
   return JSON.parse(X.serializeAsJSON(s.elements, s.appState, s.files, 'local'));
 }
 
-async function save(force) {
+// force: save over a board changed elsewhere. asNew: the board was renamed or deleted elsewhere; save it again.
+async function save(force, asNew) {
   const name = ui.name.value.trim();
   if (!validName(name)) {
     note(name ? ERRORS.invalid_name : 'Name the board first.', 'warn');
@@ -235,7 +236,7 @@ async function save(force) {
   }
   // A new name saves a new board (and never replaces another); the board's own name saves over its last save,
   // unless that changed since it was opened.
-  const same = name === cur.name && cur.rev;
+  const same = name === cur.name && cur.rev && !asNew;
   const body = { name, board, create: !same };
   if (same && !force) body.rev = cur.rev;
   ui.save.disabled = true;
@@ -247,6 +248,13 @@ async function save(force) {
     const over = el('button', { type: 'button', class: 'act' }, ['Save over it']);
     over.addEventListener('click', () => save(true));
     ui.note.append(' ', over);
+    return;
+  }
+  if (r.status === 404 && body.rev) {
+    note('This board was renamed or deleted from another window since you opened it.', 'warn');
+    const again = el('button', { type: 'button', class: 'act' }, [`Save it as ${name}`]);
+    again.addEventListener('click', () => save(false, true));
+    ui.note.append(' ', again);
     return;
   }
   if (!r.ok || !r.data || !r.data.board) {
