@@ -14,8 +14,9 @@
     `react` 18.3.1, `react-dom` 18.3.1, `fflate` 0.8.2, built with `esbuild` 0.28.2 (fetched 2026-10-22).
     `vendor-src/excalidraw/build.sh` rebuilds the folder byte for byte (`npm ci --ignore-scripts`, then `build.mjs`);
     compare with `excalidraw/SHA256SUMS`.
-  - License: Excalidraw MIT; all 82 packages in the bundle are MIT, Apache-2.0, ISC or BSD (0BSD), checked by the
-    build, which stops on any other licence. Seven more are inlined in those packages' own prebuilt files
+  - License: Excalidraw MIT; the 83 packages in the bundle are MIT, Apache-2.0, ISC, 0BSD (tslib) and CC0-1.0
+    (fractional-indexing 3.2.0 by Rocicorp, shipped as published with its CC0 dedication), checked by the build,
+    which stops on any other licence. Seven more are inlined in those packages' own prebuilt files
     (fonteditor-core and harfbuzzjs in Excalidraw's font subsetter; glur, multimath, object-assign, webworkify and
     inherits in pica): MIT and ISC, with Apache-2.0 and MIT/NCSA parts in harfbuzzjs. The build finds inlined code
     by its markers and stops on any it has no notice for. Fonts: SIL OFL 1.1 (Excalifont, Virgil, Nunito, Lilita One, Assistant,
@@ -23,9 +24,7 @@
   - What the build changes, so the bundle stays within those licences and reaches no network:
     - Mermaid (`@excalidraw/mermaid-to-excalidraw`) is left out: Excalidraw's "Mermaid to Excalidraw" dialog says it
       is not available. Parts of Mermaid's dependency tree are not MIT, Apache-2.0, BSD or ISC, and it is large.
-    - `pako` (MIT and Zlib) is replaced by a two-function shim on `fflate` (MIT); `fractional-indexing` (CC0-1.0) by
-      Agave's own implementation of the same scheme (Apache-2.0, `vendor-src/excalidraw/shims/`), which the build
-      compares with the original on 10,000 inputs before it writes anything.
+    - `pako` (MIT and Zlib) is replaced by a two-function shim on `fflate` (MIT).
     - Liberation Sans 1.05 (GPL-2.0 with a font exception) is not shipped; Excalidraw only uses it for server-side
       rendering, and the board treats it as a system font.
     - English only: the other translations are empty modules.
@@ -36,15 +35,15 @@
     - No font-subsetting worker: Excalidraw subsets on the main thread. The subsetter is WebAssembly, which the
       studio's page policy (`script-src 'self'`, no `wasm-unsafe-eval`) does not allow, so exporting a board as SVG
       may embed whole fonts or fail; PNG export and copying do not need it.
-  - Size: `excalidraw.js` 3,180,091 bytes (about 1.8 MB of it is Excalidraw's own WebAssembly as text),
+  - Size: `excalidraw.js` 3,180,022 bytes (about 1.8 MB of it is Excalidraw's own WebAssembly as text),
     `excalidraw.css` 144,644 bytes, fonts 13 MB (most of it the Xiaolai CJK font in 209 pieces); 236 files,
     16.5 MB in all. The board loads it the first time it opens; fonts load only when a board uses them.
   - sha256 of every file (also in `excalidraw/SHA256SUMS`):
 
     ```
-    adbf7763c9d3dfb1333b0561bb8150c8e20aeeff62faad44f8a35d51ff53ba50  LICENSES.txt
+    56fdb0558e075adc20b926eecdb15154845a55df933448075e0098ec993daab9  LICENSES.txt
     217a7cc659a8dd9f1d28313605e93a573f6c397d43dea7504e08ede1792644ce  excalidraw.css
-    c7274d8aa27aeb370a2b74571555a7f670a405cf464771a9f08fc6f3e92bb1fd  excalidraw.js
+    3b831999bb6551e189025c1ff5400f1745c910028715013fdf86d771f396f0be  excalidraw.js
     e0cdd332ce039770e93ec44336b6db65f931940f42b0342aad35a06e7f991d29  fonts/Assistant/Assistant-Bold.woff2
     81a9f280ce6a790f20ca8cd521183caa430f1f7fdc0752c36ef1cc6dc828ac57  fonts/Assistant/Assistant-Medium.woff2
     76945f09225aae65bdbd204cb4ac40d4caa4ff67150e5074bab1a04d1b778fc3  fonts/Assistant/Assistant-Regular.woff2

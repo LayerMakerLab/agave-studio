@@ -3,7 +3,7 @@
 // Out: excalidraw.js (one ES module: Excalidraw, React and ReactDOM), excalidraw.css, fonts/ (every font the editor
 // loads), LICENSES.txt (the licence of every package in the bundle and of every font) and SHA256SUMS.
 // The build fails when a bundled package has a licence outside MIT, Apache-2.0, BSD and ISC, when the bundle still
-// names a CDN, or when Agave's fractional-indexing differs from the original package.
+// names a CDN or an API key, or when inlined code has no notice.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -19,7 +19,9 @@ const shim = (name) => path.join(here, "shims", name);
 // Where the studio serves the files, and so where Excalidraw loads its fonts from.
 const ASSET_PATH = "/vendor/excalidraw/";
 
-const ALLOWED = new Set(["MIT", "ISC", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD"]);
+// MIT, Apache-2.0, BSD and ISC, and the public-domain dedications 0BSD and CC0-1.0 (fractional-indexing, which
+// Excalidraw orders elements with).
+const ALLOWED = new Set(["MIT", "ISC", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "CC0-1.0"]);
 
 // Fonts the bundle ships, with their licences (read from each font's own name table and its project).
 const FONTS = {
@@ -53,7 +55,6 @@ const agave = {
   setup(build) {
     build.onResolve({ filter: /^@excalidraw\/mermaid-to-excalidraw$/ }, () => ({ path: shim("mermaid-to-excalidraw.js") }));
     build.onResolve({ filter: /^pako$/ }, () => ({ path: shim("pako.js") }));
-    build.onResolve({ filter: /^fractional-indexing$/ }, () => ({ path: shim("fractional-indexing.js") }));
     build.onResolve({ filter: /^\.\/subset-worker\.chunk\.js$/ }, () => ({ path: shim("subset-worker.js") }));
     // English only: every other translation becomes an empty module.
     build.onResolve({ filter: /^\.\/locales\// }, (args) => {
@@ -83,42 +84,6 @@ const agave = {
   },
 };
 
-async function checkFractionalIndexing() {
-  const ours = await import(shim("fractional-indexing.js"));
-  const theirs = await import(path.join(here, "node_modules/fractional-indexing/src/index.js"));
-  let seed = 1;
-  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-  const keys = [null];
-  let k = null;
-  for (let i = 0; i < 400; i++) keys.push((k = theirs.generateKeyBetween(k, null)));
-  k = keys[1];
-  for (let i = 0; i < 400; i++) keys.push((k = theirs.generateKeyBetween(null, k)));
-  for (let i = 0; i < 2000; i++) {
-    const a = keys[1 + Math.floor(rand() * (keys.length - 1))];
-    const b = keys[1 + Math.floor(rand() * (keys.length - 1))];
-    if (a !== b) keys.push(theirs.generateKeyBetween(a < b ? a : b, a < b ? b : a));
-  }
-  keys.push("Zz", "a0", "zzzzzzzzzzzzzzzzzzzzzzzzzzz", "A00000000000000000000000001");
-  const sorted = [...new Set(keys.filter((x) => x !== null))].sort();
-  let checked = 0;
-  const same = (f) => {
-    let want, got;
-    try { want = JSON.stringify(f(theirs)); } catch (e) { want = "throws"; }
-    try { got = JSON.stringify(f(ours)); } catch (e) { got = "throws"; }
-    if (want !== got) fail(`fractional-indexing differs: ${f.toString()} gave ${got}, want ${want}`);
-    checked++;
-  };
-  for (let i = 0; i < 5000; i++) {
-    const a = rand() < 0.1 ? null : sorted[Math.floor(rand() * sorted.length)];
-    const b = rand() < 0.1 ? null : sorted[Math.floor(rand() * sorted.length)];
-    const n = Math.floor(rand() * 6);
-    same((m) => m.generateKeyBetween(a, b));
-    same((m) => m.generateNKeysBetween(a, b, n));
-  }
-  for (const bad of ["", "a", "a00", "b0", "!", "a0" + "0"]) same((m) => m.generateKeyBetween(bad, null));
-  return checked;
-}
-
 function packageOf(input) {
   const parts = input.split("node_modules/");
   if (parts.length < 2) return null;
@@ -143,7 +108,6 @@ function walk(dir, base = dir) {
   });
 }
 
-const fiChecks = await checkFractionalIndexing();
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
@@ -181,7 +145,7 @@ const notices = new Map();
 for (const [dir, pj] of [...pkgs].sort((a, b) => a[1].name.localeCompare(b[1].name) || a[1].version.localeCompare(b[1].version))) {
   // Old packages list their licences as an array of {type}.
   const lic = typeof pj.license === "string" ? pj.license : Array.isArray(pj.licenses) && pj.licenses.length === 1 ? pj.licenses[0].type : "";
-  if (!ALLOWED.has(lic)) fail(`${pj.name}@${pj.version} is licensed "${lic}", outside MIT, Apache-2.0, BSD and ISC`);
+  if (!ALLOWED.has(lic)) fail(`${pj.name}@${pj.version} is licensed "${lic}", outside MIT, Apache-2.0, BSD, ISC and CC0`);
   let text = licenceText(path.join(here, dir));
   if (!text && upstream(pj.name)) text = fs.readFileSync(path.join(here, "licenses", upstream(pj.name)), "utf8").trim();
   if (!text) fail(`${pj.name}@${pj.version} has no licence file`);
@@ -270,7 +234,6 @@ fs.writeFileSync(path.join(out, "SHA256SUMS"), sums);
 
 const size = (f) => fs.statSync(path.join(out, f)).size;
 const total = files.reduce((s, f) => s + size(f), 0);
-console.log(`fractional-indexing: ${fiChecks} comparisons with the original, all equal`);
-console.log(`packages in the bundle: ${notices.size}, all MIT, Apache-2.0, BSD or ISC; inlined in them: ${inlined.size}, each with its notice`);
+console.log(`packages in the bundle: ${notices.size}, all MIT, Apache-2.0, BSD, ISC or CC0; inlined in them: ${inlined.size}, each with its notice`);
 console.log(`excalidraw.js ${size("excalidraw.js")} bytes, excalidraw.css ${size("excalidraw.css")} bytes`);
 console.log(`${files.length} files, ${total} bytes in ${path.relative(path.resolve(here, "../.."), out)}/`);
