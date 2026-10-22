@@ -59,6 +59,106 @@ const validName = (n) => /^[A-Za-z0-9][A-Za-z0-9 _()-]{0,59}$/.test(n) && !n.end
 const isDirty = () => cur.version !== cur.saved || cur.files !== cur.savedFiles;
 const hasUnsaved = () => isDirty() || kept.size > 0;
 
+// ---------- what a board may load ----------
+// A board file can come from anyone. Excalidraw keeps any `dataURL` string and any web-embed element, and the page
+// policy leaves pictures open on purpose (reference images), so a hostile board could make the studio fetch from any
+// host. Only embedded pictures are kept, and embeds never show.
+
+const SAFE_PICTURE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/;
+const EMBEDS = new Set(['iframe', 'embeddable']);
+const safePicture = (f) => !!f && typeof f.dataURL === 'string' && SAFE_PICTURE.test(f.dataURL);
+
+// Returns the elements and files a board may show, and how many of each it had to take out. An embed is marked
+// deleted with its custom data dropped; a picture whose file is not embedded data is marked deleted too, so the
+// file is never shown or saved again.
+function scrub(elements, files) {
+  const keep = {};
+  let dropped = 0;
+  for (const [id, f] of Object.entries(files || {})) {
+    if (safePicture(f)) keep[id] = f;
+    else dropped++;
+  }
+  const bad = new Set(Object.keys(files || {}).filter((id) => !keep[id]));
+  let removed = 0;
+  const out = (elements || []).map((e) => {
+    if (!e || e.isDeleted) return e;
+    if (EMBEDS.has(e.type) || (e.type === 'image' && bad.has(e.fileId))) {
+      removed++;
+      const { customData: _drop, ...rest } = e;
+      return { ...rest, isDeleted: true, version: (e.version || 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) };
+    }
+    return e;
+  });
+  return { elements: out, files: keep, dropped, removed };
+}
+
+function scrubNote(r) {
+  if (r.dropped || r.removed) note('Pictures from the internet and web embeds are not shown on a board; they were left out.', 'warn');
+}
+
+// An Excalidraw clipboard payload (copied elements) or board file as text, or null.
+function sceneFromText(text) {
+  if (typeof text !== 'string' || text.length > MAX_BOARD_BYTES || !/^\s*\{/.test(text)) return null;
+  try {
+    const v = JSON.parse(text);
+    return v && (v.type === 'excalidraw' || v.type === 'excalidraw/clipboard') && Array.isArray(v.elements) ? v : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Text a paste or drop carries that would make the editor fetch from another host: a board or copied elements with
+// files that are not embedded pictures or with web embeds, HTML with a picture from the web, or a link to elsewhere.
+function reachesOut(dt) {
+  for (const type of dt.types) {
+    if (type === 'Files') continue;
+    const text = dt.getData(type) || '';
+    if (/html/.test(type) && /<img[^>]+src\s*=\s*["']?\s*(https?:|\/\/)/i.test(text)) return true;
+    if (type === 'text/uri-list' && /^\s*(https?:)?\/\//i.test(text) && !text.trim().startsWith(location.origin)) return true;
+    const v = sceneFromText(text);
+    if (v) {
+      const r = scrub(v.elements, v.files);
+      if (r.dropped || r.removed) return true;
+    }
+  }
+  return false;
+}
+
+// A paste on the board is checked before Excalidraw sees it (Excalidraw listens on the document).
+function onPaste(e) {
+  if (!ui || ui.canvas.offsetParent === null || !e.clipboardData) return;
+  const t = e.target;
+  if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (!reachesOut(e.clipboardData)) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  note('That paste had pictures from the internet or web embeds, which a board does not load. Paste or drop the picture files themselves.', 'warn');
+}
+
+// A board file dropped on the canvas opens as an untitled board, through the same checks as a saved one (Excalidraw
+// would load it as it is). Picture files go on to Excalidraw, which embeds them.
+function onFileDrop(e) {
+  const dt = e.dataTransfer;
+  const files = [...dt.files];
+  const other = files.filter((f) => !/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(f.type));
+  if (!other.length && !(files.length === 0 && reachesOut(dt))) return;
+  e.preventDefault();
+  e.stopPropagation();
+  ui.canvas.classList.remove('drop');
+  if (!other.length || other[0].size > MAX_BOARD_BYTES) {
+    note(other.length ? ERRORS.board_too_large : 'Only picture files and boards can be dropped here; links to the web are not loaded.', 'warn');
+    return;
+  }
+  other[0].text().then((text) => {
+    const v = sceneFromText(text);
+    if (!v || v.type !== 'excalidraw') {
+      note('Only picture files and Excalidraw boards can be dropped here.', 'warn');
+      return;
+    }
+    openDropped(v);
+  }, () => note('That file could not be read.', 'err'));
+}
+
 // ---------- the editor ----------
 
 function loadEditor() {
@@ -97,6 +197,8 @@ function mountEditor() {
     UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: { saveFileToDisk: true } } },
     onChange: changed,
     onLinkOpen: openLink,
+    // No web embeds: the page policy blocks every frame anyway (frame-src 'none').
+    validateEmbeddable: () => false,
   }, menu, welcome));
 }
 
@@ -109,6 +211,13 @@ function openLink(element, event) {
 }
 
 function changed(elements, _appState, files) {
+  // A backstop for whatever reached the editor some other way (a library item, a paste the page did not see).
+  const r = scrub(elements, files);
+  if (r.removed) {
+    api.updateScene({ elements: r.elements, captureUpdate: X.CaptureUpdateAction.NEVER });
+    scrubNote(r);
+    return;
+  }
   cur.version = X.getSceneVersion(elements);
   cur.files = Object.keys(files || {}).length;
   renderTitle();
@@ -121,7 +230,9 @@ function scene() {
 }
 
 function showScene(s, name, rev, dirty) {
-  const data = X.restore({ elements: s.elements, appState: s.appState, files: s.files }, null, null);
+  const clean = scrub(s.elements, s.files);
+  scrubNote(clean);
+  const data = X.restore({ elements: clean.elements, appState: s.appState, files: clean.files }, null, null);
   const theme = api.getAppState().theme;
   api.resetScene();
   api.updateScene({
@@ -203,8 +314,14 @@ async function openBoard(name) {
     note(errText(r, 'That board could not be opened.'), 'err');
     return;
   }
-  showScene(r.data.board, r.data.name, r.data.rev, false);
   note('');
+  showScene(r.data.board, r.data.name, r.data.rev, false);
+}
+
+function openDropped(v) {
+  keepCurrent();
+  showScene({ elements: v.elements, appState: v.appState || {}, files: v.files || {} }, UNTITLED, null, true);
+  if (!ui.note.classList.contains('warn')) note('The dropped board is open as an untitled board. Name it, then Save.');
 }
 
 function newBoard() {
@@ -561,7 +678,11 @@ async function placeResult(it, at) {
 }
 
 function onDrop(e) {
-  if (!e.dataTransfer || ![...e.dataTransfer.types].includes(RESULT_MIME)) return;
+  if (!e.dataTransfer) return;
+  if (![...e.dataTransfer.types].includes(RESULT_MIME)) {
+    onFileDrop(e);
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
   ui.canvas.classList.remove('drop');
@@ -611,7 +732,7 @@ function renderShots() {
     const prompt = el('p', { class: 'board-shot-prompt' }, [s.prompt || 'No words in this frame yet.']);
     if (!s.prompt) prompt.classList.add('muted');
     ui.shots.append(el('li', { class: 'board-shot' }, [
-      s.file ? el('img', { src: s.file.dataURL, alt: '' }) : el('span', { class: 'board-shot-none' }, ['No picture']),
+      safePicture(s.file) ? el('img', { src: s.file.dataURL, alt: '' }) : el('span', { class: 'board-shot-none' }, ['No picture']),
       el('div', { class: 'board-shot-body' }, [el('b', {}, [s.name]), prompt, send]),
     ]));
   });
@@ -622,6 +743,7 @@ function renderShots() {
 async function startPicture(s) {
   const own = s.image.customData && s.image.customData.agave && s.image.customData.agave.picture;
   if (typeof own === 'string' && /^\/outputs\/[A-Za-z0-9._-]+$/.test(own)) return own;
+  if (!safePicture(s.file)) throw new Error('picture');
   let data = s.file.dataURL;
   if (!/^data:image\/(png|jpeg|webp);base64,/.test(data)) {
     const enc = encode(await loadImage(data));
@@ -704,6 +826,7 @@ function buildUi(host) {
   canvas.addEventListener('dragover', onDragOver, true);
   canvas.addEventListener('dragleave', () => canvas.classList.remove('drop'));
   canvas.addEventListener('drop', onDrop, true);
+  window.addEventListener('paste', onPaste, true);
   window.addEventListener('beforeunload', (e) => {
     if (hasUnsaved()) { e.preventDefault(); e.returnValue = ''; }
   });
