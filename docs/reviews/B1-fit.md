@@ -2,14 +2,15 @@
 
 Branch `feat/boards` at `7f52913`. This review is read-only: no product code was changed.
 
-**Verdict: FAIL.** Three Important findings, each with a small fix:
+**Verdict: FAIL.** Four Important findings, each with a small fix:
 
 1. Seven bundled notices are missing.
 2. The fractional-indexing shim is credited as original work.
 3. New throws away an unsaved untitled board.
+4. The repo's `secrets` CI check (gitleaks) fails on the bundle (finding 10).
 
 The bundle rebuilds byte for byte, every licence is on the allowed list, and the board costs nothing until it
-opens. Once the three Important findings are fixed, this branch would pass on this lens.
+opens. Once the four Important findings are fixed, this branch would pass on this lens.
 
 ## What was checked, and how
 
@@ -25,6 +26,7 @@ opens. Once the three Important findings are fixed, this branch would pass on th
 | My own fractional-indexing comparison | 137,992 comparisons: about 40,000 ordered pairs with n up to 49, 40,000 malformed keys, and three custom digit sets. No differences in results or error messages. |
 | pako shim against pako 2.0.3 | 204 round trips: shim deflate to pako inflate, pako deflate and gzip to shim inflate, Unicode up to U+2FFFF. No failures. |
 | `cargo test --release` (scratch copy) | 174 passed, 0 failed, 2 ignored, as the report says. |
+| gitleaks 8.30.1 (the repo's CI `secrets` job), locally on `7f52913` | 1 leak (finding 10). |
 | Headless Chromium against a test-mode gateway (`AGAVE_FAKE_PROVIDERS=1`, port 4199) | See "Size and load" and finding 3. No off-site requests. No console errors from the board. |
 
 ## Findings
@@ -119,6 +121,29 @@ Smallest fix:
 - In `keepCurrent()`, when `cur.name === ''` and `kept` already holds `''`, store the scene under a fresh key
   (for example `'' + n`) instead of overwriting it.
 - If several untitled boards are too much, have New ask first when the current untitled board is dirty.
+
+**10. The `secrets` CI check fails on the bundle** (`web/vendor/excalidraw/excalidraw.js:8`, from
+`vendor-src/excalidraw/build.mjs:68-77`)
+
+`.github/workflows/ci.yml` runs gitleaks 8.30.1 over the full history. It reports one `gcp-api-key` leak, with
+fingerprint `7f5291375457b415e72e41d479c0046955be6b5a:web/vendor/excalidraw/excalidraw.js:gcp-api-key:8`.
+
+It is Excalidraw's own `VITE_APP_FIREBASE_CONFIG`, a public Firebase web config for
+`excalidraw-room-persistence`, which Excalidraw uses for live collaboration. The value is baked into
+`@excalidraw/excalidraw/dist/prod/chunk-ZUYEQ4TG.js`. It is not an Agave secret, and the board never uses
+collaboration. But any PR whose history includes `7f52913` goes red on `secrets`. The review PR did: gitleaks
+scanned 97 commits and found 1 leak. Running gitleaks locally on `7f52913` alone gives the same result.
+
+Scenario: B1's PR to main fails CI, and the bundle ships a third-party Google endpoint config the studio has no use
+for.
+
+Smallest fix:
+
+- In the `agave` plugin's `onLoad`, replace that config with `'{}'` using `replaceOnce`, the same way as the font
+  CDN fallback. Rebuild and update the sums.
+- The current commit already holds the key in history, so either amend `feat/boards` before it merges (it is
+  unmerged), or add the fingerprint above to a `.gitleaksignore` with a comment saying it is Excalidraw's public
+  web config.
 
 ### Nit
 
