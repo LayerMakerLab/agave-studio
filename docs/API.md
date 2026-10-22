@@ -245,7 +245,11 @@ clips; a plain card if no frame can be read within 10 s), a 3D model as its thum
 picture) links back to its file and has a label grouped with it. Each frame on a board is a shot: its words (text
 inside the frame, top to bottom and left to right, labels left out) are the prompt and its first picture is the start
 picture (the result's own /outputs file when it came from the studio, else the board's copy, saved through POST
-/api/uploads). "Send to Video" fills the Video form with them and runs nothing; the job starts only with Generate.
+/api/uploads). "Send to Video" fills the Video form with them and runs nothing; the job starts only with Generate. A
+board shows only embedded pictures (PNG, JPEG, WebP, GIF or SVG data: URLs): a picture whose file is anything else,
+every iframe and every web embed are left out when a board opens, is dropped on the canvas or changes, and the page
+says so. A paste with pictures from the web or embeds is refused, the web-embed tool and the library's Browse
+libraries link are hidden, and a picture's link opens only when it is an /outputs/ file.
 
 ## Playground (any fal model)
 - GET  /api/fal/models?q=&category=&cursor= -> {"models":[{"id":"fal-ai/flux/schnell","name":"...","category":"text-to-image",
