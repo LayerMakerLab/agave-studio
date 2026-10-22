@@ -134,6 +134,10 @@ impl Boards {
     /// `info` for a name taken from `names()`, which already matched it against the folder.
     fn info_listed(&self, name: &str) -> Result<BoardInfo, BoardError> {
         let (p, meta) = self.file_at(name).ok_or(BoardError::NotFound)?;
+        // A file over the limit is never read in full (listing would block every save while it reads).
+        if meta.len() > MAX_BOARD_BYTES as u64 {
+            return Err(BoardError::TooLarge);
+        }
         let bytes = fs::read(&p).map_err(|_| BoardError::Io)?;
         Ok(Self::info_of(name, &meta, &bytes))
     }
@@ -415,6 +419,20 @@ mod tests {
         b.save("Linked", &scene("mine"), false, None).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&fs::read(&outside).unwrap()).unwrap()["elements"][0]["text"], "secret");
         assert!(!fs::symlink_metadata(dir.join("Linked.excalidraw")).unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn files_over_the_limit_are_not_listed_or_read() {
+        let dir = fsutil::test_dir("boards_oversize").join("boards");
+        let b = Boards::new(dir.clone());
+        b.save("Small", &scene("s"), true, None).unwrap();
+        // A sparse file: over the limit on paper, nothing to read on disk.
+        let f = fs::File::create(dir.join("Huge.excalidraw")).unwrap();
+        f.set_len(300 << 20).unwrap();
+        let names: Vec<String> = b.list().into_iter().map(|i| i.name).collect();
+        assert_eq!(names, vec!["Small".to_string()]);
+        assert_eq!(b.load("Huge").err(), Some(BoardError::TooLarge));
+        assert_eq!(b.save("huge", &scene("x"), false, None), Err(BoardError::Exists), "its name is still taken");
     }
 
     #[test]
