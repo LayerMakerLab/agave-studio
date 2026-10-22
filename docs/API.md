@@ -230,7 +230,7 @@ renaming and deleting need the page's launch cookie.
   is not an Excalidraw scene) | 413 board_too_large.
 - POST /api/boards/save {"name","board","create":false,"rev":null} -> {"board":{name,bytes,modified,rev}}.
   `board` must be an Excalidraw scene: an object with "type":"excalidraw" and an `elements` array (`appState` and
-  `files` objects optional); it is saved as sent (pretty-printed JSON). `create`: only when no board has that name
+  `files` objects optional); it is saved as compact JSON, and the 25 MB limit is measured on that, as the page measures it. `create`: only when no board has that name
   (409 board_exists, also for a name that differs only in case). `rev`: only when the saved board still has that rev
   (409 {"error":"board_changed","rev":"<saved rev>"}); without it the save replaces what is saved. 400
   invalid_name/invalid_board/bad_request | 409 too_many_boards | 413 {"error":"board_too_large","max_mb":25} (the

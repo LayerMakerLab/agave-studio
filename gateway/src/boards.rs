@@ -171,7 +171,8 @@ impl Boards {
         if !valid_board(board) {
             return Err(BoardError::Invalid);
         }
-        let bytes = serde_json::to_vec_pretty(board).map_err(|_| BoardError::Invalid)?;
+        // Compact, as the page measures it: indenting nested arrays (freedraw points) can more than double a board.
+        let bytes = serde_json::to_vec(board).map_err(|_| BoardError::Invalid)?;
         if bytes.len() > MAX_BOARD_BYTES {
             return Err(BoardError::TooLarge);
         }
@@ -423,6 +424,30 @@ mod tests {
         big["files"] = json!({"f1": {"id": "f1", "mimeType": "image/png", "dataURL": "x".repeat(MAX_BOARD_BYTES)}});
         assert_eq!(b.save("Big", &big, true, None), Err(BoardError::TooLarge));
         assert_eq!(b.list(), vec![]);
+    }
+
+    #[tokio::test]
+    async fn a_board_just_under_the_limit_saves_however_many_small_elements_it_has() {
+        let app = crate::api::router(AppState::for_tests("boards_near_limit"));
+        // Freedraw strokes: many short nested arrays, which pretty printing would blow up well past 25 MB.
+        let stroke = |i: usize| json!({"id": format!("e{i}"), "type": "freedraw", "points": vec![[0, 1]; 40]});
+        let mut elements = Vec::new();
+        let mut size = json!({"name": "Near", "board": {"type": "excalidraw", "elements": []}}).to_string().len();
+        loop {
+            let e = stroke(elements.len());
+            let n = serde_json::to_vec(&e).unwrap().len() + 1;
+            if size + n >= MAX_BOARD_BYTES - 4096 {
+                break;
+            }
+            size += n;
+            elements.push(e);
+        }
+        let body = json!({"name": "Near", "board": {"type": "excalidraw", "elements": elements}}).to_string();
+        assert!(body.len() > MAX_BOARD_BYTES - 8192 && body.len() < MAX_BOARD_BYTES, "{}", body.len());
+        assert!(serde_json::to_vec_pretty(&serde_json::from_str::<Value>(&body).unwrap()).unwrap().len() > MAX_BOARD_BYTES);
+        let (s, v) = send(&app, post("/api/boards/save", body)).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert!(v["board"]["bytes"].as_u64().unwrap() < MAX_BOARD_BYTES as u64);
     }
 
     fn post(uri: &str, body: String) -> Request<Body> {
