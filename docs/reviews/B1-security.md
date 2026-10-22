@@ -8,14 +8,36 @@ and a scratch browser script, none of them committed.
 - `cargo test --offline` (in `gateway/`, after one `cargo fetch`): **174 passed, 0 failed, 2 ignored**.
 - `cargo clippy --all-targets -- -D warnings`: **clean** (exit 0).
 - `sha256sum -c web/vendor/excalidraw/SHA256SUMS`: all 236 files match.
+- `gitleaks git . --redact` (8.30.1, as in CI): **1 leak**, `gcp-api-key` in `web/vendor/excalidraw/excalidraw.js:8`
+  at `7f52913` (I0). CI's `secrets` job fails on it.
 
 ## Verdict: BLOCK
 
-The routes are sound. One page finding breaks the repository's "0 leaks" rule: opening a board file that someone
-else made can make the studio load files from any host (I1). One correctness finding means some boards well under
-25 MB cannot be saved (I2). Both are small fixes. The Nits can wait.
+The routes are sound. Two findings break the repository's "0 leaks" rule:
+
+- the bundle ships a Google API key, and CI's gitleaks `secrets` job fails on it (I0);
+- opening a board file that someone else made can make the studio load files from any host (I1).
+
+One correctness finding means some boards well under 25 MB cannot be saved (I2). All three are small fixes. The
+Nits can wait.
 
 ## Findings
+
+### I0 Important: the bundle ships a Google API key, and CI's `secrets` job fails on it
+
+`web/vendor/excalidraw/excalidraw.js:8`, from `vendor-src/excalidraw/build.mjs`.
+
+The build keeps Excalidraw's own `VITE_APP_FIREBASE_CONFIG`, which holds the `apiKey` of excalidraw.com's Firebase
+project `excalidraw-room-persistence`. gitleaks 8.30.1 (the CI step) flags it with `gcp-api-key` at commit
+`7f52913`, so the `secrets` job is red on any PR that carries `feat/boards`. Merged as is, it turns `main` red too.
+
+This is upstream's public web key, not one of the user's keys, and the studio never calls Firebase:
+`connect-src 'self'` blocks it. But the repository's rule is 0 leaks, its gate fails, and the key has no use here.
+
+Smallest fix: in `build.mjs`, replace `VITE_APP_FIREBASE_CONFIG:'{...}'` with `'{}'`, the same way the font CDN
+fallback is replaced. Fail the build if `apiKey` is still in the output, as the CDN check does. Then rebuild and
+update `SHA256SUMS` and `web/vendor/README.md`. History keeps the key either way, so do it before `feat/boards`
+merges, or squash the branch, so that `main` never contains it.
 
 ### I1 Important: a hostile board makes the page load files from any host
 
@@ -204,8 +226,9 @@ it, but it is the one place where the local address goes into a URL off the host
 
 **Nothing leaked in the commit.**
 
-- No key, `data/` file, `.env` or local path is in the diff, the bundle, `web/vendor/README.md` or the lockfile.
-  All 289 `resolved` entries are on registry.npmjs.org.
+- Apart from the upstream Firebase key in I0, the diff, the bundle, `web/vendor/README.md` and the lockfile have no
+  key, no `data/` file, no `.env` and no local path. All 289 `resolved` entries are on registry.npmjs.org. My first
+  grep missed I0; CI's gitleaks found it, and gitleaks 8.30.1 run here reports exactly that one finding.
 - The names and e-mail addresses in the diff are upstream licence notices and the existing `LayerMaker LLC`
   copyright header.
 - The commit author is `Agave Studio <noreply@agave.invalid>`.
