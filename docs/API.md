@@ -240,12 +240,12 @@ renaming and deleting need the page's launch cookie.
   alone is allowed) | 400 invalid_name.
 - POST /api/boards/delete {"name"} -> {"ok":true} | 404 not_found | 400 invalid_name.
 In the studio: results go on a board as pictures shrunk to 1600 px on the long side and about 1.9 MB at most (WebP, or
-JPEG where the browser cannot write WebP); a video goes on as a still of its first half second, a 3D model as its
-thumbnail, and either (or a result with no picture) links back to its file and has a label grouped with it. Each
-frame on a board is a shot: its words (text inside the frame, top to bottom and left to right, labels left out) are
-the prompt and its first picture is the start picture (the result's own /outputs file when it came from the studio,
-else the board's copy, saved through POST /api/uploads). "Send to Video" fills the Video form with them and runs
-nothing; the job starts only with Generate.
+JPEG where the browser cannot write WebP); a video goes on as a still from 0.5 s in (a third of the way into shorter
+clips; a plain card if no frame can be read within 10 s), a 3D model as its thumbnail, and either (or a result with no
+picture) links back to its file and has a label grouped with it. Each frame on a board is a shot: its words (text
+inside the frame, top to bottom and left to right, labels left out) are the prompt and its first picture is the start
+picture (the result's own /outputs file when it came from the studio, else the board's copy, saved through POST
+/api/uploads). "Send to Video" fills the Video form with them and runs nothing; the job starts only with Generate.
 
 ## Playground (any fal model)
 - GET  /api/fal/models?q=&category=&cursor= -> {"models":[{"id":"fal-ai/flux/schnell","name":"...","category":"text-to-image",

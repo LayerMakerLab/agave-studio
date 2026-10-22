@@ -535,16 +535,26 @@ function loadImage(src) {
   });
 }
 
+// A still from 0.5 s in (a third of the way into shorter clips). Gives up after 10 s (a stalled read) and on a video
+// with no picture to read, so the caller's plain card takes over instead of "Placing…" staying on screen.
+const VIDEO_STILL_MS = 10_000;
 function videoFrame(src) {
   return new Promise((resolve, reject) => {
     const v = document.createElement('video');
     v.muted = true;
     v.preload = 'auto';
     v.playsInline = true;
-    const done = () => { v.removeAttribute('src'); v.load(); };
-    v.onerror = () => { done(); reject(new Error('video')); };
+    let timer = 0;
+    const done = () => { clearTimeout(timer); v.onerror = v.onloadedmetadata = v.onseeked = null; v.removeAttribute('src'); v.load(); };
+    const fail = () => { done(); reject(new Error('video')); };
+    timer = setTimeout(fail, VIDEO_STILL_MS);
+    v.onerror = fail;
     v.onloadedmetadata = () => { v.currentTime = Math.min(0.5, (v.duration || 1) / 3); };
     v.onseeked = () => {
+      if (!v.videoWidth || !v.videoHeight) {
+        fail();
+        return;
+      }
       const c = document.createElement('canvas');
       c.width = v.videoWidth;
       c.height = v.videoHeight;
