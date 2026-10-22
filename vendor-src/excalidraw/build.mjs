@@ -188,6 +188,52 @@ for (const [dir, pj] of [...pkgs].sort((a, b) => a[1].name.localeCompare(b[1].na
   notices.set(`${pj.name} ${pj.version}`, `${pj.name} ${pj.version} (${lic})\n\n${text}`);
 }
 
+// Code other packages ship already inlined in their prebuilt files, which esbuild's package list cannot see:
+// Excalidraw's font-subsetting chunk ("taken from the package" comments) and pica's browserify bundles (its module
+// maps). Every package found there needs its notice here; the build fails on inlined code it has no notice for.
+const INLINED = {
+  "fonteditor-core": { version: "2.4.0", licence: "MIT", files: ["fonteditor-core.txt"] },
+  harfbuzzjs: { version: "0.3.6", licence: "MIT, with Apache-2.0 and MIT/NCSA parts", files: ["harfbuzzjs.txt", "emscripten.txt"] },
+  glur: { version: "1.1.2", licence: "MIT", files: ["glur.txt"] },
+  multimath: { version: "2.0.0", licence: "MIT", files: ["multimath.txt"] },
+  "object-assign": { version: "4.1.1", licence: "MIT", files: ["object-assign.txt"] },
+  webworkify: { version: "1.5.0", licence: "MIT", files: ["webworkify.txt"] },
+  inherits: { version: "2.0.4", licence: "ISC", files: ["inherits.txt"] },
+};
+const pkgName = (spec) => (spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]);
+function inlinedIn(text) {
+  const names = new Set();
+  for (const m of text.matchAll(/taken from the package "([^"]+)"/g)) names.add(pkgName(m[1]));
+  // A browserify bundle maps each module's require() names to module numbers: {"./lib/x":3,"glur/mono16":7}.
+  if (text.includes("MODULE_NOT_FOUND")) {
+    for (const map of text.matchAll(/\{"[^"{}]+":\d+(?:,"[^"{}]+":\d+)*\}/g)) {
+      for (const k of map[0].matchAll(/"([^"]+)":\d+/g)) {
+        if (!k[1].startsWith(".") && /^(@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(\/.*)?$/.test(k[1])) names.add(pkgName(k[1]));
+      }
+    }
+  }
+  return names;
+}
+const bundledNames = new Set([...pkgs.values()].map((pj) => pj.name));
+const inlined = new Set();
+for (const input of Object.keys(result.metafile.inputs)) {
+  if (!/\.(m?js|cjs)$/.test(input)) continue;
+  for (const name of inlinedIn(fs.readFileSync(path.join(here, input), "utf8"))) {
+    if (bundledNames.has(name)) continue;
+    if (!INLINED[name]) fail(`${input} inlines code from ${name}, and the build has no notice for it`);
+    if (![...ALLOWED].some((l) => INLINED[name].licence.startsWith(l))) fail(`${name} is licensed ${INLINED[name].licence}`);
+    inlined.add(name);
+  }
+}
+for (const name of Object.keys(INLINED)) {
+  if (!inlined.has(name)) fail(`${name} has a notice but is no longer inlined anywhere: drop it from INLINED`);
+}
+const readLicence = (f) => fs.readFileSync(path.join(here, "licenses", f), "utf8").trim();
+const inlinedNotices = [...inlined].sort().map((name) => {
+  const i = INLINED[name];
+  return `${name} ${i.version} (${i.licence})\n\n${i.files.map(readLicence).join("\n\n")}`;
+});
+
 // Fonts: every family Excalidraw loads, except the ones left out above.
 const fontSrc = path.join(dist, "fonts");
 const families = fs.readdirSync(fontSrc).filter((d) => !SKIPPED_FONTS.includes(d));
@@ -203,8 +249,11 @@ fs.writeFileSync(
     fontNotes + "\n\n" +
     "Packages in excalidraw.js and excalidraw.css:\n\n" +
     [...notices.values()].join("\n\n" + "-".repeat(78) + "\n\n") + "\n\n" + "-".repeat(78) + "\n\n" +
+    "Inlined in other packages' prebuilt files (Excalidraw's font-subsetting chunk, pica's bundles):\n\n" +
+    inlinedNotices.join("\n\n" + "-".repeat(78) + "\n\n") + "\n\n" + "-".repeat(78) + "\n\n" +
     "Compiled into @excalidraw/excalidraw's font subsetting (WebAssembly): HarfBuzz and Google's woff2.\n\n" +
-    ["harfbuzz.txt", "woff2.txt"].map((f) => fs.readFileSync(path.join(here, "licenses", f), "utf8").trim()).join("\n\n" + "-".repeat(78) + "\n\n") + "\n",
+    ["harfbuzz.txt", "woff2.txt"].map(readLicence).join("\n\n" + "-".repeat(78) + "\n\n") + "\n\n" + "-".repeat(78) + "\n\n" +
+    "The Apache License 2.0, which applies to the Apache-2.0 parts named above:\n\n" + readLicence("apache-2.0.txt") + "\n",
 );
 
 // No CDN may be left in the code: the page may only fetch from the studio (connect-src 'self').
@@ -222,6 +271,6 @@ fs.writeFileSync(path.join(out, "SHA256SUMS"), sums);
 const size = (f) => fs.statSync(path.join(out, f)).size;
 const total = files.reduce((s, f) => s + size(f), 0);
 console.log(`fractional-indexing: ${fiChecks} comparisons with the original, all equal`);
-console.log(`packages in the bundle: ${notices.size}, all MIT, Apache-2.0, BSD or ISC`);
+console.log(`packages in the bundle: ${notices.size}, all MIT, Apache-2.0, BSD or ISC; inlined in them: ${inlined.size}, each with its notice`);
 console.log(`excalidraw.js ${size("excalidraw.js")} bytes, excalidraw.css ${size("excalidraw.css")} bytes`);
 console.log(`${files.length} files, ${total} bytes in ${path.relative(path.resolve(here, "../.."), out)}/`);

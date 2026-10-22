@@ -15,7 +15,10 @@
     `vendor-src/excalidraw/build.sh` rebuilds the folder byte for byte (`npm ci --ignore-scripts`, then `build.mjs`);
     compare with `excalidraw/SHA256SUMS`.
   - License: Excalidraw MIT; all 82 packages in the bundle are MIT, Apache-2.0, ISC or BSD (0BSD), checked by the
-    build, which stops on any other licence. Fonts: SIL OFL 1.1 (Excalifont, Virgil, Nunito, Lilita One, Assistant,
+    build, which stops on any other licence. Seven more are inlined in those packages' own prebuilt files
+    (fonteditor-core and harfbuzzjs in Excalidraw's font subsetter; glur, multimath, object-assign, webworkify and
+    inherits in pica): MIT and ISC, with Apache-2.0 and MIT/NCSA parts in harfbuzzjs. The build finds inlined code
+    by its markers and stops on any it has no notice for. Fonts: SIL OFL 1.1 (Excalifont, Virgil, Nunito, Lilita One, Assistant,
     Cascadia Code, Xiaolai) and MIT (Comic Shanns). Every notice is in `excalidraw/LICENSES.txt`.
   - What the build changes, so the bundle stays within those licences and reaches no network:
     - Mermaid (`@excalidraw/mermaid-to-excalidraw`) is left out: Excalidraw's "Mermaid to Excalidraw" dialog says it
@@ -39,7 +42,7 @@
   - sha256 of every file (also in `excalidraw/SHA256SUMS`):
 
     ```
-    a4fee31081e129083c22e703051772eabf4341bf179ef1d6e7a43756ce12cb13  LICENSES.txt
+    adbf7763c9d3dfb1333b0561bb8150c8e20aeeff62faad44f8a35d51ff53ba50  LICENSES.txt
     217a7cc659a8dd9f1d28313605e93a573f6c397d43dea7504e08ede1792644ce  excalidraw.css
     c7274d8aa27aeb370a2b74571555a7f670a405cf464771a9f08fc6f3e92bb1fd  excalidraw.js
     e0cdd332ce039770e93ec44336b6db65f931940f42b0342aad35a06e7f991d29  fonts/Assistant/Assistant-Bold.woff2
