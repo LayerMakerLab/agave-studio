@@ -214,6 +214,38 @@ the last frame, Add to edit) run as soon as the step before them is done; a back
 every 2 s moves runs on with no page open. The last frame is taken by ffmpeg as a local job (model "agave/last-frame",
 shown in the gallery like other jobs), so a restart in the middle fails that step instead of losing it.
 
+## Boards
+The studio's Board view (`web/app/board.js`, the Excalidraw editor vendored in `web/vendor/excalidraw/`) saves each
+board as one Excalidraw file, `data/boards/<name>.excalidraw` (test mode: `data/fake-providers/boards/`), owner-only
+(0600 in a 0700 folder) and written atomically (a new file renamed over the old one, so a planted symlink is replaced,
+never followed). Pictures on a board are embedded in its file. A board name is also its file name: 1 to 60 of A-Z,
+a-z, 0-9, space, `-`, `_`, `(`, `)`, starting with a letter or digit, not ending in a space; names that differ only in
+letter case are the same board (macOS folders ignore case). Symlinks, hard links and other files in the folder are
+not boards. At most 500 boards, 25 MB each. Every route goes through the same guard as the rest of the API; saving,
+renaming and deleting need the page's launch cookie.
+- GET  /api/boards -> {"boards":[{"name":"Ep 1","bytes":21356,"modified":unix,"rev":"<16 hex>"}]} most recently saved
+  first. `rev` is the first 16 hex of the file's SHA-256.
+- GET  /api/boards/load?name=Ep%201 -> {"name","rev","bytes","modified","board":{"type":"excalidraw","version":2,
+  "elements":[...],"appState":{...},"files":{...}}} | 400 invalid_name | 404 not_found | 400 invalid_board (the file
+  is not an Excalidraw scene) | 413 board_too_large.
+- POST /api/boards/save {"name","board","create":false,"rev":null} -> {"board":{name,bytes,modified,rev}}.
+  `board` must be an Excalidraw scene: an object with "type":"excalidraw" and an `elements` array (`appState` and
+  `files` objects optional); it is saved as sent (pretty-printed JSON). `create`: only when no board has that name
+  (409 board_exists, also for a name that differs only in case). `rev`: only when the saved board still has that rev
+  (409 {"error":"board_changed","rev":"<saved rev>"}); without it the save replaces what is saved. 400
+  invalid_name/invalid_board/bad_request | 409 too_many_boards | 413 {"error":"board_too_large","max_mb":25} (the
+  body limit is 25 MB plus 64 KB) | 500 write_failed.
+- POST /api/boards/rename {"from","to"} -> {"board":{...}} | 404 not_found | 409 board_exists (a change of letter case
+  alone is allowed) | 400 invalid_name.
+- POST /api/boards/delete {"name"} -> {"ok":true} | 404 not_found | 400 invalid_name.
+In the studio: results go on a board as pictures shrunk to 1600 px on the long side and about 1.9 MB at most (WebP, or
+JPEG where the browser cannot write WebP); a video goes on as a still of its first half second, a 3D model as its
+thumbnail, and either (or a result with no picture) links back to its file and has a label grouped with it. Each
+frame on a board is a shot: its words (text inside the frame, top to bottom and left to right, labels left out) are
+the prompt and its first picture is the start picture (the result's own /outputs file when it came from the studio,
+else the board's copy, saved through POST /api/uploads). "Send to Video" fills the Video form with them and runs
+nothing; the job starts only with Generate.
+
 ## Playground (any fal model)
 - GET  /api/fal/models?q=&category=&cursor= -> {"models":[{"id":"fal-ai/flux/schnell","name":"...","category":"text-to-image",
        "description":"...","thumb":"https://..."|null,"makes_files":true}],"next_cursor":"..."|null,"has_more":bool,
@@ -279,4 +311,4 @@ language to the user's prompt. Preset tables live in C++.
 ## Design
 Use `web/css/tokens.css` (graphite, silver, one ember accent). Primary button = `.pill`.
 Fonts: Geist, Geist Mono, Instrument Serif, served from `web/assets/fonts` (`web/css/fonts.css`); the homepage alone also
-loads Anybody from Google Fonts.
+loads Anybody from Google Fonts. The board's editor brings its own fonts in `web/vendor/excalidraw/fonts`.

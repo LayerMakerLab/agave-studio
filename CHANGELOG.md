@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Board: a Board entry in the rail opens a whiteboard with the real Excalidraw editor (0.18.1, bundled with React 18.3.1
+  in `web/vendor/excalidraw/` with every font it loads; nothing comes from a CDN). New, open, save, rename and delete
+  boards, saved as `data/boards/<name>.excalidraw`; a board switched away from keeps its unsaved changes. Drag a
+  finished result onto the board (or press Place): pictures go on shrunk to 1600 px, videos and 3D models as a still
+  with a label and a link to the file. Each frame is a shot, with the frame's words as the prompt and its first
+  picture as the start picture; Send to Video fills the Video form and runs nothing. New routes: `/api/boards`,
+  `/api/boards/load`, `/api/boards/save`, `/api/boards/rename`, `/api/boards/delete` (docs/API.md, "Boards").
+  `vendor-src/excalidraw/build.sh` rebuilds the bundle byte for byte.
 - Playground: voice models such as MiniMax Speech made no file, because fal's default answer is inline hex data. An
   `output_format` that chooses between "url" and inline data is no longer offered, and runs always ask for "url".
 - What fal charged: with an optional read-only `FAL_BILLING_KEY` (fal's BILLING preset, which can't run models), each

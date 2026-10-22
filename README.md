@@ -30,6 +30,10 @@ show their credit cost). Keys are stored only on your computer, and the app has 
   with `@tag`.
 - **Pipelines:** Library flows that run several steps in a row (product photo to hero still, video and 3D model;
   character sheet to two joined clips). The full price shows first and every paid step waits for your click.
+- **Board:** a whiteboard with the real [Excalidraw](https://excalidraw.com) editor, shipped with the studio (it works
+  offline). Sketch, drag finished pictures, videos and 3D models onto it, and save and reopen boards (they are
+  `.excalidraw` files in `data/boards/`). Draw a frame around each shot: its words and first picture list as a shot,
+  and Send to Video fills the Video form with them. Nothing runs until you press Generate.
 - **Edit:** trim and join clips, auto captions, remove pauses, reframe to 9:16, clean up voice, and set loudness
   to -14 LUFS.
 - **Playground:** fal's models that make pictures, video, audio or 3D, each with its own controls built from fal's own
@@ -122,6 +126,7 @@ These need macOS 14 or later and Xcode's Swift tools.
 | `engine/promptcraft/` | C++ camera and style phrases, linked into the gateway |
 | `web/` | The site (`/`) and the studio (`/app/`): plain HTML, CSS and JavaScript, no build step |
 | `native/` | Optional macOS tools: speech, vision and the Mac app |
+| `vendor-src/excalidraw/` | Pinned build of the board's editor into `web/vendor/excalidraw/` (`build.sh`, Node and npm) |
 | `docs/API.md` | The gateway's HTTP API |
 
 ## Develop

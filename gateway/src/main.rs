@@ -3,6 +3,7 @@
 mod api;
 mod assemble;
 mod billing;
+mod boards;
 mod fsutil;
 mod jobs;
 mod keys;
@@ -94,6 +95,7 @@ async fn main() {
     if let Some(data) = state.paths.jobs_file.parent() {
         fsutil::remove_leftovers(data);
     }
+    fsutil::remove_leftovers(&state.paths.boards_dir);
     println!("Agave Studio gateway on http://{addr} (web: {})", state.paths.web.display());
     if state.fake.is_some() {
         println!("TEST MODE (AGAVE_FAKE_PROVIDERS=1): fake providers, no keys, no network; data in {}", state.ctx.outputs_dir.display());

@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use tower_http::services::ServeDir;
 
 use crate::assemble::{self, Assemble};
+use crate::boards;
 use crate::jobs::{self, now_unix, Job};
 use crate::keys::{self, SLOTS};
 use crate::media;
@@ -209,6 +210,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pipelines/runs", get(pipelines::runs).post(pipelines::create))
         .route("/api/pipelines/runs/{id}/step", post(pipelines::step))
         .route("/api/pipelines/runs/{id}/delete", post(pipelines::delete))
+        .route("/api/boards", get(boards::list))
+        .route("/api/boards/load", get(boards::load))
+        .route("/api/boards/save", post(boards::save).layer(DefaultBodyLimit::max(boards::MAX_BOARD_BYTES + 64 * 1024)))
+        .route("/api/boards/rename", post(boards::rename))
+        .route("/api/boards/delete", post(boards::delete))
         .nest_service("/outputs", ServeDir::new(outputs))
         .fallback_service(ServeDir::new(web).append_index_html_on_directories(true))
         .layer(middleware::from_fn_with_state(state.clone(), guard))

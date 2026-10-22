@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::boards::Boards;
 use crate::jobs::JobStore;
 use crate::keys::KeyStore;
 use crate::media::Ctx;
@@ -22,6 +23,8 @@ pub struct Paths {
     pub models_file: PathBuf,
     pub studio_file: PathBuf,
     pub pipelines_file: PathBuf,
+    /// Saved boards, one .excalidraw file each.
+    pub boards_dir: PathBuf,
 }
 
 impl Paths {
@@ -40,6 +43,7 @@ impl Paths {
             models_file: crate_dir.join("models.toml"),
             studio_file: data.join("studio.json"),
             pipelines_file: data.join("pipelines.json"),
+            boards_dir: data.join("boards"),
         }
     }
 }
@@ -55,6 +59,8 @@ pub struct AppState {
     pub studio: Studio,
     /// Library pipelines: runs and their step state (data/pipelines.json).
     pub pipelines: PipelineStore,
+    /// Boards (data/boards/*.excalidraw).
+    pub boards: Boards,
     /// Playground: fal catalog, model forms and prices (cached in memory).
     pub playground: Arc<playground::Cache>,
     /// Test mode: every model is answered by a local fake provider (no network, no key, no cost). Only set
@@ -121,6 +127,7 @@ impl AppState {
             jobs,
             studio,
             pipelines,
+            boards: Boards::new(paths.boards_dir.clone()),
             playground: Arc::new(playground::Cache::new(false)),
             fake: None,
             allowed_hosts: Arc::new(hosts),
@@ -156,6 +163,7 @@ impl AppState {
             models_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml"),
             studio_file: dir.join("studio.json"),
             pipelines_file: dir.join("pipelines.json"),
+            boards_dir: dir.join("boards"),
         };
         let keys = KeyStore::empty(paths.keys_file.clone());
         let mut st = Self::build(paths, keys).expect("test state");
@@ -206,6 +214,7 @@ mod tests {
                 models_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models.toml"),
                 studio_file: dir.join("studio.json"),
                 pipelines_file: dir.join("pipelines.json"),
+                boards_dir: dir.join("boards"),
             };
             let keys = KeyStore::empty(paths.keys_file.clone());
             AppState::build(paths, keys).expect("state")

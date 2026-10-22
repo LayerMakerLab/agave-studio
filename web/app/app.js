@@ -51,6 +51,7 @@
 
   const state = {
     mode: 'image',
+    view: 'studio', // 'board' while the Board view shows (its drawing stays in the page when you leave it)
     voices: null,
     models: [],
     presets: { camera: [], styles: [] },
@@ -207,6 +208,8 @@
     runChip: $('#runChip'),
     runChipText: $('#runChipText'),
     testBanner: $('#testBanner'),
+    board: $('#board'),
+    boardBtn: $('#boardBtn'),
   };
 
   // ---------- helpers ----------
@@ -582,6 +585,7 @@
   }
 
   function writeHash() {
+    if (state.view === 'board') return;
     const m = els.model.value;
     history.replaceState(null, '', `#${state.mode}${m ? '/' + m : ''}`);
   }
@@ -589,6 +593,7 @@
   function setMode(id) {
     els.lookAsk.hidden = true;
     if (!MODES[id]) return;
+    leaveBoard();
     state.mode = id;
     const md = MODES[id];
     document.querySelectorAll('.mode[data-mode]').forEach((b) =>
@@ -772,6 +777,7 @@
     els.count.textContent = jobs.length
       ? `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}${active ? ` · ${active} active` : ''}`
       : '';
+    if (boardMod) boardMod.jobsChanged();
   }
 
   function upsertJob(job) {
@@ -2701,6 +2707,57 @@
     else setStatus(`${it.title} is ready. Check the cost, then press Generate.`);
   }
 
+  // ---------- board ----------
+  // The Board view (board.js) loads the vendored Excalidraw editor the first time it opens. Its drawing stays in the
+  // page while the studio shows, so unsaved changes survive switching away. Send to Video only fills the form.
+
+  let boardMod = null;
+  const boardBridge = {
+    call,
+    jobs: () => state.jobs,
+    jobName: jobModelName,
+    sendToVideo(shot) {
+      state.libModel = null;
+      state.refs = shot.image ? [shot.image] : [];
+      els.ref.value = '';
+      els.recipe.value = '';
+      setMode('video');
+      renderTray();
+      syncRefMode();
+      els.prompt.value = shot.prompt || '';
+      autosize();
+      els.prompt.focus();
+      setStatus(shot.image
+        ? `${shot.name} is in the Video form with its start picture. Check the model and the cost, then press Generate.`
+        : `${shot.name} is in the Video form. Its frame has no picture, so this is text to video. Check the model and the cost, then press Generate.`);
+    },
+  };
+
+  function showBoard() {
+    closePanel(true);
+    els.lookAsk.hidden = true;
+    state.view = 'board';
+    els.shell.classList.add('board-on');
+    els.board.hidden = false;
+    document.querySelectorAll('.mode[data-mode]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    els.boardBtn.setAttribute('aria-pressed', 'true');
+    els.title.textContent = 'Board';
+    els.sub.textContent = 'Sketch shots, drop finished results in, and frame each shot to send it to Video.';
+    document.title = 'Board · Agave Studio';
+    history.replaceState(null, '', '#board');
+    import('/app/board.js')
+      .then((m) => { boardMod = m; return m.show(els.board, boardBridge); })
+      .catch(() => { els.board.textContent = 'The board could not load. Reload the page.'; });
+  }
+
+  function leaveBoard() {
+    if (state.view !== 'board') return;
+    state.view = 'studio';
+    els.shell.classList.remove('board-on');
+    els.board.hidden = true;
+    els.boardBtn.setAttribute('aria-pressed', 'false');
+  }
+
   // ---------- pipelines ----------
   // A pipeline runs the studio's own steps in a row on the engine (data/pipelines.json), so a run survives a
   // reload. The full price shows before it starts; a step that costs money waits for a click here.
@@ -3731,6 +3788,7 @@
   function bind() {
     document.querySelectorAll('.mode[data-mode]').forEach((b) =>
       b.addEventListener('click', () => { state.libModel = null; setMode(b.dataset.mode); }));
+    els.boardBtn.addEventListener('click', showBoard);
     document.querySelectorAll('[data-open-settings]').forEach((b) =>
       b.addEventListener('click', () => openSettings()));
     els.closeSettings.addEventListener('click', closeSettings);
@@ -3816,6 +3874,7 @@
     });
     window.addEventListener('hashchange', () => {
       const h = readHash();
+      if (h.mode === 'board') { showBoard(); return; }
       if (!MODES[h.mode]) return;
       state.want = h.model;
       setMode(h.mode);
@@ -3838,6 +3897,7 @@
     const h = readHash();
     state.want = h.model;
     setMode(MODES[h.mode] ? h.mode : 'image');
+    if (h.mode === 'board') showBoard();
     updateEmpty();
     loadEdit();
     renderSong();
