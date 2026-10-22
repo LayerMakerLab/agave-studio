@@ -202,12 +202,14 @@ function mountEditor() {
   }, menu, welcome));
 }
 
-// A picture's link opens the result's file in a new tab, so the board itself is never navigated away from.
+// A picture's link opens the result's file in a new tab, so the board itself is never navigated away from. Only the
+// studio's own result files open: a link a board brought from elsewhere stays put.
 function openLink(element, event) {
   const link = element && element.link;
   if (!link) return;
   event.preventDefault();
-  if (/^\/outputs\/[A-Za-z0-9._-]+$/.test(link) || /^https:\/\//.test(link)) window.open(link, '_blank', 'noopener,noreferrer');
+  if (/^\/outputs\/[A-Za-z0-9._-]+$/.test(link)) window.open(link, '_blank', 'noopener,noreferrer');
+  else note('Only links to the studio\'s own results open from a board.', 'warn');
 }
 
 function changed(elements, _appState, files) {
