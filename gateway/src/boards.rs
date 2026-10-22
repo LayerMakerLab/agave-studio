@@ -253,7 +253,8 @@ fn board_fail(e: BoardError) -> Response {
     }
 }
 
-/// A body over the route's limit is "too large"; anything else that is not the expected JSON is a bad request.
+/// On save, a body over the route's limit is a board too large; anything else that is not the expected JSON is a
+/// bad request. Rename and delete carry only names, so any refused body there is a bad request (see `bad_body`).
 fn body_fail(e: JsonRejection) -> Response {
     if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
         return board_fail(BoardError::TooLarge);
@@ -318,10 +319,14 @@ pub struct RenameReq {
     to: String,
 }
 
+fn bad_body(_: JsonRejection) -> Response {
+    fail(StatusCode::BAD_REQUEST, "bad_request")
+}
+
 pub async fn rename(State(st): State<AppState>, body: Result<Json<RenameReq>, JsonRejection>) -> Response {
     let Json(b) = match body {
         Ok(b) => b,
-        Err(e) => return body_fail(e),
+        Err(e) => return bad_body(e),
     };
     if !valid_name(&b.from) || !valid_name(&b.to) {
         return fail(StatusCode::BAD_REQUEST, "invalid_name");
@@ -341,7 +346,7 @@ pub struct DeleteReq {
 pub async fn delete(State(st): State<AppState>, body: Result<Json<DeleteReq>, JsonRejection>) -> Response {
     let Json(b) = match body {
         Ok(b) => b,
-        Err(e) => return body_fail(e),
+        Err(e) => return bad_body(e),
     };
     if !valid_name(&b.name) {
         return fail(StatusCode::BAD_REQUEST, "invalid_name");
@@ -582,6 +587,13 @@ mod tests {
         let huge = format!("{{\"name\":\"Huge\",\"board\":{{\"type\":\"excalidraw\",\"elements\":[],\"pad\":\"{}\"}}}}", "x".repeat(MAX_BOARD_BYTES + 1024));
         let (s, v) = send(&app, post("/api/boards/save", huge)).await;
         assert_eq!((s, v["error"].as_str()), (StatusCode::PAYLOAD_TOO_LARGE, Some("board_too_large")));
+        // Rename and delete take only names: an oversized body there is a bad request, not a board too large.
+        let pad = "x".repeat(3 << 20);
+        for uri in ["/api/boards/rename", "/api/boards/delete"] {
+            let body = json!({"name": "Ep", "from": "Ep", "to": "Ep2", "pad": pad}).to_string();
+            let (s, v) = send(&app, post(uri, body)).await;
+            assert_eq!((s, v["error"].as_str()), (StatusCode::BAD_REQUEST, Some("bad_request")), "{uri}");
+        }
     }
 
     #[tokio::test]
