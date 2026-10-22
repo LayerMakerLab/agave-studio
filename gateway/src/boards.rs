@@ -94,19 +94,30 @@ impl Boards {
         self.dir.join(format!("{name}{EXT}"))
     }
 
-    /// The board's file when it is a regular file of its own (never a symlink or a hard link to another file).
-    fn file(&self, name: &str) -> Option<(PathBuf, fs::Metadata)> {
+    /// The file at `name` when it is a regular file of its own (never a symlink or a hard link to another file).
+    /// Only for a name as the folder lists it: on a folder that ignores letter case (macOS) the path also finds
+    /// "SHOTS" for "Shots".
+    fn file_at(&self, name: &str) -> Option<(PathBuf, fs::Metadata)> {
         let p = self.path(name);
         let meta = fs::symlink_metadata(&p).ok()?;
         (meta.is_file() && meta.nlink() == 1).then_some((p, meta))
     }
 
+    /// The board saved under exactly `name`: the folder must list that name, letter case and all.
+    fn file(&self, name: &str) -> Option<(PathBuf, fs::Metadata)> {
+        if !self.names().iter().any(|n| n == name) {
+            return None;
+        }
+        self.file_at(name)
+    }
+
+    /// Every board name exactly as the folder lists it.
     fn names(&self) -> Vec<String> {
         let Ok(entries) = fs::read_dir(&*self.dir) else { return Vec::new() };
         entries
             .flatten()
             .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(EXT)).map(str::to_string))
-            .filter(|n| valid_name(n) && self.file(n).is_some())
+            .filter(|n| valid_name(n) && self.file_at(n).is_some())
             .collect()
     }
 
@@ -116,7 +127,13 @@ impl Boards {
     }
 
     fn info(&self, name: &str) -> Result<BoardInfo, BoardError> {
-        let (p, meta) = self.file(name).ok_or(BoardError::NotFound)?;
+        self.file(name).ok_or(BoardError::NotFound)?;
+        self.info_listed(name)
+    }
+
+    /// `info` for a name taken from `names()`, which already matched it against the folder.
+    fn info_listed(&self, name: &str) -> Result<BoardInfo, BoardError> {
+        let (p, meta) = self.file_at(name).ok_or(BoardError::NotFound)?;
         let bytes = fs::read(&p).map_err(|_| BoardError::Io)?;
         Ok(Self::info_of(name, &meta, &bytes))
     }
@@ -129,7 +146,7 @@ impl Boards {
     /// Every board, most recently saved first.
     pub fn list(&self) -> Vec<BoardInfo> {
         let _held = self.hold();
-        let mut out: Vec<BoardInfo> = self.names().iter().filter_map(|n| self.info(n).ok()).collect();
+        let mut out: Vec<BoardInfo> = self.names().iter().filter_map(|n| self.info_listed(n).ok()).collect();
         out.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.name.cmp(&b.name)));
         out
     }
@@ -356,7 +373,12 @@ mod tests {
         assert_eq!(b.rename("Shots", "other"), Err(BoardError::Exists));
         assert_eq!(b.rename("Nope", "Fresh"), Err(BoardError::NotFound));
         assert_eq!(b.rename("Shots", "SHOTS").unwrap().name, "SHOTS");
+        // The old spelling is gone even on a folder that ignores letter case (macOS): names are matched against
+        // the folder's own listing, never found through the path.
         assert_eq!(b.load("Shots").err(), Some(BoardError::NotFound));
+        assert_eq!(b.delete("Shots"), Err(BoardError::NotFound));
+        assert_eq!(b.rename("Shots", "Fresh"), Err(BoardError::NotFound));
+        assert!(b.load("SHOTS").is_ok());
         let names: Vec<String> = b.list().into_iter().map(|i| i.name).collect();
         assert_eq!(names.len(), 2);
         assert!(names.contains(&"SHOTS".to_string()) && names.contains(&"Other".to_string()));
