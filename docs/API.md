@@ -237,8 +237,8 @@ renaming and deleting need the page's launch cookie.
   without it the save replaces what is saved. 400 invalid_name/invalid_board/bad_request | 409 too_many_boards | 413
   {"error":"board_too_large","max_mb":25} (the body limit is 25 MB plus 64 KB) | 500 write_failed.
 - POST /api/boards/rename {"from","to"} -> {"board":{...}} | 404 not_found | 409 board_exists (a change of letter case
-  alone is allowed) | 400 invalid_name.
-- POST /api/boards/delete {"name"} -> {"ok":true} | 404 not_found | 400 invalid_name.
+  alone is allowed) | 400 invalid_name | 400 bad_request (not the expected JSON, or a body over 2 MB).
+- POST /api/boards/delete {"name"} -> {"ok":true} | 404 not_found | 400 invalid_name | 400 bad_request (as for rename).
 In the studio: results go on a board as pictures shrunk to 1600 px on the long side and about 1.9 MB at most (WebP, or
 JPEG where the browser cannot write WebP); a video goes on as a still from 0.5 s in (a third of the way into shorter
 clips; a plain card if no frame can be read within 10 s), a 3D model as its thumbnail, and either (or a result with no
