@@ -775,6 +775,8 @@ a.mode { text-decoration: none; }
   overflow: hidden; border: 1px solid var(--line-2); background: #121212;
 }
 .board-canvas.drop { box-shadow: 0 0 0 2px var(--ember); }
+/* The library's "Browse libraries" link opens excalidraw.com with the studio's local address in its query. */
+.board-canvas .library-menu-browse-button { display: none !important; }
 .board-loading { margin: 0; padding: 24px; }
 .board-side { display: grid; align-content: start; gap: 14px; min-width: 0; max-height: calc(100dvh - 240px); overflow-y: auto; }
 .board-shots { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
