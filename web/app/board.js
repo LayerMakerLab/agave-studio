@@ -341,6 +341,8 @@ function boardJson() {
 
 // force: save over a board changed elsewhere. asNew: the board was renamed or deleted elsewhere; save it again.
 async function save(force, asNew) {
+  // One save at a time: Enter in the name box would otherwise send a second one while the first is on its way.
+  if (ui.save.disabled) return;
   const name = ui.name.value.trim();
   if (!validName(name)) {
     note(name ? ERRORS.invalid_name : 'Name the board first.', 'warn');
