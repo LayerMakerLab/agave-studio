@@ -19,9 +19,15 @@ let loading = null;
 let shotTimer = null;
 
 // The board on screen. `saved` is the scene version last saved or loaded, so a change shows as unsaved.
-const cur = { name: UNTITLED, rev: null, saved: 0, version: 0, files: 0, savedFiles: 0 };
-// Boards switched away from with unsaved changes, kept until they are saved: name ('' for a new one) -> scene.
+// `key` names the scene among the kept ones: 'b:<name>' for a saved board, 'u:<n>' for each untitled one.
+const cur = { name: UNTITLED, key: 'u:1', rev: null, saved: 0, version: 0, files: 0, savedFiles: 0 };
+// Boards switched away from with unsaved changes, kept until they are saved: key -> scene. Every untitled board has
+// its own key, so starting a new one or deleting a board never overwrites another unsaved drawing.
 const kept = new Map();
+let untitledCount = 1;
+const newUntitledKey = () => `u:${++untitledCount}`;
+const keyOf = (name) => 'b:' + name;
+const untitledLabel = (key) => `Untitled board ${key.slice(2)}`;
 let list = []; // saved boards from the engine
 
 function el(tag, attrs, kids) {
@@ -231,7 +237,7 @@ function scene() {
   return { elements: api.getSceneElementsIncludingDeleted(), appState: api.getAppState(), files: api.getFiles() };
 }
 
-function showScene(s, name, rev, dirty) {
+function showScene(s, name, rev, dirty, key) {
   const clean = scrub(s.elements, s.files);
   scrubNote(clean);
   const data = X.restore({ elements: clean.elements, appState: s.appState, files: clean.files }, null, null);
@@ -246,6 +252,7 @@ function showScene(s, name, rev, dirty) {
   if (files.length) api.addFiles(files);
   api.history.clear();
   cur.name = name;
+  cur.key = key;
   cur.rev = rev;
   cur.version = X.getSceneVersion(api.getSceneElementsIncludingDeleted());
   cur.files = Object.keys(api.getFiles()).length;
@@ -261,11 +268,11 @@ function showScene(s, name, rev, dirty) {
 // Puts the board on screen aside (unsaved changes and all) before another one opens.
 function keepCurrent() {
   if (!isDirty()) {
-    kept.delete(cur.name);
+    kept.delete(cur.key);
     return;
   }
   const s = scene();
-  kept.set(cur.name, { elements: s.elements, appState: { viewBackgroundColor: s.appState.viewBackgroundColor }, files: s.files, rev: cur.rev });
+  kept.set(cur.key, { name: cur.name, elements: s.elements, appState: { viewBackgroundColor: s.appState.viewBackgroundColor }, files: s.files, rev: cur.rev });
 }
 
 // ---------- boards on the engine ----------
@@ -282,12 +289,13 @@ function renderList() {
   sel.append(el('option', { value: '' }, [list.length || kept.size ? 'Open a board…' : 'No saved boards yet']));
   const names = new Set(list.map((b) => b.name));
   for (const b of list) {
-    const label = kept.has(b.name) || (b.name === cur.name && isDirty()) ? `${b.name} (unsaved changes)` : b.name;
-    sel.append(el('option', { value: 'b:' + b.name }, [label]));
+    const key = keyOf(b.name);
+    const label = kept.has(key) || (key === cur.key && isDirty()) ? `${b.name} (unsaved changes)` : b.name;
+    sel.append(el('option', { value: key }, [label]));
   }
-  if (kept.has(UNTITLED) && cur.name !== UNTITLED) sel.append(el('option', { value: 'new:' }, ['Untitled board (unsaved)']));
-  for (const n of kept.keys()) {
-    if (n !== UNTITLED && !names.has(n)) sel.append(el('option', { value: 'b:' + n }, [`${n} (unsaved, deleted on disk)`]));
+  for (const [key, k] of kept) {
+    if (key.startsWith('u:')) sel.append(el('option', { value: key }, [`${untitledLabel(key)} (unsaved)`]));
+    else if (!names.has(k.name)) sel.append(el('option', { value: key }, [`${k.name} (unsaved, deleted on disk)`]));
   }
   sel.value = '';
   ui.rename.disabled = !cur.name;
@@ -295,21 +303,23 @@ function renderList() {
 }
 
 function renderTitle() {
-  const label = cur.name || 'Untitled board';
+  const label = cur.name || untitledLabel(cur.key);
   ui.state.textContent = isDirty() ? `${label} · unsaved changes` : cur.rev ? `${label} · saved` : label;
   ui.state.classList.toggle('dirty', isDirty());
 }
 
-async function openBoard(name) {
-  if (name === cur.name && !kept.has(name)) return;
+// Opens a saved board or a kept one by its key.
+async function openBoard(key) {
+  if (key === cur.key) return;
   keepCurrent();
-  const k = kept.get(name);
+  const k = kept.get(key);
   if (k) {
-    showScene(k, name, k.rev, true);
-    kept.delete(name);
-    note(name ? `${name} has the changes you had not saved yet.` : 'Your unsaved board is back.');
+    showScene(k, k.name, k.rev, true, key);
+    kept.delete(key);
+    note(k.name ? `${k.name} has the changes you had not saved yet.` : `${untitledLabel(key)} is back, unsaved.`);
     return;
   }
+  const name = key.slice(2);
   note(`Opening ${name}…`);
   const r = await bridge.call(`/api/boards/load?name=${encodeURIComponent(name)}`);
   if (!r.ok || !r.data || !r.data.board) {
@@ -317,19 +327,18 @@ async function openBoard(name) {
     return;
   }
   note('');
-  showScene(r.data.board, r.data.name, r.data.rev, false);
+  showScene(r.data.board, r.data.name, r.data.rev, false, keyOf(r.data.name));
 }
 
 function openDropped(v) {
   keepCurrent();
-  showScene({ elements: v.elements, appState: v.appState || {}, files: v.files || {} }, UNTITLED, null, true);
+  showScene({ elements: v.elements, appState: v.appState || {}, files: v.files || {} }, UNTITLED, null, true, newUntitledKey());
   if (!ui.note.classList.contains('warn')) note('The dropped board is open as an untitled board. Name it, then Save.');
 }
 
 function newBoard() {
   keepCurrent();
-  showScene({ elements: [], appState: {}, files: {} }, UNTITLED, null, false);
-  kept.delete(UNTITLED);
+  showScene({ elements: [], appState: {}, files: {} }, UNTITLED, null, false, newUntitledKey());
   ui.name.focus();
   note('A new board. Name it, then Save.');
 }
@@ -382,13 +391,12 @@ async function save(force, asNew) {
     note(errText(r, 'The board could not be saved.'), 'err');
     return;
   }
-  const wasNew = !same && cur.name !== name;
-  if (wasNew && cur.name === UNTITLED) kept.delete(UNTITLED);
   cur.name = r.data.board.name;
+  cur.key = keyOf(cur.name);
   cur.rev = r.data.board.rev;
   cur.saved = cur.version;
   cur.savedFiles = cur.files;
-  kept.delete(cur.name);
+  kept.delete(cur.key);
   api.updateScene({ appState: { name: cur.name }, captureUpdate: X.CaptureUpdateAction.NEVER });
   note(`Saved ${cur.name}.`, 'ok');
   renderTitle();
@@ -418,7 +426,8 @@ async function rename() {
   const from = cur.name;
   cur.name = r.data.board.name;
   cur.rev = r.data.board.rev;
-  if (kept.has(from)) { kept.set(cur.name, kept.get(from)); kept.delete(from); }
+  cur.key = keyOf(cur.name);
+  kept.delete(keyOf(from));
   api.updateScene({ appState: { name: cur.name }, captureUpdate: X.CaptureUpdateAction.NEVER });
   note(`Renamed to ${cur.name}.`, 'ok');
   renderTitle();
@@ -445,9 +454,11 @@ async function remove() {
     note(errText(r, 'The board could not be deleted.'), 'err');
     return;
   }
-  kept.delete(name);
-  // The drawing stays on screen as an unsaved board, so a mistaken delete can still be saved again.
+  kept.delete(keyOf(name));
+  // The drawing stays on screen as a new unsaved board of its own (never over another kept one), so a mistaken
+  // delete can still be saved again.
   cur.name = UNTITLED;
+  cur.key = newUntitledKey();
   cur.rev = null;
   cur.saved = -1;
   ui.name.value = name;
@@ -819,8 +830,7 @@ function buildUi(host) {
   ui = { name, open, save: sv, rename: rn, del: dl, state: stateText, note: noteEl, canvas, loadingNote, results, resultsEmpty, shots: shotsList, shotsEmpty };
   open.addEventListener('change', () => {
     const v = open.value;
-    if (v === 'new:') openBoard(UNTITLED);
-    else if (v.startsWith('b:')) openBoard(v.slice(2));
+    if (v.startsWith('b:') || v.startsWith('u:')) openBoard(v);
   });
   nw.addEventListener('click', newBoard);
   sv.addEventListener('click', () => save(false));

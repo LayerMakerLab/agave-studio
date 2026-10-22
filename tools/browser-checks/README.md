@@ -19,3 +19,4 @@ step, then exits non-zero on any failure, console error or warning, HTTP error, 
 | Check | What it does |
 |---|---|
 | `hostile-board.mjs` | Opens, drops and pastes a board whose picture is a web address and which carries an iframe and a web embed; presses Send to Video on its shot. Nothing may load from elsewhere. |
+| `untitled-boards.mjs` | Draws on untitled boards and presses New, opens and deletes boards between them: every unsaved drawing stays in the Open list and comes back, and leaving the page still asks. |
