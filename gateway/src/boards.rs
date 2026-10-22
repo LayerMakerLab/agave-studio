@@ -133,13 +133,34 @@ impl Boards {
 
     /// `info` for a name taken from `names()`, which already matched it against the folder.
     fn info_listed(&self, name: &str) -> Result<BoardInfo, BoardError> {
-        let (p, meta) = self.file_at(name).ok_or(BoardError::NotFound)?;
-        // A file over the limit is never read in full (listing would block every save while it reads).
+        let (meta, bytes) = self.read(name)?;
+        Ok(Self::info_of(name, &meta, &bytes))
+    }
+
+    /// Reads a board's file through one handle: opened without following a symlink (O_NOFOLLOW; O_NONBLOCK so a FIFO
+    /// cannot hang it), then checked on that same handle, so nothing can be swapped in between the check and the
+    /// read. A file over the limit is never read in full (listing would hold the lock against saves meanwhile).
+    fn read(&self, name: &str) -> Result<(fs::Metadata, Vec<u8>), BoardError> {
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.path(name))
+            .map_err(|e| if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ELOOP) { BoardError::NotFound } else { BoardError::Io })?;
+        let meta = file.metadata().map_err(|_| BoardError::Io)?;
+        if !meta.is_file() || meta.nlink() != 1 {
+            return Err(BoardError::NotFound);
+        }
         if meta.len() > MAX_BOARD_BYTES as u64 {
             return Err(BoardError::TooLarge);
         }
-        let bytes = fs::read(&p).map_err(|_| BoardError::Io)?;
-        Ok(Self::info_of(name, &meta, &bytes))
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        file.take(MAX_BOARD_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|_| BoardError::Io)?;
+        if bytes.len() > MAX_BOARD_BYTES {
+            return Err(BoardError::TooLarge);
+        }
+        Ok((meta, bytes))
     }
 
     fn info_of(name: &str, meta: &fs::Metadata, bytes: &[u8]) -> BoardInfo {
@@ -157,11 +178,8 @@ impl Boards {
 
     pub fn load(&self, name: &str) -> Result<(BoardInfo, Value), BoardError> {
         let _held = self.hold();
-        let (p, meta) = self.file(name).ok_or(BoardError::NotFound)?;
-        if meta.len() > MAX_BOARD_BYTES as u64 {
-            return Err(BoardError::TooLarge);
-        }
-        let bytes = fs::read(&p).map_err(|_| BoardError::Io)?;
+        self.file(name).ok_or(BoardError::NotFound)?;
+        let (meta, bytes) = self.read(name)?;
         let v: Value = serde_json::from_slice(&bytes).map_err(|_| BoardError::Invalid)?;
         if !valid_board(&v) {
             return Err(BoardError::Invalid);
@@ -419,6 +437,25 @@ mod tests {
         b.save("Linked", &scene("mine"), false, None).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&fs::read(&outside).unwrap()).unwrap()["elements"][0]["text"], "secret");
         assert!(!fs::symlink_metadata(dir.join("Linked.excalidraw")).unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn a_board_is_read_through_one_handle_that_never_follows_a_link() {
+        let dir = fsutil::test_dir("boards_handle").join("boards");
+        let b = Boards::new(dir.clone());
+        b.save("Real", &scene("r"), true, None).unwrap();
+        assert!(b.read("Real").is_ok());
+        // Even when the name was checked first, the read itself refuses a link put there since.
+        let outside = dir.parent().unwrap().join("secret.json");
+        fs::write(&outside, serde_json::to_vec(&scene("secret")).unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("Swapped.excalidraw")).unwrap();
+        assert_eq!(b.read("Swapped").err(), Some(BoardError::NotFound));
+        // A FIFO fails at once instead of blocking (on a thread, so a regression fails instead of hanging).
+        let fifo = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(dir.join("Pipe.excalidraw").as_os_str())).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(b.read("Pipe").is_err()));
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(true));
     }
 
     #[test]
