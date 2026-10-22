@@ -227,15 +227,15 @@ renaming and deleting need the page's launch cookie.
   first. `rev` is the first 16 hex of the file's SHA-256.
 - GET  /api/boards/load?name=Ep%201 -> {"name","rev","bytes","modified","board":{"type":"excalidraw","version":2,
   "elements":[...],"appState":{...},"files":{...}}} | 400 invalid_name | 404 not_found | 400 invalid_board (the file
-  is not an Excalidraw scene) | 413 board_too_large.
-- POST /api/boards/save {"name","board","create":false,"rev":null} -> {"board":{name,bytes,modified,rev}}.
-  `board` must be an Excalidraw scene: an object with "type":"excalidraw" and an `elements` array (`appState` and
-  `files` objects optional); it is saved as compact JSON, and the 25 MB limit is measured on that, as the page measures it. `create`: only when no board has that name
-  (409 board_exists, also for a name that differs only in case). `rev`: only when the saved board still has that rev
-  (409 {"error":"board_changed","rev":"<saved rev>"}), and 404 not_found when no board has that name any more (it
-  was renamed or deleted elsewhere; the page asks before saving it again); without it the save replaces what is saved. 400
-  invalid_name/invalid_board/bad_request | 409 too_many_boards | 413 {"error":"board_too_large","max_mb":25} (the
-  body limit is 25 MB plus 64 KB) | 500 write_failed.
+  is not an Excalidraw scene) | 413 board_too_large | 500 read_failed (the file could not be read).
+- POST /api/boards/save {"name","board","create":false,"rev":null} -> {"board":{name,bytes,modified,rev}}. `board`
+  must be an Excalidraw scene: an object with "type":"excalidraw" and an `elements` array (`appState` and `files`
+  objects optional); it is saved as compact JSON, and the 25 MB limit is measured on that, as the page measures it.
+  `create`: only when no board has that name (409 board_exists, also for a name that differs only in case). `rev`:
+  only when the saved board still has that rev (409 {"error":"board_changed","rev":"<saved rev>"}), and 404 not_found
+  when no board has that name any more (it was renamed or deleted elsewhere; the page asks before saving it again);
+  without it the save replaces what is saved. 400 invalid_name/invalid_board/bad_request | 409 too_many_boards | 413
+  {"error":"board_too_large","max_mb":25} (the body limit is 25 MB plus 64 KB) | 500 write_failed.
 - POST /api/boards/rename {"from","to"} -> {"board":{...}} | 404 not_found | 409 board_exists (a change of letter case
   alone is allowed) | 400 invalid_name.
 - POST /api/boards/delete {"name"} -> {"ok":true} | 404 not_found | 400 invalid_name.
