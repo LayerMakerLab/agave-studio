@@ -33,7 +33,9 @@ show their credit cost). Keys are stored only on your computer, and the app has 
 - **Board:** a whiteboard with the real [Excalidraw](https://excalidraw.com) editor, shipped with the studio (it works
   offline). Sketch, drag finished pictures, videos and 3D models onto it, and save and reopen boards (they are
   `.excalidraw` files in `data/boards/`). Draw a frame around each shot: its words and first picture list as a shot,
-  and Send to Video fills the Video form with them. Nothing runs until you press Generate.
+  and Send to Video fills the Video form with them. Nothing runs until you press Generate. Not yet: SVG export
+  embeds whole fonts (the page policy blocks Excalidraw's font subsetter), Mermaid diagrams and web embeds are not
+  included, and video stills have not been checked in desktop Chrome or Safari.
 - **Edit:** trim and join clips, auto captions, remove pauses, reframe to 9:16, clean up voice, and set loudness
   to -14 LUFS.
 - **Playground:** fal's models that make pictures, video, audio or 3D, each with its own controls built from fal's own

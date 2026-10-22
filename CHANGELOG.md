@@ -9,7 +9,9 @@
   with a label and a link to the file. Each frame is a shot, with the frame's words as the prompt and its first
   picture as the start picture; Send to Video fills the Video form and runs nothing. New routes: `/api/boards`,
   `/api/boards/load`, `/api/boards/save`, `/api/boards/rename`, `/api/boards/delete` (docs/API.md, "Boards").
-  `vendor-src/excalidraw/build.sh` rebuilds the bundle byte for byte.
+  `vendor-src/excalidraw/build.sh` rebuilds the bundle byte for byte. Not yet: SVG export embeds whole fonts (the
+  page policy blocks Excalidraw's font subsetter, which logs two console errors), Mermaid diagrams and web embeds
+  are not included, and video stills have not been checked in desktop Chrome or Safari.
 - Playground: voice models such as MiniMax Speech made no file, because fal's default answer is inline hex data. An
   `output_format` that chooses between "url" and inline data is no longer offered, and runs always ask for "url".
 - What fal charged: with an optional read-only `FAL_BILLING_KEY` (fal's BILLING preset, which can't run models), each
